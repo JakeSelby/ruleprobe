@@ -46,12 +46,18 @@ Other groupings, and a window:
 
 ```sh
 uvx ruleprobe report --by repo --since 30      # last 30 days, one line per repository
-uvx ruleprobe report --by stance               # grouped by the configuration a session ran under
+uvx ruleprobe report --by stance --stance commits=conventional   # grouped by configuration
 uvx ruleprobe report --root ./transcripts      # a directory of your own
 uvx ruleprobe report --rules ./docs/rules      # bind detectors to rule files, and name the gaps
 uvx ruleprobe detectors                        # what would run
 uvx ruleprobe corpus                           # how good each detector is, over the labelled corpus
+uvx ruleprobe report --json                    # the same numbers as data, rows included
 ```
+
+A transcript does not record the configuration it ran under, so `--stance dimension=variant`
+is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
+what a detector's `gate:` block reads: a gated detector with no stance passed never fires,
+and `ruleprobe detectors` names the stance each one is waiting for.
 
 ## Sixty seconds on a rule of your own
 

@@ -4,13 +4,18 @@
 Each test is the reviewer's own input, kept verbatim where it was concrete, so a fix that
 is later undone fails here under the number it was reported as.
 """
+import contextlib
+import io
+import json
 import os
 import tempfile
 import unittest
 
 from corpus import bash, tool_use
 from ruleprobe import Detector, Registry, iter_sessions, report, run
+from ruleprobe.cli import _since, main
 from ruleprobe.matchers import compile_detector
+from ruleprobe.report import report_data
 from ruleprobe.shell import Parsed, pipelines, strip_heredocs
 
 
@@ -99,6 +104,76 @@ class DenominatorFindingTests(unittest.TestCase):
                       _read_errors_line([{"path": "/t/a.jsonl", "error": "ValueError"},
                                          {"path": "/t/b.jsonl", "error": "OSError"}]))
         self.assertEqual(_read_errors_line([]), "")
+
+
+class GatingFindingTests(unittest.TestCase):
+    """Findings 1, 2, 11 and 24: the command line as the only way a gate, a stance or a
+    JSON denominator is reachable."""
+
+    GATED = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "fixtures", "gated-detector.yaml")
+    FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
+
+    def run_cli(self, *argv):
+        out = io.StringIO()
+        with contextlib.redirect_stderr(io.StringIO()):
+            return main(list(argv), out=out), out.getvalue()
+
+    def test_finding_01_a_gated_detector_fires_once_the_stance_is_passed(self):
+        code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
+                                  "--detectors", self.GATED,
+                                  "--stance", "commits=conventional")
+        self.assertEqual(code, 0)
+        line = [x for x in text.split("\n") if x.startswith("gated/commit")][0]
+        self.assertEqual(line.split()[1:4], ["1", "1", "2"])
+
+    def test_finding_01_the_same_detector_is_silent_with_no_stance(self):
+        _code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
+                                   "--detectors", self.GATED)
+        line = [x for x in text.split("\n") if x.startswith("gated/commit")][0]
+        self.assertEqual(line.split()[1:4], ["0", "0", "2"])
+
+    def test_finding_01_the_detector_listing_names_the_stance_a_gate_wants(self):
+        _code, text = self.run_cli("detectors", "--no-config", "--detectors", self.GATED)
+        self.assertIn("gated on --stance commits=conventional", text)
+
+    def test_finding_02_by_stance_groups_on_what_the_command_line_was_given(self):
+        _code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
+                                   "--by", "stance", "--stance", "commits=conventional")
+        self.assertIn("commits=conventional", text)
+        self.assertNotIn("(no stances)", text)
+
+    def test_finding_02_a_stance_without_a_variant_is_refused(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("report", "--root", self.FIXTURES, "--stance", "commits")
+
+    def test_finding_11_json_applies_the_same_denominator_and_min_sessions(self):
+        _code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
+                                   "--min-sessions", "1", "--promote-share", "0.1",
+                                   "--json")
+        data = json.loads(text)
+        self.assertEqual(data["min_sessions"], 1)
+        notes = dict((d["detector"], d["note"]) for d in data["detectors"])
+        self.assertIn("promote?", set(notes.values()))
+        self.assertEqual(data["detectors"][0]["of"], data["measured"])
+
+    def test_finding_11_json_folds_a_rename_the_way_the_table_does(self):
+        registry = Registry([Detector("a/one", "a", "session", lambda e, c: [])])
+        registry.rename("a/old", "a/one")
+        data = report_data(rows({"a/old": 2, "a/one": 1}), registry=registry)
+        self.assertEqual([(d["detector"], d["hits"]) for d in data["detectors"]],
+                         [("a/one", 3)])
+
+    def test_finding_11_json_exits_non_zero_on_an_empty_root_like_the_table(self):
+        empty = os.path.join(self.FIXTURES, "nothing-here")
+        self.assertEqual(self.run_cli("report", "--root", empty, "--json")[0], 1)
+        self.assertEqual(self.run_cli("report", "--root", empty)[0], 1)
+
+    def test_finding_24_a_bare_year_is_refused_rather_than_read_as_days(self):
+        with self.assertRaises(SystemExit):
+            self.run_cli("report", "--root", self.FIXTURES, "--since", "2024")
+        self.assertEqual(_since("30"), 30)
+        self.assertEqual(_since("2024-01-01"), "2024-01-01")
 
 
 if __name__ == "__main__":

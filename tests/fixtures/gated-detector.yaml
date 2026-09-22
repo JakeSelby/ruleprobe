@@ -1,0 +1,12 @@
+# A detector that only applies under one stance. It is here so the tests can prove that a
+# `gate:` block is reachable from the command line - `--stance commits=conventional` - and
+# silent without one, which is what finding 1 of issue #2 was about.
+version: 1
+
+detectors:
+  - id: gated/commit-message
+    rule: gated
+    event: tool_use
+    gate: {stance: commits, variants: [conventional]}
+    when:
+      git: {subcommand: [commit]}

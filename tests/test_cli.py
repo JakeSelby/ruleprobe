@@ -33,11 +33,14 @@ class ReportCommandTests(unittest.TestCase):
         self.assertIn("other-repo", text)
         self.assertNotIn("demo-repo", text)
 
-    def test_json_prints_the_rows_rather_than_the_table(self):
+    def test_json_prints_the_same_report_as_data_and_the_rows_with_it(self):
         code, text = run_cli("report", "--root", FIXTURES, "--json")
-        rows = json.loads(text)
+        data = json.loads(text)
         self.assertEqual(code, 0)
-        self.assertEqual(sorted(r["repo"] for r in rows), ["demo-repo", "other-repo"])
+        self.assertEqual(sorted(r["repo"] for r in data["rows"]),
+                         ["demo-repo", "other-repo"])
+        self.assertEqual(data["measured"], 2)
+        self.assertEqual([d["of"] for d in data["detectors"]], [2] * len(data["detectors"]))
 
     def test_an_empty_root_says_what_to_do_and_exits_non_zero(self):
         code, text = run_cli("report", "--root", FIXTURES + "/nothing-here")
