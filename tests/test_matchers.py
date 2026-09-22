@@ -249,9 +249,11 @@ class AbsentTests(unittest.TestCase):
         when = {"absent": {"of": {"command": {"starts_with": ["pytest"]}}, "scope": "turn"}}
         self.assertEqual([h.turn for h in hits(when, events, event="session")], [2, 3])
 
-    def test_an_empty_session_is_still_an_absence(self):
+    def test_an_empty_session_is_no_absence_at_all(self):
+        # A rollout that was aborted before anything happened is not a session in which
+        # something failed to happen; counting it walks the rate towards 100% on nothing.
         when = {"absent": {"of": {"tool": "Write"}}}
-        self.assertEqual(count(when, [], event="session"), 1)
+        self.assertEqual(count(when, [], event="session"), 0)
 
 
 class ChangeTests(unittest.TestCase):

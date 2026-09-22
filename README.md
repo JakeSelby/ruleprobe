@@ -174,10 +174,14 @@ The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `pa
 session matchers `order`, `absent` and `change`. `ruleprobe/detectors/common.yaml` uses all
 but four of them, and `ruleprobe/matchers.py` documents each in one line.
 
-Two rules about the format worth knowing before you hit them. Every key inside one `command`
-block is read against the *same* pipeline segment, so two constraints on one command belong
-in one block rather than in an `all` of two. And a session matcher may only be the whole of
-a `session` detector's `when`, because a hit it produces is not a hit on an event in hand.
+Three rules about the format worth knowing before you hit them. Every key inside one
+`command` block is read against the *same* pipeline segment, so two constraints on one
+command belong in one block rather than in an `all` of two. A session matcher may only be
+the whole of a `session` detector's `when`, because a hit it produces is not a hit on an
+event in hand. And a list is always alternatives: `regex`, `contains` and `path_glob` hold
+when any one of their patterns does. `contains` is a substring, so `contains: no-verify`
+finds the token `--no-verify`; `path_glob` is a path, so `*` stops at a `/`, `**` crosses
+one, and `src/*.py` matches the absolute path a transcript actually carries.
 
 **The format is a YAML subset, and JSON is the same thing.** YAML is not in the standard
 library and this package takes no dependencies, so `ruleprobe/declarative.py` implements the

@@ -99,10 +99,16 @@ class Registry(object):
         return self
 
     def rename(self, old_id, new_id):
-        """Record that `old_id` became `new_id`. A stored row is never rewritten for a
-        rename; a report folds this map on every read instead, so one measurement stays one
-        line and one series across it."""
+        """Record that `old_id` became `new_id`, and drop `old_id` if it is still here.
+
+        A stored row is never rewritten for a rename; a report folds this map on every read
+        instead, so one measurement stays one line and one series across it. Leaving the old
+        detector registered as well would double every hit into the successor and keep the
+        old id on the table for ever as an `unobserved` line, so the rename removes it.
+        """
         self.renamed[old_id] = new_id
+        if old_id != new_id:
+            self.remove(old_id)
         return self
 
     def get(self, detector_id):

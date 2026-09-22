@@ -29,6 +29,12 @@ The matchers, by the shape they read:
 - `message` - `role`, `final`, `regex`, `contains`: an assistant message.
 - `kind` - the raw event kind, for `compact` and the other schema events.
 
+A list is alternatives everywhere: `regex`, `contains` and `path_glob` hold when any one of
+their patterns does. `contains` is a substring, in a command's token as much as in a
+message. `path_glob` is a path and not a string - `*` and `?` stop at a `/`, `**` crosses
+one - and a pattern that does not start at the root matches any suffix of the path at a
+component boundary, because a transcript's `file_path` is absolute.
+
 Three read the session rather than one event, and may only be the whole of a `session`
 detector's `when`, because a hit they produce is not a hit on the event in hand:
 
@@ -206,6 +212,53 @@ def _dotted(data, field):
     return value
 
 
+#: Compiled `path_glob` patterns, keyed by the pattern. A detector compiles once and runs
+#: over every event in every session, so the translation is not worth doing twice.
+_PATH_GLOBS = {}
+
+
+def _path_glob(pattern):
+    """`path_glob` as a compiled regular expression.
+
+    Two differences from `fnmatch`, both of them about a file path being a path and not a
+    string. `*` and `?` do not cross a `/` - `src/*.py` is one directory's files, and `**`
+    is how you ask for any depth - and a pattern that does not start at the root matches
+    any suffix of the path at a component boundary, because `file_path` in a transcript is
+    absolute and nobody writes `/Users/.../src/*.py` in a detector.
+    """
+    compiled = _PATH_GLOBS.get(pattern)
+    if compiled is not None:
+        return compiled
+    out, i, n = [], 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if pattern.startswith("**", i):
+            out.append(".*")
+            i += 2
+        elif c == "*":
+            out.append("[^/]*")
+            i += 1
+        elif c == "?":
+            out.append("[^/]")
+            i += 1
+        elif c == "[":
+            end = pattern.find("]", i + 1)
+            if end == -1:
+                out.append(re.escape(c))
+                i += 1
+            else:
+                body = pattern[i + 1:end].replace("\\", "\\\\")
+                out.append("[%s]" % ("^" + body[1:] if body[:1] == "!" else body))
+                i = end + 1
+        else:
+            out.append(re.escape(c))
+            i += 1
+    anchor = "^" if pattern.startswith("/") or pattern.startswith("**") else "(?:^|.*/)"
+    compiled = re.compile(anchor + "".join(out) + "$")
+    _PATH_GLOBS[pattern] = compiled
+    return compiled
+
+
 def _hit(event):
     return hit(event, tool_use_id=(event.get("kind") == "tool_use"))
 
@@ -266,7 +319,7 @@ def _m_arg(value, where, owner, key):
         text = text_of(raw)
         if regexes and not any(rx.search(text) for rx in regexes):
             return False
-        if globs and not any(fnmatch.fnmatchcase(text, g) for g in globs):
+        if globs and not any(_path_glob(g).match(text) for g in globs):
             return False
         if contains and not any(c in text for c in contains):
             return False
@@ -306,7 +359,10 @@ def _m_command(value, where, owner, key):
             return False
         if starts and segment[:len(starts)] != starts:
             return False
-        if contains and not any(token in segment for token in contains):
+        # Substring, as `contains` is everywhere else in the format: `contains: no-verify`
+        # asking for the token `--no-verify` and getting nothing was a matcher that read
+        # like one thing and did another.
+        if contains and not any(c in token for c in contains for token in segment):
             return False
         if none_of and any(token in none_of for token in segment[1:]):
             return False
@@ -324,7 +380,9 @@ def _m_command(value, where, owner, key):
             return False
         if unparsed is not None and bool(parsed.skipped) != unparsed:
             return False
-        if regexes and not all(rx.search(parsed.command) for rx in regexes):
+        # Any, as `arg`, `text` and `message` read a list of patterns: a list of
+        # alternatives that had to all hold was a detector that could not fire.
+        if regexes and not any(rx.search(parsed.command) for rx in regexes):
             return False
         if not per_segment:
             return True
@@ -508,9 +566,18 @@ def _a_order(value, where, owner, key):
         for i, event in enumerate(events):
             if not first(event, env):
                 continue
-            for later in events[i + 1:i + 1 + within]:
+            distance = 0
+            for later in events[i + 1:]:
                 if then(later, env):
                     hits.append(_hit(event))
+                    break
+                # A `tool_result` is the answer to the call before it, not a step the agent
+                # took, and on a Claude Code transcript there is one after every call. Left
+                # in the budget, `within: 2` meant one tool use.
+                if later.get("kind") == "tool_result":
+                    continue
+                distance += 1
+                if distance >= within:
                     break
         return hits
     return _Aggregate(run)
@@ -528,9 +595,12 @@ def _a_absent(value, where, owner, key):
 
     def run(events, env):
         if scope == "session":
-            if any(of(event, env) for event in events):
+            # A session with no events at all - an aborted rollout carrying only its
+            # header - is not a session in which something failed to happen. Counting one
+            # as a hit walks a rule like `no-test-run` towards 100% on nothing.
+            if not events or any(of(event, env) for event in events):
                 return []
-            return [(events[-1].get("turn", 0) if events else 0, None)]
+            return [(events[-1].get("turn", 0), None)]
         order, matched = [], set()
         for event in events:
             turn = event.get("turn", 0)

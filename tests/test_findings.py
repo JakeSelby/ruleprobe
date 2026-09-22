@@ -106,6 +106,61 @@ class DenominatorFindingTests(unittest.TestCase):
         self.assertEqual(_read_errors_line([]), "")
 
 
+class MatcherFindingTests(unittest.TestCase):
+    def test_finding_08_an_event_less_session_is_not_an_absence(self):
+        spec = {"event": "session",
+                "when": {"absent": {"of": {"command": {"name": ["pytest"]}},
+                                    "scope": "session"}}}
+        self.assertFalse(fires(spec, []))
+        self.assertTrue(fires(spec, [bash("ls")]))
+
+    def test_finding_10_a_rename_removes_the_detector_it_renamed(self):
+        registry = Registry([Detector("a/old", "a", "session", lambda e, c: [(1, None)]),
+                             Detector("a/one", "a", "session", lambda e, c: [(1, None)])])
+        registry.rename("a/old", "a/one")
+        self.assertEqual(registry.ids(), ["a/one"])
+        self.assertEqual(sorted(run([bash("ls")], registry=registry)), ["a/one"])
+        text = report(rows({"a/old": 1, "a/one": 1}), registry=registry)
+        self.assertNotIn("a/old", text)
+        self.assertIn("a/one", text)
+
+    def test_finding_12_command_contains_is_a_substring_of_a_token(self):
+        spec = {"when": {"command": {"contains": "no-verify"}}}
+        self.assertTrue(fires(spec, [bash("git commit --no-verify -m x")]))
+        self.assertFalse(fires(spec, [bash("git commit -m x")]))
+
+    def test_finding_13_a_list_of_command_regexes_is_alternatives(self):
+        spec = {"when": {"command": {"regex": ["^ruff ", "^black "]}}}
+        self.assertTrue(fires(spec, [bash("ruff check .")]))
+        self.assertTrue(fires(spec, [bash("black .")]))
+        self.assertFalse(fires(spec, [bash("pytest -q")]))
+
+    def test_finding_21_order_within_does_not_spend_its_budget_on_tool_results(self):
+        spec = {"event": "session",
+                "when": {"order": {"first": {"command": {"name": ["git"]}},
+                                   "then": {"command": {"name": ["pytest"]}},
+                                   "within": 2}}}
+        events = [bash("git add -A", id="t1"),
+                  {"kind": "tool_result", "turn": 1, "tool_use_id": "t1",
+                   "tool_name": "Bash", "text": ""},
+                  bash("ls", turn=1, id="t2"),
+                  {"kind": "tool_result", "turn": 1, "tool_use_id": "t2",
+                   "tool_name": "Bash", "text": ""},
+                  bash("pytest -q", turn=1, id="t3")]
+        self.assertTrue(fires(spec, events))
+
+    def test_finding_22_a_path_glob_does_not_cross_a_separator(self):
+        spec = {"when": {"arg": {"field": "file_path", "path_glob": "src/*.py"}}}
+        self.assertTrue(fires(spec, [tool_use("Write", {"file_path": "/w/repo/src/a.py"})]))
+        self.assertFalse(fires(spec, [tool_use("Write",
+                                               {"file_path": "/w/repo/src/deep/a.py"})]))
+
+    def test_finding_22_a_double_star_is_how_any_depth_is_asked_for(self):
+        spec = {"when": {"arg": {"field": "file_path", "path_glob": "tests/**"}}}
+        self.assertTrue(fires(spec, [tool_use("Write", {"file_path": "/w/tests/x/y.py"})]))
+        self.assertFalse(fires(spec, [tool_use("Write", {"file_path": "/w/src/y.py"})]))
+
+
 class GatingFindingTests(unittest.TestCase):
     """Findings 1, 2, 11 and 24: the command line as the only way a gate, a stance or a
     JSON denominator is reachable."""
