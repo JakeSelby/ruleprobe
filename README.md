@@ -336,14 +336,15 @@ over it: an unmeasured detector is a gap to see, not a failure to fix.
 - `ruleprobe/report.py` - rows in, text out. A row is a small dict, so a report can be taken
   over rows you stored months ago rather than over transcripts you still have.
 
-The public API is five names:
+The public API is six names:
 
 ```python
-iter_sessions(root=None, runtime="auto", since=None)   # -> Session(.id .repo .runtime .events)
+iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(.id .repo .events)
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
 Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, promote_share=0.30)
+report_data(rows, by="rule", ...)                       # the same numbers as a dict; --json prints it
 validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall .f1)}
 ```
 
