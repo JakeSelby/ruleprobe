@@ -171,12 +171,13 @@ def strip_comment(line):
 
 
 def _heredoc_headers(line):
-    """`(start, end, delimiter)` for every heredoc operator that is a real shell word.
+    """`(start, end, delimiter, dash)` for every heredoc operator that is a real shell word.
 
     `<<` inside quotes is data — `grep -n '<<EOF' file` opens no heredoc — so the scan
-    tracks quoting. `<<-`, `<<"EOF"` and `<<'MSG-END'` are all headers; `<<<` is not. A
-    substitution quotes afresh, which is what makes the `-m "$(cat <<'EOF' ...)"` form a
-    heredoc and not a string.
+    tracks quoting. `<<-`, `<<"EOF"`, `<<'MSG-END'` and `<<\\EOF` are all headers; `<<<` is
+    not. A substitution quotes afresh, which is what makes the `-m "$(cat <<'EOF' ...)"`
+    form a heredoc and not a string. `dash` says the operator was `<<-`, which is the only
+    spelling whose terminator may be indented, and then only by tabs.
     """
     out = []
     sq = dq = False
@@ -220,7 +221,8 @@ def _heredoc_headers(line):
             continue
         if line.startswith("<<", i):
             j = i + 2
-            if j < n and line[j] == "-":
+            dash = j < n and line[j] == "-"
+            if dash:
                 j += 1
             while j < n and line[j] in " \t":
                 j += 1
@@ -229,18 +231,36 @@ def _heredoc_headers(line):
                 k = line.find(quote, j + 1)
                 if k == -1:
                     break
-                out.append((i, k + 1, line[j + 1:k]))
+                out.append((i, k + 1, line[j + 1:k], dash))
                 i = k + 1
                 continue
+            # An unquoted delimiter may still be escaped a character at a time: `<<\EOF`
+            # is bash's third spelling of `<<'EOF'`, and reading the backslash as the end
+            # of the word would leave the body to be parsed as commands.
             k = j
-            while k < n and (line[k].isalnum() or line[k] in "_-."):
-                k += 1
-            if k > j:
-                out.append((i, k, line[j:k]))
+            word = []
+            while k < n:
+                c = line[k]
+                if c == "\\" and k + 1 < n:
+                    word.append(line[k + 1])
+                    k += 2
+                    continue
+                if c.isalnum() or c in "_-.":
+                    word.append(c)
+                    k += 1
+                    continue
+                break
+            if word:
+                out.append((i, k, "".join(word), dash))
                 i = k
                 continue
         i += 1
     return out
+
+
+def _terminates(line, delimiter, dash):
+    """Whether `line` is the terminator of a heredoc on `delimiter`."""
+    return (line.lstrip("\t") if dash else line) == delimiter
 
 
 def strip_heredocs(command):
@@ -248,6 +268,10 @@ def strip_heredocs(command):
 
     The operator stays as `<< __RULEPROBE_HEREDOC_n__`, so a segment carrying a heredoc is
     still recognisable as redirected and the body can be bound back to its own command.
+
+    A terminator is matched the way bash matches one: the line is the delimiter and nothing
+    else. Only `<<-` allows it to be indented, and only by tabs. An indented `  EOF` closes
+    nothing, so the lines after it stay body rather than becoming commands nobody ran.
     """
     lines = command.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     kept, bodies = [], []
@@ -257,9 +281,9 @@ def strip_heredocs(command):
         i += 1
         headers = _heredoc_headers(line)
         rewritten, cursor = [], 0
-        for start, end, delimiter in headers:
+        for start, end, delimiter, dash in headers:
             body = []
-            while i < len(lines) and lines[i].strip() != delimiter:
+            while i < len(lines) and not _terminates(lines[i], delimiter, dash):
                 body.append(lines[i])
                 i += 1
             i += 1  # the terminator line itself
@@ -303,13 +327,21 @@ def _shell_lines(text):
     return out
 
 
-def tokenize(text):
+def tokenize(text, strict=False):
     """Shell tokens for already-heredoc-stripped `text`: substitutions become placeholders,
     comments go, and the newlines that separate commands become `;` — the ones inside a
-    quoted argument are left alone."""
+    quoted argument are left alone.
+
+    `strict=True` returns None instead of a token list for text that does not parse — an
+    unterminated quote, an unclosed `$(` — so a caller can tell "no words in it" from "no
+    parse of it". `Parsed` uses it: a command nobody could tokenize is `unparsed`, not a
+    command with nothing in it.
+    """
     # A continuation is one command, so it is joined before anything is split.
     text = re.sub(r"\\\r?\n[ \t]*", " ", text)
     stripped = strip_subs(text)
+    if stripped is None and strict:
+        return None
     if stripped is not None:
         text = stripped
     text = " ; ".join(strip_comment(line) for line in _shell_lines(text))
@@ -319,7 +351,7 @@ def tokenize(text):
         lex.whitespace_split = True
         return list(lex)
     except ValueError:
-        return []
+        return None if strict else []
 
 
 def _pipelines(tokens):
@@ -427,7 +459,15 @@ class Parsed(object):
             return
         try:
             text, self.heredocs = strip_heredocs(self.command)
-            self.pipelines = _pipelines(tokenize(_CAT_SUB_RE.sub(r"\1", text)))
+            tokens = tokenize(_CAT_SUB_RE.sub(r"\1", text), strict=True)
+            # Text that does not tokenize is `unparsed`, not a command with no words in it:
+            # a matcher asking for `unparsed` is the only thing that should see it, and a
+            # segment matcher should not read half a parse.
+            if tokens is None:
+                self.heredocs, self.pipelines, self.normalised = [], [], ""
+                self.skipped = True
+                return
+            self.pipelines = _pipelines(tokens)
             self.normalised = normalise(self.command)
         except Exception:
             self.heredocs, self.pipelines, self.normalised = [], [], ""

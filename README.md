@@ -255,11 +255,11 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
-transcript-hygiene/unfiltered-find        5    6    5    0    0   1.00    1.00   1.00
+transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
 verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    32   40   32    0    0   1.00    1.00   1.00  floor 0.90
+total                                    32   42   32    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
