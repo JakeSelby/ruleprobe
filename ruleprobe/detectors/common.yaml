@@ -1,0 +1,131 @@
+# The six shipped detectors, written in the declarative format.
+#
+# ruleprobe/detectors/common.py is the reference implementation; this file is the same six
+# observables written as data, and tests/test_equivalence.py asserts the two produce
+# identical hits over the corpus. It is here to be read: every matcher the format has is
+# used at least once below, and a detector of your own starts by copying one of these into
+# .ruleprobe/detectors.yaml.
+#
+# Nothing loads this file automatically. The Python versions are what `ruleprobe report`
+# runs; these are the worked examples and the equivalence fixture.
+
+version: 1
+
+detectors:
+
+  # A lone `cat <one path>`: one segment in the pipeline, no redirect, one operand.
+  - id: transcript-hygiene/whole-file-cat
+    rule: transcript-hygiene
+    event: tool_use
+    when:
+      command:
+        starts_with: cat
+        sole_segment: true
+        redirect: false
+        arg_count: 1
+
+  # `find <dir>` with no narrowing predicate and nothing consuming its output.
+  - id: transcript-hygiene/unfiltered-find
+    rule: transcript-hygiene
+    event: tool_use
+    when:
+      command:
+        starts_with: find
+        sole_segment: true
+        redirect: false
+        none_of:
+          - -name
+          - -iname
+          - -path
+          - -ipath
+          - -regex
+          - -iregex
+          - -type
+          - -maxdepth
+          - -mindepth
+          - -mmin
+          - -mtime
+          - -newer
+          - -newermt
+          - -size
+          - -perm
+          - -user
+          - -group
+          - -empty
+          - -prune
+          - -exec
+          - -execdir
+          - -delete
+          - -print0
+
+  # A commit or push that walks past the repository's hooks, in its three spellings: the
+  # flag, a `-c core.hooksPath=` override, and the assignment pre-commit reads.
+  - id: verification/no-verify
+    rule: verification
+    event: tool_use
+    when:
+      any:
+        - git:
+            subcommand: [commit, push]
+            args_any: ["--no-verify"]
+        - git:
+            subcommand: [commit]
+            args_any: ["-n"]
+        - git:
+            subcommand: [commit, push]
+            token_prefix: "core.hooksPath="
+        - env:
+            name: [SKIP, PRE_COMMIT_ALLOW_NO_CONFIG]
+            command: [git, pre-commit]
+
+  # A secret-shaped string written to a file, or into a heredoc body.
+  - id: secrets/secret-in-write
+    rule: secrets
+    event: tool_use
+    when:
+      any:
+        - all:
+            - tool: {name: [Write, Edit]}
+            - arg:
+                field: [content, new_string]
+                regex:
+                  - "AKIA[0-9A-Z]{16}"
+                  - "(?i)aws_secret[_]access_key"
+                  - "Bearer [A-Za-z0-9._-]{20,}"
+                  - "(?i)client_secret\\s*[:=]"
+                  - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                  - "xox[bp]-"
+                  - "ghp_[A-Za-z0-9]{20,}"
+                  - "sk-[A-Za-z0-9]{20,}"
+        - all:
+            - tool: {name: Bash}
+            - text:
+                source: payload
+                regex:
+                  - "AKIA[0-9A-Z]{16}"
+                  - "(?i)aws_secret[_]access_key"
+                  - "Bearer [A-Za-z0-9._-]{20,}"
+                  - "(?i)client_secret\\s*[:=]"
+                  - "-----BEGIN [A-Z ]*PRIVATE KEY-----"
+                  - "xox[bp]-"
+                  - "ghp_[A-Za-z0-9]{20,}"
+                  - "sk-[A-Za-z0-9]{20,}"
+
+  # One hit per context compaction.
+  - id: cache-hygiene/compact
+    rule: cache-hygiene
+    event: session
+    when:
+      kind: compact
+
+  # A model change mid-session. A bracketed name is a runtime-generated turn, not a switch
+  # anyone made, so it is stepped over rather than counted.
+  - id: cache-hygiene/model-switch
+    rule: cache-hygiene
+    event: session
+    when:
+      change:
+        kind: assistant_text
+        field: model
+        ignore_prefix: "<"
+        ignore_empty: true

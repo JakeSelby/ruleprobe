@@ -16,14 +16,14 @@ def run_cli(*argv):
 
 class ReportCommandTests(unittest.TestCase):
     def test_the_default_grouping_is_by_detector(self):
-        code, text = run_cli("report", "--root", FIXTURES)
+        code, text = run_cli("report", "--root", FIXTURES, "--no-config")
         self.assertEqual(code, 0)
         self.assertIn("detector", text.split("\n")[0])
         self.assertIn("verification/no-verify", text)
         self.assertIn("transcript-hygiene/unfiltered-find", text)
 
     def test_by_repo_names_both_repositories(self):
-        code, text = run_cli("report", "--root", FIXTURES, "--by", "repo")
+        code, text = run_cli("report", "--root", FIXTURES, "--no-config", "--by", "repo")
         self.assertEqual(code, 0)
         self.assertIn("demo-repo", text)
         self.assertIn("other-repo", text)
@@ -52,7 +52,7 @@ class ReportCommandTests(unittest.TestCase):
 
 class OtherCommandTests(unittest.TestCase):
     def test_detectors_lists_the_shipped_six(self):
-        code, text = run_cli("detectors")
+        code, text = run_cli("detectors", "--no-config")
         self.assertEqual(code, 0)
         self.assertEqual(len([x for x in text.strip().split("\n") if x]), 6)
         self.assertIn("secrets/secret-in-write", text)

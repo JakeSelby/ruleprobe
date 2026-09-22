@@ -36,3 +36,6 @@ version = { attr = "ruleprobe.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["ruleprobe*"]
+
+[tool.setuptools.package-data]
+ruleprobe = ["detectors/*.yaml"]

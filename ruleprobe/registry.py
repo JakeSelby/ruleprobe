@@ -15,7 +15,8 @@ __all__ = ["Detector", "Registry", "DEFAULT", "run", "register_compiler", "from_
 
 #: The shapes of transcript a detector reads. A registry entry naming anything else is a
 #: typo, not a new kind, so `Registry.add` refuses it.
-EVENT_KINDS = frozenset(("bash", "write", "agent-brief", "assistant-final", "session"))
+EVENT_KINDS = frozenset(("bash", "write", "agent-brief", "assistant-final", "session",
+                         "tool_use", "assistant_text"))
 
 
 class Detector(object):
@@ -177,10 +178,9 @@ DEFAULT = Registry()
 # --- extension point: declarative detectors -----------------------------------------
 #
 # A detector written as data rather than as Python - a pattern, a tool name and a rule id in
-# a config file - is JakeSelby/agent-harness#452 and is deliberately not implemented here. What this module
-# owes that work is a seam, and this is it: a compiler registered per spec `kind` turns a
-# dict into a `Detector`, and nothing else in the package needs to change. Until then
-# `from_spec` raises, and `COMPILERS` is empty.
+# a config file - arrives here: a compiler registered per spec `kind` turns a dict into a
+# `Detector`, and nothing else in this module knows what the dict holds.
+# `ruleprobe.matchers` registers the `declarative` kind, and a caller may register another.
 
 COMPILERS = {}
 
@@ -195,10 +195,13 @@ def from_spec(spec):
     """A `Detector` from a declarative spec dict, via its registered compiler."""
     kind = (spec or {}).get("kind")
     compiler = COMPILERS.get(kind)
+    if compiler is None and kind is None:
+        from . import matchers  # noqa: F401  - registers the default compiler
+        compiler = COMPILERS.get(matchers.SPEC_KIND)
     if compiler is None:
         raise NotImplementedError(
-            "no compiler for detector spec kind %r; declarative detectors are not built yet, "
-            "and a caller may register one with register_compiler()" % (kind,))
+            "no compiler for detector spec kind %r; the shipped one is %r, and a caller "
+            "may register another with register_compiler()" % (kind, "declarative"))
     return compiler(spec)
 
 
