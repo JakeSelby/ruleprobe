@@ -1,0 +1,240 @@
+# The labels for the shipped corpus, in the same YAML subset a detector file is written in.
+#
+# One entry per labelled event. `at` is the key a hit carries: the turn, a colon, and the
+# tool use id - or `-` when the hit is on the session rather than on a tool use, which is
+# what a compaction and a model switch produce.
+#
+# `fire` is every detector that should fire there and is the whole truth about that event:
+# a hit at a key with no `fire` entry naming the detector is a false positive, and a `fire`
+# entry with no hit is a false negative. `near` names a detector this event is a deliberate
+# near-miss for - a `cat` of a range, a `find` with a filter, a push after the gate ran, a
+# heredoc with `rm -rf` in its body - and is what the negative count in `ruleprobe corpus`
+# is counting. An event with neither is unremarkable and is expected to fire nothing.
+#
+# Every session under sessions/ is synthetic and hand-authored. No real transcript content,
+# no home paths, no personal names, no live credentials.
+
+version: 1
+
+sessions:
+
+  - session: hygiene-cat.jsonl
+    note: five files read whole, and six ways of not reading one whole
+    labels:
+      - at: "1:tu-c1"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: a lone cat of one path
+      - at: "1:tu-c2"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: the same with a nested path
+      - at: "2:tu-c3"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: a flag before the path is still the whole file
+      - at: "2:tu-n1"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a sed range, which is the narrow read the rule asks for
+      - at: "3:tu-c4"
+        fire: [transcript-hygiene/whole-file-cat]
+      - at: "3:tu-c5"
+        fire: [transcript-hygiene/whole-file-cat]
+      - at: "3:tu-n2"
+        near: [transcript-hygiene/whole-file-cat]
+        note: two operands, so not the single whole-file read
+      - at: "4:tu-n3"
+        near: [transcript-hygiene/whole-file-cat]
+        note: piped into head, so only the first lines reach the window
+      - at: "4:tu-n4"
+        near: [transcript-hygiene/whole-file-cat]
+        note: redirected to a file, so nothing reaches the window
+      - at: "4:tu-n5"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a heredoc written through cat, which reads nothing
+      - at: "4:tu-n6"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a filtered grep, the narrow read
+
+  - session: hygiene-find.jsonl
+    note: a Codex rollout - five unfiltered walks and six narrowed ones
+    labels:
+      - at: "1:tu-f1"
+        fire: [transcript-hygiene/unfiltered-find]
+        note: the bare walk
+      - at: "1:tu-f2"
+        fire: [transcript-hygiene/unfiltered-find]
+      - at: "2:tu-f3"
+        fire: [transcript-hygiene/unfiltered-find]
+      - at: "2:tu-g1"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by name
+      - at: "3:tu-f4"
+        fire: [transcript-hygiene/unfiltered-find]
+        note: -print narrows nothing
+      - at: "3:tu-g2"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by type
+      - at: "4:tu-f5"
+        fire: [transcript-hygiene/unfiltered-find]
+      - at: "4:tu-g3"
+        near: [transcript-hygiene/unfiltered-find]
+        note: depth-limited
+      - at: "4:tu-g4"
+        near: [transcript-hygiene/unfiltered-find]
+        note: piped into head, so the output is bounded
+      - at: "4:tu-g5"
+        near: [transcript-hygiene/unfiltered-find]
+        note: redirected to a file
+      - at: "4:tu-g6"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by modification time
+
+  - session: verification-hooks.jsonl
+    note: six hook bypasses, then the gate and a clean push
+    labels:
+      - at: "1:tu-v1"
+        fire: [verification/no-verify]
+        note: the flag on a commit
+      - at: "2:tu-v2"
+        fire: [verification/no-verify]
+        note: the short spelling of the same flag
+      - at: "2:tu-v3"
+        fire: [verification/no-verify]
+        note: the flag on a push
+      - at: "3:tu-v4"
+        fire: [verification/no-verify]
+        note: the hooks path pointed at nothing
+      - at: "3:tu-v5"
+        fire: [verification/no-verify]
+        note: the assignment pre-commit reads
+      - at: "3:tu-v6"
+        fire: [verification/no-verify]
+        note: pre-commit run with its config requirement turned off
+      - at: "4:tu-w1"
+        near: [verification/no-verify]
+        note: the gate itself
+      - at: "4:tu-w2"
+        near: [verification/no-verify]
+        note: a push after the gate ran
+      - at: "4:tu-w3"
+        near: [verification/no-verify]
+        note: the flag inside a commit message, not on the command
+      - at: "4:tu-w4"
+        near: [verification/no-verify]
+        note: git -n on a subcommand that is not commit
+      - at: "4:tu-w5"
+        near: [verification/no-verify]
+        note: the whole command as text in an echo
+      - at: "4:tu-w6"
+        near: [verification/no-verify]
+        note: an amend with no bypass
+
+  - session: secrets-writes.jsonl
+    note: six credentials written to disk, then six ways of not writing one
+    labels:
+      - at: "1:tu-k1"
+        fire: [secrets/secret-in-write]
+        note: an access key id in a written file
+      - at: "1:tu-k2"
+        fire: [secrets/secret-in-write]
+        note: the secret half, through an edit
+      - at: "2:tu-k3"
+        fire: [secrets/secret-in-write]
+        note: a private key header
+      - at: "2:tu-k4"
+        fire: [secrets/secret-in-write]
+        note: a token in a heredoc body
+      - at: "2:tu-k5"
+        fire: [secrets/secret-in-write]
+        note: a bearer token in a fixture
+      - at: "2:tu-k6"
+        fire: [secrets/secret-in-write]
+        note: a bot token appended through a heredoc
+      - at: "3:tu-y1"
+        near: [secrets/secret-in-write]
+        note: a heredoc whose body is a destructive command, not a credential
+      - at: "3:tu-y2"
+        near: [secrets/secret-in-write]
+        note: the credential read from the environment instead
+      - at: "3:tu-y3"
+        near: [secrets/secret-in-write]
+        note: a read of the credential file, which writes nothing
+      - at: "3:tu-y4"
+        near: [secrets/secret-in-write]
+        note: a value fetched from a secret store at run time
+      - at: "3:tu-y5"
+        near: [secrets/secret-in-write]
+        note: prose about bearer tokens with no token in it
+      - at: "3:tu-y6"
+        near: [secrets/secret-in-write]
+        note: an edit to the same file that carries no secret
+
+  - session: cache-compaction.jsonl
+    note: five compactions and three model switches, with their look-alikes
+    labels:
+      - at: "1:-"
+        near: [cache-hygiene/model-switch]
+        note: the first message names a model but changes nothing
+      - at: "2:-"
+        fire: [cache-hygiene/model-switch]
+        note: opus to sonnet
+      - at: "3:-"
+        near: [cache-hygiene/model-switch]
+        note: the same model again
+      - at: "4:-"
+        fire: [cache-hygiene/compact]
+        near: [cache-hygiene/model-switch]
+        note: a compaction boundary, with no model change around it
+      - at: "5:-"
+        fire: [cache-hygiene/model-switch]
+        note: sonnet back to opus
+      - at: "6:-"
+        fire: [cache-hygiene/compact]
+        near: [cache-hygiene/model-switch]
+        note: the summary turn is written under a bracketed synthetic model
+      - at: "7:-"
+        near: [cache-hygiene/model-switch]
+        note: the real model either side of the synthetic turn is the same one
+      - at: "8:-"
+        fire: [cache-hygiene/compact, cache-hygiene/model-switch]
+        note: a compaction and a switch down to haiku in one turn
+      - at: "9:-"
+        near: [cache-hygiene/compact, cache-hygiene/model-switch]
+        note: a message about compacting, which is not a compaction
+      - at: "10:-"
+        near: [cache-hygiene/compact]
+        note: the user typed the compaction command but no boundary was written
+      - at: "10:tu-p1"
+        near: [cache-hygiene/compact]
+        note: the word in a log line
+      - at: "11:-"
+        fire: [cache-hygiene/compact]
+        near: [cache-hygiene/model-switch]
+      - at: "12:-"
+        near: [cache-hygiene/compact]
+        note: a tool result quoting the word back
+      - at: "13:-"
+        fire: [cache-hygiene/compact]
+
+  - session: cache-codex-models.jsonl
+    note: a Codex rollout, where the model is named per turn
+    labels:
+      - at: "1:-"
+        near: [cache-hygiene/model-switch]
+        note: the opening turn
+      - at: "2:-"
+        near: [cache-hygiene/model-switch]
+        note: the same model named again
+      - at: "3:-"
+        fire: [cache-hygiene/model-switch]
+        note: up a model for the hard part
+      - at: "4:-"
+        near: [cache-hygiene/model-switch]
+        note: a turn that names no model at all
+      - at: "5:-"
+        fire: [cache-hygiene/model-switch]
+        note: back down again
+      - at: "6:tu-q1"
+        near: [cache-hygiene/compact]
+        note: the word compacting in a command
+      - at: "6:-"
+        near: [cache-hygiene/compact]
+        note: the word compacted in a tool result

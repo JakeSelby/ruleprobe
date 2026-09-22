@@ -20,6 +20,14 @@ RULE_MIN_SESSIONS = 20
 BY = ("rule", "repo", "stance")
 
 
+def _validity_note(scores, detector_id):
+    """Imported late: `ruleprobe.validity` reads the transcript readers, and a report over
+    stored rows should not pay for that unless it asked for the column."""
+    from .validity import validity_note
+
+    return validity_note(scores, detector_id)
+
+
 def measure(session, stances=None, registry=DEFAULT):
     """One report row from one `Session`: its identity and its hit counts."""
     errors = []
@@ -70,7 +78,7 @@ def rule_ids(rows, registry):
 
 
 def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_PROMOTE_SHARE,
-           registry=DEFAULT):
+           registry=DEFAULT, validity=None):
     """The report as text, ready to print.
 
     - `by="rule"` - one line per detector: hits, the sessions it fired in, the denominator,
@@ -80,6 +88,11 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
       is noise.
     - `by="repo"` - one line per repository: sessions, hits, and its top three detectors.
     - `by="stance"` - the same, grouped by each `dimension=variant` a row ran under.
+
+    `validity`, when a `{detector_id: Score}` mapping from `ruleprobe.validity` is passed,
+    adds a column saying how good each detector is over the labelled corpus, so a hit rate
+    is read as `p=0.96 r=0.91` and not as a fact. It is off by default because the table is
+    meant to be read in a minute; `ruleprobe report --validity` turns it on.
     """
     if by not in BY:
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
@@ -101,6 +114,9 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
     if by == "rule":
         total = len(counted)
         head = "%-38s%7s%10s%6s%8s  note" % ("detector", "hits", "sessions", "of", "share")
+        width = len(head)
+        if validity is not None:
+            head = "%-*s  validity" % (width, head)
         lines.append(head)
         lines.append("-" * len(head))
         for did in rule_ids(measured, registry):
@@ -110,8 +126,11 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
             note = ""
             if total >= min_sessions:
                 note = "promote?" if share > promote_share else ("unobserved" if not hits else "")
-            lines.append(("%-38s%7d%10d%6d%8.0f%%  %s"
-                          % (did[:38], hits, seen, total, share * 100, note)).rstrip())
+            line = "%-38s%7d%10d%6d%8.0f%%  %s" % (did[:38], hits, seen, total,
+                                                   share * 100, note)
+            if validity is not None:
+                line = "%-*s  %s" % (width, line.rstrip(), _validity_note(validity, did))
+            lines.append(line.rstrip())
         return "\n".join(lines)
 
     if by == "stance":

@@ -1,0 +1,43 @@
+# The gate. Three things, in the order a failure is cheapest to read: the package imports
+# and compiles, the tests pass on the floor the package claims and on the newest Python,
+# and every detector is still over the corpus floor.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.9 is the floor `requires-python` claims; 3.x is whatever is newest, so a
+        # deprecation lands here before it lands on a user.
+        python-version: ["3.9", "3.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: compileall
+        run: python -m compileall -q ruleprobe tests
+      - name: tests
+        run: python -m unittest discover -s tests -v
+
+  corpus:
+    # The detector-validity gate: a detector under the floor fails the build, which is what
+    # stops a hit rate from quietly becoming a rate of the detector. It is a gate on this
+    # repository only; nothing in `ruleprobe report` reads the floor.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - run: python -m ruleprobe corpus --no-config --floor 0.9

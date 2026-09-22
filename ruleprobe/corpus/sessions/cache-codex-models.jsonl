@@ -1,0 +1,14 @@
+{"type": "session_meta", "timestamp": "2026-01-10T09:00:00.000Z", "payload": {"id": "corpus-cache-codex-models", "cwd": "/workspace/example-repo", "cli_version": "0.40.0", "model": "gpt-5-codex"}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:00:01.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:00:02.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Opened the thread."}]}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:01:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:01:02.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Same model, second turn."}]}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:02:00.000Z", "payload": {"model": "gpt-5.1-codex", "effort": "high"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:02:02.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Switched up for the hard part."}]}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:03:00.000Z", "payload": {"effort": "high"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:03:02.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "The turn named no model, so nothing changed."}]}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:04:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:04:02.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Back down for the mechanical part."}]}}
+{"type": "turn_context", "timestamp": "2026-01-10T09:05:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:05:02.000Z", "payload": {"type": "function_call", "call_id": "tu-q1", "name": "exec_command", "arguments": "{\"cmd\": \"echo 'compacting the context' >> /tmp/session-log.txt\"}"}}
+{"type": "response_item", "timestamp": "2026-01-10T09:05:04.000Z", "payload": {"type": "function_call_output", "call_id": "tu-q1", "output": "context compacted at 40 percent\n"}}

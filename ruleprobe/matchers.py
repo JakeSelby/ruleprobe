@@ -38,24 +38,50 @@ detector's `when`, because a hit they produce is not a hit on the event in hand:
 - `change` - `kind`, `field`, `ignore_prefix`, `ignore_empty`: a field that differs from the
   previous event of that kind.
 
+An entry may also carry `examples`, which is how a detector states its own precision and
+recall rather than being taken on trust. `fire` is a list of minimal cases it should fire
+on, `skip` a list it should not; each case is `bash: <command>`, or `event: <one event>`,
+or `events: [<event>, ...]` for a session detector, with an optional `note`. Nothing runs
+them at report time; `ruleprobe corpus` scores them.
+
+    examples:
+      fire:
+        - bash: sudo pip install ruff
+      skip:
+        - bash: uv pip install ruff
+          note: the tool the rule asks for
+
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
 fires.
 """
 import fnmatch
 import re
+from collections import namedtuple
 
 from .declarative import DeclarativeError
 from .events import hit, input_of, text_of
 from .registry import Detector, register_compiler
 from .shell import git_calls, has_redirect, operands, split_assignments
 
-__all__ = ["SPEC_KIND", "compile_detector", "compile_matcher"]
+__all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
+           "compile_matcher"]
+
+#: The cases a detector states about itself: `fire` and `skip`, each a list of
+#: `(note, events)`. Scored by `ruleprobe.validity`, never at report time.
+Examples = namedtuple("Examples", "fire skip")
+
+EXAMPLE_KEYS = ("fire", "skip")
+CASE_KEYS = ("bash", "event", "events", "note")
+#: The keys one event snippet may carry: the event schema in `ruleprobe.events`, and
+#: nothing else, so a typo is a finding rather than a case that silently tests nothing.
+SNIPPET_KEYS = ("kind", "turn", "id", "name", "input", "text", "final", "model",
+                "tool_name", "tool_use_id")
 
 #: The `kind` a declarative spec carries when it arrives through `registry.from_spec`.
 SPEC_KIND = "declarative"
 
-ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description")
+ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description", "examples")
 EVENTS = ("tool_use", "assistant_text", "session")
 _TEXT_SOURCES = ("command", "heredocs", "payload", "assistant")
 
@@ -600,6 +626,72 @@ def _select(event_kind):
     return lambda event, wanted=event_kind: event.get("kind") == wanted
 
 
+def compile_examples(value, where, container=None):
+    """An `examples:` block as `Examples(fire, skip)`, each a list of `(note, events)`.
+
+    Nothing here runs a detector: this is the reading of the block, and
+    `ruleprobe.validity.score_examples` is the scoring of it.
+    """
+    if value is None:
+        return None
+    spec = _allowed(_mapping(value, where, container, "examples", "examples"),
+                    EXAMPLE_KEYS, where, container, "examples", "examples")
+    out = {}
+    for name in EXAMPLE_KEYS:
+        cases = spec.get(name)
+        if cases is None:
+            out[name] = []
+            continue
+        if not isinstance(cases, list):
+            where.fail("examples %s must be a list of cases" % name, spec, name)
+        out[name] = [_case(case, where, spec, name, index)
+                     for index, case in enumerate(cases)]
+    if not out["fire"] and not out["skip"]:
+        where.fail("an examples block with no cases in it", container, "examples")
+    return Examples(out["fire"], out["skip"])
+
+
+def _case(case, where, container, key, index):
+    """One example case as `(note, events)`."""
+    spec = _allowed(_mapping(case, where, container, key, "an example case"),
+                    CASE_KEYS, where, container, key, "example case")
+    named = [k for k in ("bash", "event", "events") if k in spec]
+    if len(named) != 1:
+        where.fail("an example case is one of bash, event or events", spec, None)
+    note = spec.get("note")
+    if note is not None and not isinstance(note, str):
+        where.fail("an example note is a string", spec, "note")
+    if "bash" in spec:
+        command = spec["bash"]
+        if not isinstance(command, str) or not command:
+            where.fail("examples bash must be a command string", spec, "bash")
+        raw = [{"kind": "tool_use", "name": "Bash", "input": {"command": command}}]
+    elif "event" in spec:
+        raw = [spec["event"]]
+    else:
+        raw = spec["events"]
+        if not isinstance(raw, list) or not raw:
+            where.fail("examples events must be a non-empty list", spec, "events")
+    return (note or "", [_snippet(e, where, spec, index + i)
+                         for i, e in enumerate(raw)])
+
+
+def _snippet(event, where, container, index):
+    """One event snippet, filled out to the event schema. Defaults are the common case: a
+    Bash tool use on turn one, with an id of its own so two snippets never collide."""
+    spec = _allowed(_mapping(event, where, container, None, "an event snippet"),
+                    SNIPPET_KEYS, where, container, None, "event snippet")
+    out = dict(spec)
+    out.setdefault("kind", "tool_use")
+    out.setdefault("turn", index + 1)
+    if out["kind"] == "tool_use":
+        out.setdefault("name", "Bash")
+        out.setdefault("id", "example-%d" % (index + 1))
+        if not isinstance(out.get("input"), dict):
+            where.fail("an event snippet's input is a mapping", spec, "input")
+    return out
+
+
 def compile_detector(spec, path="<spec>", lines=None, line=0):
     """One entry as a `Detector`. Raises `DeclarativeError` with a line for any spec error."""
     where = _Where(path, lines, line or (lines.line_of(spec) if lines else 0))
@@ -621,6 +713,8 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
     matcher = compile_matcher(spec["when"], _Where(path, lines, where.at(spec, "when")),
                               allow_aggregate=(event_kind == "session"))
     gate = _gate(spec.get("gate"), where, spec)
+    examples = compile_examples(spec.get("examples"),
+                                _Where(path, lines, where.at(spec, "examples")), spec)
 
     if isinstance(matcher, _Aggregate):
         run = matcher.run
@@ -636,7 +730,7 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
                     if selects(event) and matcher(event, env)]
 
     fn.__name__ = re.sub(r"\W", "_", detector_id)
-    return Detector(detector_id, rule, event_kind, fn, gate)
+    return Detector(detector_id, rule, event_kind, fn, gate, examples)
 
 
 register_compiler(SPEC_KIND, lambda spec: compile_detector(spec))
