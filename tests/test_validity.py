@@ -260,7 +260,7 @@ class LoaderTests(Temp):
 
     def test_an_unknown_session_key_is_fatal(self):
         self.refuses("version: 1\nsessions:\n  - session: case.jsonl\n    labels: []\n"
-                     "    comment: no\n",
+                     "    comment: 'no'\n",
                      "unknown session key")
 
     def test_a_detector_id_that_is_not_a_list_of_strings_is_fatal(self):

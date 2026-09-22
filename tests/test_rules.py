@@ -265,7 +265,7 @@ class MalformedRuleTests(Temp):
         self.assertEqual(len(bundle.findings), 1)
 
     def test_a_rule_name_with_a_slash_in_it_is_a_finding_not_a_crash(self):
-        self.write("rules/x.md", "---\nrule: a/b\nopt_out: no\n---\n")
+        self.write("rules/x.md", '---\nrule: a/b\nopt_out: "no"\n---\n')
         bundle = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
         self.assertEqual(bundle.rules[0].state, "dark")
         self.assertIn("slash-free", bundle.findings[0].reason)

@@ -14,6 +14,7 @@ import unittest
 from corpus import bash, tool_use
 from ruleprobe import Detector, Registry, iter_sessions, report, run
 from ruleprobe.cli import _since, main
+from ruleprobe.declarative import DeclarativeError, parse
 from ruleprobe.matchers import compile_detector
 from ruleprobe.report import report_data
 from ruleprobe.shell import Parsed, pipelines, strip_heredocs
@@ -159,6 +160,41 @@ class MatcherFindingTests(unittest.TestCase):
         spec = {"when": {"arg": {"field": "file_path", "path_glob": "tests/**"}}}
         self.assertTrue(fires(spec, [tool_use("Write", {"file_path": "/w/tests/x/y.py"})]))
         self.assertFalse(fires(spec, [tool_use("Write", {"file_path": "/w/src/y.py"})]))
+
+
+class ParserFindingTests(unittest.TestCase):
+    def test_finding_14_an_escaped_quote_inside_a_string_is_not_a_comment(self):
+        document = parse('regex: "a\\" # b"\n')
+        self.assertEqual(document, {"regex": 'a" # b'})
+
+    def test_finding_15_a_pair_in_a_flow_sequence_is_a_one_key_mapping(self):
+        self.assertEqual(parse("when: [a: b, c]\n"), {"when": [{"a": "b"}, "c"]})
+
+    def test_finding_16_a_yaml_1_1_boolean_word_is_refused_rather_than_guessed(self):
+        for text in ("k: yes\n", "k: no\n", "k: On\n", "k: OFF\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(DeclarativeError):
+                    parse(text)
+        self.assertEqual(parse('k: "no"\n'), {"k": "no"})
+        self.assertEqual(parse("k: true\n"), {"k": True})
+
+    def test_finding_16_a_leading_zero_number_is_refused_rather_than_read_as_ten(self):
+        with self.assertRaises(DeclarativeError):
+            parse("within: 010\n")
+        self.assertEqual(parse("within: 10\n"), {"within": 10})
+        self.assertEqual(parse("within: 0\n"), {"within": 0})
+
+    def test_finding_19_a_claude_prompt_quoting_session_meta_is_not_a_codex_rollout(self):
+        line = json.dumps({"type": "user", "sessionId": "s-1", "cwd": "/w/repo",
+                           "timestamp": "2026-09-20T10:00:00.000Z",
+                           "message": {"role": "user",
+                                       "content": 'why is "session_meta" first?'}})
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "quoting.jsonl")
+            with open(path, "w") as handle:
+                handle.write(line + "\n")
+            sessions = list(iter_sessions(root=directory))
+        self.assertEqual([s.runtime for s in sessions], ["claude-code"])
 
 
 class GatingFindingTests(unittest.TestCase):

@@ -5,6 +5,7 @@ A reader is a module with `ROOT`, `transcripts(root)` and `read(path)`. Adding a
 adding one of those and a line in `RUNTIMES`.
 """
 import datetime
+import json
 import os
 
 from . import claude_code, codex
@@ -32,14 +33,25 @@ def _since_stamp(since):
 
 
 def _detect(path):
-    """The reader for `path`, from its first line. A Codex rollout opens with
-    `session_meta`; a Claude Code transcript does not."""
+    """The reader for `path`, from its first line.
+
+    A Codex rollout opens with a line whose `type` is `session_meta`; a Claude Code
+    transcript does not. The line is parsed rather than searched, because a user prompt that
+    quotes `"session_meta"` - a transcript of somebody working on this package, say - would
+    otherwise be handed to the Codex reader and silently read as nothing.
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             first = handle.readline()
     except OSError:
         return None
-    return codex if '"session_meta"' in first else claude_code
+    try:
+        entry = json.loads(first)
+    except ValueError:
+        entry = None
+    if isinstance(entry, dict) and entry.get("type") == "session_meta":
+        return codex
+    return claude_code
 
 
 def iter_sessions(root=None, runtime="auto", since=None, errors=None):

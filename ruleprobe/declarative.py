@@ -13,7 +13,11 @@ this module parses the subset a detector needs and refuses everything else by na
 
 Refused, each with a line number and a reason rather than a wrong parse: anchors and
 aliases (`&`, `*`), tags (`!`), block scalars (`|`, `>`), directives (`%`), merge keys, and
-more than one document in a file. Tabs may not indent.
+more than one document in a file. Tabs may not indent. Two scalars are refused for the same
+reason - a file that two readers disagree about is worse than one that does not load:
+`yes`, `no`, `on` and `off`, which are booleans in YAML 1.1 and strings in 1.2, and a number
+with a leading zero, which is octal in YAML and was decimal here. Quote either to mean the
+string.
 
 JSON is the other accepted spelling: `load()` reads a `.json` file with the standard library
 and reports its errors the same way. The two produce the same objects, so which one a
@@ -35,6 +39,11 @@ MAX_DEPTH = 32
 _INT_RE = re.compile(r"^[+-]?\d+$")
 _FLOAT_RE = re.compile(r"^[+-]?(\d+\.\d*|\.\d+)([eE][+-]?\d+)?$")
 _CONSTANTS = {"true": True, "false": False, "null": None, "~": None}
+# YAML 1.1 reads these as booleans and YAML 1.2 as strings, and a leading zero is octal in
+# both. Refusing them by name is the same bargain the rest of this parser makes: a file that
+# would be read two ways is an error with a line on it, never a quiet third reading.
+_AMBIGUOUS_BOOLS = frozenset(("yes", "no", "on", "off"))
+_OCTALISH_RE = re.compile(r"^[+-]?0\d+$")
 # The characters YAML gives a meaning this parser does not implement. Refusing them by name
 # is the difference between an unsupported file and a silently wrong one.
 _RESERVED = {
@@ -178,12 +187,21 @@ def _scan(text, path, first_line):
 
 def _strip_comment(line):
     """`line` without a trailing `#` comment. A `#` inside quotes, or joined to a word, is
-    data: `--exclude=#tmp` is a token and `'# 1'` is a string."""
+    data: `--exclude=#tmp` is a token and `'# 1'` is a string.
+
+    A double-quoted string takes backslash escapes, so `"a\\" # b"` is one string with a
+    quote in it and not a comment. A single-quoted one does not, as YAML has it.
+    """
     sq = dq = False
-    for i, c in enumerate(line):
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
         if sq:
             sq = c != "'"
         elif dq:
+            if c == "\\":
+                i += 2
+                continue
             dq = c != '"'
         elif c == "'":
             sq = True
@@ -191,6 +209,7 @@ def _strip_comment(line):
             dq = True
         elif c == "#" and (i == 0 or line[i - 1] in " \t"):
             return line[:i]
+        i += 1
     return line
 
 
@@ -321,7 +340,7 @@ def _scalar(text, no, path):
         return _quoted(text, no, path)
     if text[:1] in _RESERVED:
         raise DeclarativeError(_RESERVED[text[:1]], no, path)
-    return _plain(text)
+    return _plain(text, no, path)
 
 
 def _expect_end(text, end, no, path):
@@ -329,11 +348,27 @@ def _expect_end(text, end, no, path):
         raise DeclarativeError("trailing text after a flow collection", no, path)
 
 
-def _plain(text):
+def _plain(text, no=0, path=""):
+    """A plain scalar as the value it spells, or a refusal for one two YAML versions read
+    differently.
+
+    `yes`, `no`, `on` and `off` are booleans in YAML 1.1 and strings in 1.2, and `010` is 8
+    in YAML and 10 here. Either is a file that means one thing to a reader and another to
+    this parser, so both are refused by name: quote it, or write `true`, `false` or a
+    decimal number.
+    """
     lowered = text.lower()
     if lowered in _CONSTANTS:
         return _CONSTANTS[lowered]
+    if lowered in _AMBIGUOUS_BOOLS:
+        raise DeclarativeError(
+            "%r is a boolean in one YAML version and a string in another; write true or "
+            "false, or quote it" % text, no, path)
     if _INT_RE.match(text):
+        if _OCTALISH_RE.match(text):
+            raise DeclarativeError(
+                "%r has a leading zero, which YAML reads as octal and this parser does "
+                "not; write it in decimal, or quote it" % text, no, path)
         return int(text)
     if _FLOAT_RE.match(text):
         return float(text)
@@ -395,12 +430,18 @@ def _flow(text, i, no, path, depth):
             raise DeclarativeError("unterminated flow collection", no, path)
         if text[i] == closing:
             return out, i + 1
-        item, i = _flow_item(text, i, no, path, depth)
+        pair, item, i = _flow_item(text, i, no, path, depth)
         if mapping:
+            if not pair:
+                raise DeclarativeError("expected 'key: value' in a flow mapping", no, path)
             key, value = item
             if key in out:
                 raise DeclarativeError("duplicate key %r" % key, no, path)
             out[key] = value
+        elif pair:
+            # `[a: b]` is a one-key mapping inside a sequence, as YAML has it, and not a
+            # pair of its own: a shape nobody can write in JSON should not reach a matcher.
+            out.append({item[0]: item[1]})
         else:
             out.append(item)
         i = _skip_space(text, i)
@@ -416,6 +457,7 @@ def _flow(text, i, no, path, depth):
 
 
 def _flow_item(text, i, no, path, depth):
+    """`(is_a_key_value_pair, item, index after it)`."""
     value, i = _flow_value(text, i, no, path, depth)
     i = _skip_space(text, i)
     if i < len(text) and text[i] == ":":
@@ -423,8 +465,8 @@ def _flow_item(text, i, no, path, depth):
         if not isinstance(value, str):
             raise DeclarativeError("a flow mapping key must be a string", no, path)
         second, i = _flow_value(text, i, no, path, depth)
-        return (value, second), i
-    return value, i
+        return True, (value, second), i
+    return False, value, i
 
 
 def _flow_value(text, i, no, path, depth):
@@ -443,7 +485,7 @@ def _flow_value(text, i, no, path, depth):
     raw = text[start:i].strip()
     if not raw:
         raise DeclarativeError("an empty value in a flow collection", no, path)
-    return _plain(raw), i
+    return _plain(raw, no, path), i
 
 
 def _skip_space(text, i):
