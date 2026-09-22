@@ -1,0 +1,467 @@
+# SPDX-License-Identifier: MIT
+"""Shell decomposition: one Bash command, parsed once, shared by every detector.
+
+The parser is deliberately partial. It answers "which words were the command and its
+arguments, in which pipeline segment, and what did a heredoc body hold" — enough for a
+detector to recognise a shape — and nothing else. It never runs anything, never resolves a
+variable, and never opens a file.
+
+Known misses, all of them under-counts by design. A missed hit is a quieter report; a false
+hit is a wrong one.
+
+- A heredoc header behind a `#` comment (`cat <<EOF  # note`) is read as a heredoc, because
+  the body is lifted out before comments are stripped.
+- A command nested inside a substitution (`$(git commit -m ...)`) is invisible: the
+  substitution is replaced wholesale before the segments are split.
+- Literal text equal to a heredoc marker in an argument is resolved as if it were that
+  heredoc's body.
+"""
+import re
+import shlex
+
+# Longest Bash command worth tokenizing. The tokenizer is superlinear in line length and a
+# pasted file is never the shape a detector is looking for; a longer command is left
+# unparsed, and `Parsed.skipped` says so.
+MAX_COMMAND = 16 * 1024
+
+# What stands in for a command, process or arithmetic substitution once it is lifted out.
+# An argument that resolves to one was never read, so it is never judged.
+SUB_PLACEHOLDER = "__RULEPROBE_SUB__"
+
+# A heredoc body is lifted out of the command and left behind as this marker, so the command
+# a body belongs to is still visible in the token stream.
+_MARKER = "__RULEPROBE_HEREDOC_%d__"
+MARKER_RE = re.compile(r"^__RULEPROBE_HEREDOC_(\d+)__$")
+# `cmd -m "$(cat <<'EOF' ... EOF)"`, the form a coding agent writes for a multi-line commit
+# message: the substitution exists only to carry the heredoc, so the marker takes its place.
+_CAT_SUB_RE = re.compile(r"\$\(\s*cat\s+<<\s*(__RULEPROBE_HEREDOC_\d+__)\s*\)")
+
+_PIPE = frozenset(("|", "|&"))
+_BREAK = frozenset((";", "&&", "||", "&", ";;", "(", ")"))
+_DROP = frozenset(("do", "done", "then", "fi", "else", "esac", "{", "}", "!",
+                   "while", "until", "if", "elif", "for", "select", "case", "in"))
+_REDIRECTS = re.compile(r"^\d*(<|<<|<<<|<&|>|>>|&>|>&)$")
+_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
+
+
+# --- substitutions and comments ----------------------------------------------------
+
+
+def _match_paren(text, start):
+    """The index of the `)` closing the `(` at `start`, or None."""
+    depth = 0
+    i = start
+    n = len(text)
+    sq = dq = False
+    while i < n:
+        c = text[i]
+        if sq:
+            sq = c != "'"
+        elif dq:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                dq = False
+        elif c == "\\":
+            i += 1
+        elif c == "'":
+            sq = True
+        elif c == '"':
+            dq = True
+        elif c == "(":
+            depth += 1
+        elif c == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return None
+
+
+def strip_subs(command):
+    """`command` with every substitution replaced by `SUB_PLACEHOLDER`, or None.
+
+    None means the text does not parse — an unterminated quote or backtick, an unclosed
+    `$(` — and the caller keeps the raw text rather than a half-rewritten one.
+    """
+    out = []
+    i = 0
+    n = len(command)
+    sq = dq = False
+    while i < n:
+        c = command[i]
+        if sq:
+            out.append(c)
+            if c == "'":
+                sq = False
+            i += 1
+            continue
+        if c == "'" and not dq:
+            sq = True
+            out.append(c)
+            i += 1
+            continue
+        if c == '"':
+            dq = not dq
+            out.append(c)
+            i += 1
+            continue
+        if c == "\\":
+            out.append(command[i:i + 2])
+            i += 2
+            continue
+        if c == "`":
+            j = i + 1
+            while j < n and command[j] != "`":
+                j += 2 if command[j] == "\\" else 1
+            if j >= n:
+                return None
+            out.append(SUB_PLACEHOLDER)
+            i = j + 1
+            continue
+        if command.startswith("$(", i):
+            end = _match_paren(command, i + 1)
+            if end is None:
+                return None
+            out.append(SUB_PLACEHOLDER)
+            i = end + 1
+            continue
+        if c in "<>" and not dq and command.startswith("(", i + 1):
+            end = _match_paren(command, i + 1)
+            if end is None:
+                return None
+            out.append(SUB_PLACEHOLDER)
+            i = end + 1
+            continue
+        out.append(c)
+        i += 1
+    if sq or dq:
+        return None
+    return "".join(out)
+
+
+def strip_comment(line):
+    """`line` without its trailing bash comment: an unquoted `#` at the start of a word.
+    Substitutions are already placeholders by here, so only quotes need tracking."""
+    sq = dq = False
+    i = 0
+    n = len(line)
+    while i < n:
+        c = line[i]
+        if sq:
+            sq = c != "'"
+        elif dq:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                dq = False
+        elif c == "\\":
+            i += 1
+        elif c == "'":
+            sq = True
+        elif c == '"':
+            dq = True
+        elif c == "#" and (i == 0 or line[i - 1] in " \t;|&()"):
+            return line[:i]
+        i += 1
+    return line
+
+
+# --- heredocs ----------------------------------------------------------------------
+
+
+def _heredoc_headers(line):
+    """`(start, end, delimiter)` for every heredoc operator that is a real shell word.
+
+    `<<` inside quotes is data — `grep -n '<<EOF' file` opens no heredoc — so the scan
+    tracks quoting. `<<-`, `<<"EOF"` and `<<'MSG-END'` are all headers; `<<<` is not. A
+    substitution quotes afresh, which is what makes the `-m "$(cat <<'EOF' ...)"` form a
+    heredoc and not a string.
+    """
+    out = []
+    sq = dq = False
+    stack = []
+    i, n = 0, len(line)
+    while i < n:
+        c = line[i]
+        if sq:
+            sq = c != "'"
+            i += 1
+            continue
+        if dq and not line.startswith("$(", i):
+            if c == "\\":
+                i += 2
+                continue
+            dq = c != '"'
+            i += 1
+            continue
+        if line.startswith("$(", i):
+            stack.append(dq)
+            dq = False
+            i += 2
+            continue
+        if c == ")" and stack:
+            dq = stack.pop()
+            i += 1
+            continue
+        if c == "\\":
+            i += 2
+            continue
+        if c == "'":
+            sq = True
+            i += 1
+            continue
+        if c == '"':
+            dq = True
+            i += 1
+            continue
+        if line.startswith("<<<", i):  # a herestring, not a heredoc
+            i += 3
+            continue
+        if line.startswith("<<", i):
+            j = i + 2
+            if j < n and line[j] == "-":
+                j += 1
+            while j < n and line[j] in " \t":
+                j += 1
+            if j < n and line[j] in "\"'":
+                quote = line[j]
+                k = line.find(quote, j + 1)
+                if k == -1:
+                    break
+                out.append((i, k + 1, line[j + 1:k]))
+                i = k + 1
+                continue
+            k = j
+            while k < n and (line[k].isalnum() or line[k] in "_-."):
+                k += 1
+            if k > j:
+                out.append((i, k, line[j:k]))
+                i = k
+                continue
+        i += 1
+    return out
+
+
+def strip_heredocs(command):
+    """`(command with each heredoc body lifted out, [body, ...])`.
+
+    The operator stays as `<< __RULEPROBE_HEREDOC_n__`, so a segment carrying a heredoc is
+    still recognisable as redirected and the body can be bound back to its own command.
+    """
+    lines = command.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    kept, bodies = [], []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        headers = _heredoc_headers(line)
+        rewritten, cursor = [], 0
+        for start, end, delimiter in headers:
+            body = []
+            while i < len(lines) and lines[i].strip() != delimiter:
+                body.append(lines[i])
+                i += 1
+            i += 1  # the terminator line itself
+            rewritten.append(line[cursor:start])
+            rewritten.append("<< " + (_MARKER % len(bodies)))
+            cursor = end
+            bodies.append("\n".join(body))
+        rewritten.append(line[cursor:])
+        kept.append("".join(rewritten))
+    return "\n".join(kept), bodies
+
+
+# --- tokens and pipelines ----------------------------------------------------------
+
+
+def _shell_lines(text):
+    """`text` split at the newlines bash treats as command separators: the ones outside
+    quotes. A newline inside a `-m "..."` message is part of the message, not a new
+    command."""
+    out, start = [], 0
+    sq = dq = False
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == "\\" and not sq:
+            i += 2
+            continue
+        if sq:
+            sq = c != "'"
+        elif dq:
+            dq = c != '"'
+        elif c == "'":
+            sq = True
+        elif c == '"':
+            dq = True
+        elif c == "\n":
+            out.append(text[start:i])
+            start = i + 1
+        i += 1
+    out.append(text[start:])
+    return out
+
+
+def tokenize(text):
+    """Shell tokens for already-heredoc-stripped `text`: substitutions become placeholders,
+    comments go, and the newlines that separate commands become `;` — the ones inside a
+    quoted argument are left alone."""
+    # A continuation is one command, so it is joined before anything is split.
+    text = re.sub(r"\\\r?\n[ \t]*", " ", text)
+    stripped = strip_subs(text)
+    if stripped is not None:
+        text = stripped
+    text = " ; ".join(strip_comment(line) for line in _shell_lines(text))
+    try:
+        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lex.commenters = ""
+        lex.whitespace_split = True
+        return list(lex)
+    except ValueError:
+        return []
+
+
+def _pipelines(tokens):
+    """Tokens as a list of pipelines, each a list of segments, each a token list."""
+    out, pipe, seg = [], [], []
+    for token in tokens:
+        if token in _BREAK:
+            if seg:
+                pipe.append(seg)
+                seg = []
+            if pipe:
+                out.append(pipe)
+                pipe = []
+            continue
+        if token in _PIPE:
+            if seg:
+                pipe.append(seg)
+                seg = []
+            continue
+        if not seg and token in _DROP:
+            continue
+        seg.append(token)
+    if seg:
+        pipe.append(seg)
+    if pipe:
+        out.append(pipe)
+    return out
+
+
+def pipelines(command):
+    """`command` parsed from raw text. `analyse()` is the path detectors use; this one is
+    for a caller with a single command in hand, and for the tests."""
+    text, _ = strip_heredocs(command)
+    return _pipelines(tokenize(_CAT_SUB_RE.sub(r"\1", text)))
+
+
+def operands(segment):
+    """The segment's positional words: no flags, no redirect operators or targets."""
+    out = []
+    skip = False
+    for token in segment[1:]:
+        if skip:
+            skip = False
+            continue
+        if _REDIRECTS.match(token):
+            skip = True
+            continue
+        if token.startswith("-"):
+            continue
+        out.append(token)
+    return out
+
+
+def has_redirect(segment):
+    return any(_REDIRECTS.match(t) for t in segment)
+
+
+def normalise(command):
+    """Whitespace-collapsed command text, without a leading `cd <dir> &&`."""
+    text = " ".join(command.split())
+    return re.sub(r"^cd\s+\S+\s*&&\s*", "", text).strip()
+
+
+def split_assignments(segment):
+    """`(leading NAME=VALUE assignments, the command and its arguments)`."""
+    i = 0
+    while i < len(segment) and _ASSIGNMENT_RE.match(segment[i]):
+        i += 1
+    return segment[:i], segment[i:]
+
+
+def git_calls(parsed, subcommands):
+    """`(segment, subcommand, args)` for every `git <subcommand>` in a parsed command."""
+    for pipe in parsed.pipelines:
+        for segment in pipe:
+            _, words = split_assignments(segment)
+            if not words or words[0] != "git":
+                continue
+            rest = words[1:]
+            i = 0
+            while i < len(rest) and rest[i].startswith("-"):
+                i += 2 if rest[i] in ("-C", "-c") else 1
+            if i < len(rest) and rest[i] in subcommands:
+                yield segment, rest[i], rest[i + 1:]
+
+
+# --- the parsed view ---------------------------------------------------------------
+
+
+class Parsed(object):
+    """One Bash tool use, parsed once and shared by every shell detector."""
+
+    __slots__ = ("event", "command", "skipped", "heredocs", "pipelines", "normalised")
+
+    def __init__(self, event):
+        from .events import input_of, text_of
+
+        self.event = event
+        self.command = text_of(input_of(event).get("command"))
+        self.heredocs, self.pipelines, self.normalised = [], [], ""
+        # A command that is absent, a number, a list or bytes parses to nothing at all; the
+        # event stays in the list and every shell detector simply passes over it.
+        self.skipped = not self.command or len(self.command) > MAX_COMMAND
+        if self.skipped:
+            return
+        try:
+            text, self.heredocs = strip_heredocs(self.command)
+            self.pipelines = _pipelines(tokenize(_CAT_SUB_RE.sub(r"\1", text)))
+            self.normalised = normalise(self.command)
+        except Exception:
+            self.heredocs, self.pipelines, self.normalised = [], [], ""
+            self.skipped = True
+
+    @property
+    def turn(self):
+        return self.event.get("turn", 0)
+
+    @property
+    def id(self):
+        return self.event.get("id")
+
+
+class Context(object):
+    """One pass over the events: the Bash parses and the final assistant messages."""
+
+    __slots__ = ("events", "bash", "finals")
+
+    def __init__(self, events):
+        self.events = events
+        self.bash = []
+        self.finals = []
+        for event in events:
+            kind = event.get("kind")
+            if kind == "tool_use" and event.get("name") == "Bash":
+                self.bash.append(Parsed(event))
+            elif kind == "assistant_text" and event.get("final"):
+                self.finals.append(event)
+
+
+def analyse(events):
+    """The parsed view `run()` hands to every detector. Anything that is not a dict event is
+    dropped here, so no detector has to defend itself against the shape."""
+    if not isinstance(events, (list, tuple)):
+        events = []
+    return Context([e for e in events if isinstance(e, dict)])

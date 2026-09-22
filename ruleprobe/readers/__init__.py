@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: MIT
+"""Transcript readers, and `iter_sessions` over them.
+
+A reader is a module with `ROOT`, `transcripts(root)` and `read(path)`. Adding a runtime is
+adding one of those and a line in `RUNTIMES`.
+"""
+import datetime
+import os
+
+from . import claude_code, codex
+
+RUNTIMES = {"claude-code": claude_code, "codex": codex}
+
+__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex"]
+
+
+def _since_stamp(since):
+    """`since` as a `YYYY-MM-DD` string, from a date, a datetime, a string, or an int number
+    of days back. `None` means no filtering."""
+    if since is None:
+        return None
+    if isinstance(since, bool):
+        raise TypeError("since must be a date, a YYYY-MM-DD string, or a number of days")
+    if isinstance(since, int):
+        day = datetime.date.today() - datetime.timedelta(days=since)
+        return day.isoformat()
+    if isinstance(since, datetime.datetime):
+        return since.date().isoformat()
+    if isinstance(since, datetime.date):
+        return since.isoformat()
+    return str(since)[:10]
+
+
+def _detect(path):
+    """The reader for `path`, from its first line. A Codex rollout opens with
+    `session_meta`; a Claude Code transcript does not."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            first = handle.readline()
+    except OSError:
+        return None
+    return codex if '"session_meta"' in first else claude_code
+
+
+def iter_sessions(root=None, runtime="auto", since=None):
+    """Every session under `root`, in path order.
+
+    - `root` - a directory to walk. `None` reads each selected runtime's own default
+      location: `~/.claude/projects` and `~/.codex/sessions`.
+    - `runtime` - `"auto"`, `"claude-code"` or `"codex"`. `"auto"` reads both default
+      locations and decides each file by its first line, so a directory holding both kinds
+      is read correctly.
+    - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
+      last timestamp is older is skipped; one that carries no timestamp at all is kept,
+      because an absent date is not an old one.
+
+    Yields `Session` objects. A file that cannot be read, or holds no session, is skipped
+    silently: a report over a hundred transcripts is not worth losing to one bad file.
+    """
+    if runtime != "auto" and runtime not in RUNTIMES:
+        raise ValueError("unknown runtime %r; one of auto, %s"
+                         % (runtime, ", ".join(sorted(RUNTIMES))))
+    stamp = _since_stamp(since)
+    for path, reader in _paths(root, runtime):
+        try:
+            session = reader.read(path)
+        except Exception:
+            continue
+        if session is None:
+            continue
+        if stamp and session.ended and session.ended[:10] < stamp:
+            continue
+        yield session
+
+
+def _walk(base):
+    """Every `.jsonl` file under `base`, in path order."""
+    found = []
+    for directory, _dirs, files in os.walk(base):
+        for name in files:
+            if name.endswith(".jsonl"):
+                found.append(os.path.join(directory, name))
+    return sorted(found)
+
+
+def _paths(root, runtime):
+    """`(path, reader)` for every transcript to read, deduplicated and ordered."""
+    seen = set()
+    out = []
+    if root is not None:
+        base = os.path.expanduser(root)
+        for path in _walk(base):
+            reader = _detect(path) if runtime == "auto" else RUNTIMES[runtime]
+            if reader is not None and path not in seen:
+                seen.add(path)
+                out.append((path, reader))
+        return out
+    names = [runtime] if runtime != "auto" else sorted(RUNTIMES)
+    for name in names:
+        reader = RUNTIMES[name]
+        for path in reader.transcripts():
+            if path not in seen:
+                seen.add(path)
+                out.append((path, reader))
+    return out

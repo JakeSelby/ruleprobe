@@ -1,0 +1,6 @@
+{"type": "session_meta", "timestamp": "2026-09-21T08:00:00.000Z", "payload": {"id": "rollout-1", "cwd": "/tmp/other-repo", "cli_version": "0.40.0", "model": "gpt-5-codex"}}
+{"type": "turn_context", "timestamp": "2026-09-21T08:00:01.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-09-21T08:00:02.000Z", "payload": {"type": "function_call", "call_id": "call_1", "name": "exec_command", "arguments": "{\"cmd\": \"find .\"}"}}
+{"type": "response_item", "timestamp": "2026-09-21T08:00:03.000Z", "payload": {"type": "function_call_output", "call_id": "call_1", "output": "./a\n./b\n"}}
+{"type": "turn_context", "timestamp": "2026-09-21T08:00:10.000Z", "payload": {"model": "gpt-5.1-codex", "effort": "high"}}
+{"type": "response_item", "timestamp": "2026-09-21T08:00:11.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Listed them."}]}}
