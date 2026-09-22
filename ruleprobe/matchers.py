@@ -252,13 +252,16 @@ def _m_arg(value, where, owner, key):
     contains = _strings(value.get("contains"), where, value, "contains", "arg contains")
     exists = _flag(value.get("exists"), where, value, "exists")
     equals = value.get("equals")
-    equals_set = None if equals is None else (
-        frozenset(equals) if isinstance(equals, list) else frozenset([equals]))
+    # A list, not a set: a transcript field is any JSON shape, and `field: edits` can hand
+    # us a list or a dict. `in` over a set would raise TypeError on one, which used to cost
+    # the whole session its record rather than this one comparison.
+    equals_any = None if equals is None else (
+        list(equals) if isinstance(equals, list) else [equals])
 
     def one(raw):
         if exists is not None and (raw is not None) != exists:
             return False
-        if equals_set is not None and raw not in equals_set:
+        if equals_any is not None and not any(raw == want for want in equals_any):
             return False
         text = text_of(raw)
         if regexes and not any(rx.search(text) for rx in regexes):

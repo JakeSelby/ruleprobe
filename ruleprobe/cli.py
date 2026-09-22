@@ -16,6 +16,7 @@ detectors are run over them in memory, and a table is printed.
 """
 import argparse
 import json
+import os
 import sys
 
 from . import __version__
@@ -102,11 +103,26 @@ def _bundle_and_registry(args, plugins=None):
     return bundle, bundle.registry(base)
 
 
+def _read_errors_line(errors):
+    """What to say about the transcripts that never became a row. A swallowed per-item
+    error is unknown, not absent, so the count is printed even when every row is fine."""
+    if not errors:
+        return ""
+    named = ", ".join("%s (%s)" % (os.path.basename(e["path"]), e["error"])
+                      for e in errors[:3])
+    more = "" if len(errors) <= 3 else ", and %d more" % (len(errors) - 3)
+    return "%d transcript(s) produced no session: %s%s" % (len(errors), named, more)
+
+
 def cmd_report(args, out):
     bundle, registry = _bundle_and_registry(args)
+    read_errors = []
     rows = [measure(session, registry=registry)
             for session in iter_sessions(root=args.root, runtime=args.runtime,
-                                         since=_since(args.since))]
+                                         since=_since(args.since), errors=read_errors)]
+    unread = _read_errors_line(read_errors)
+    if unread:
+        sys.stderr.write(unread + "\n")
     if args.json:
         summary = bundle.summary()
         if summary:

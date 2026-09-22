@@ -23,8 +23,17 @@ class DenominatorTests(unittest.TestCase):
         rows = [row({"a/one": 1}), {"session_id": "legacy"},
                 row({"a/one": 9}, rules_errors=[{"detector": "a/two", "error": "KeyError"}])]
         text = report(rows, registry=REGISTRY)
-        self.assertIn("2 session(s) carry no rule data (1 unmeasured, 1 errored)", text)
-        # The denominator is 1: the errored row's nine hits are not counted either.
+        self.assertIn("1 session(s) carry no rule data", text)
+        self.assertIn("1 detector(s) raised in 1 session(s): a/two (1)", text)
+        # `a/two` raised in one of the two measured rows, so its denominator is 1 and
+        # `a/one` keeps both: an error costs the detector that raised and nobody else.
+        self.assertIn("a/one                                      10         2     2", text)
+        self.assertIn("a/two                                       0         0     1", text)
+
+    def test_an_error_naming_no_detector_still_drops_the_row_whole(self):
+        rows = [row({"a/one": 1}), row({"a/one": 9}, rules_error="boom")]
+        text = report(rows, registry=REGISTRY)
+        self.assertIn("1 session(s) carry an error naming no detector", text)
         self.assertIn("a/one                                       1         1     1", text)
 
     def test_no_measured_row_says_so_rather_than_printing_an_empty_table(self):
@@ -119,7 +128,8 @@ class MeasureTests(unittest.TestCase):
         self.assertEqual(measured["rules"], {})
         self.assertEqual(measured["rules_errors"],
                          [{"detector": "a/boom", "error": "ValueError"}])
-        self.assertIn("1 errored", report([measured], registry=registry))
+        self.assertIn("1 detector(s) raised in 1 session(s): a/boom (1)",
+                      report([measured], registry=registry))
 
 
 if __name__ == "__main__":

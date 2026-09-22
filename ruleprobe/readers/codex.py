@@ -27,7 +27,7 @@ def transcripts(root=None):
     """Every Codex rollout under `root`."""
     base = os.path.expanduser(root or ROOT)
     found = []
-    for directory, _dirs, files in os.walk(base):
+    for directory, _dirs, files in os.walk(base, followlinks=True):
         for name in files:
             if name.endswith(".jsonl"):
                 found.append(os.path.join(directory, name))
