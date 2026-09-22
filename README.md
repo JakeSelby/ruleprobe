@@ -50,6 +50,7 @@ uvx ruleprobe report --by stance               # grouped by the configuration a 
 uvx ruleprobe report --root ./transcripts      # a directory of your own
 uvx ruleprobe report --rules ./docs/rules      # bind detectors to rule files, and name the gaps
 uvx ruleprobe detectors                        # what would run
+uvx ruleprobe corpus                           # how good each detector is, over the labelled corpus
 ```
 
 ## Sixty seconds on a rule of your own
@@ -224,16 +225,86 @@ detector, and the report will not pretend otherwise.
 twelve rules is one entry in the coverage block, not twelve. Splitting rules into files is
 what makes the unmeasured list mean anything.
 
-**Detector validity is unmeasured.** Every detector here was written by reading transcripts
-and arguing about edge cases, not by scoring against a labelled corpus. Nobody has measured
-its precision or its recall, so treat a count as a strong hint and not as a fact; a labelled
-corpus is tracked as
-[agent-harness#455](https://github.com/JakeSelby/agent-harness/issues/455). The detectors
-deliberately under-count: a missed hit is a quieter report, a false hit is a wrong one.
+**Detector validity is measured, and the measurement is small.** Every detector is scored
+against a hand-labelled corpus that ships with the package - see
+[How good are the detectors?](#how-good-are-the-detectors) below - but that corpus is
+synthetic and it is six sessions, so it catches a detector that is wrong about a shape it
+was shown and says nothing about a shape nobody thought of. The detectors deliberately
+under-count: a missed hit is a quieter report, a false hit is a wrong one.
 
 **What a count is not.** A detector fires on a shape in a transcript, not on an intention.
 `whole-file-cat` firing 89 times above does not prove the agent wasted context; it proves it
 read 89 files whole, which is a fact worth having and an argument worth starting.
+
+## How good are the detectors?
+
+A hit rate is a rate of the detector until somebody says what the detector *should* have
+found. So a labelled corpus ships inside the package, at `ruleprobe/corpus/`: six synthetic
+sessions in both transcript shapes, every interesting event labelled by hand with the
+detectors that ought to fire on it, and a deliberate near-miss beside each one - a `cat` of
+a line range, a `find` narrowed by `-name`, a `git push` after the gate ran, a heredoc with
+`rm -rf` in its body as text rather than as a command.
+
+```sh
+ruleprobe corpus
+```
+
+```
+detector                                pos  neg   tp   fp   fn   prec  recall     f1  note
+-------------------------------------------------------------------------------------------
+cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
+cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
+secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
+transcript-hygiene/unfiltered-find        5    6    5    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
+verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
+-------------------------------------------------------------------------------------------
+total                                    32   40   32    0    0   1.00    1.00   1.00  floor 0.90
+```
+
+`pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
+`ruleprobe corpus --floor 0.9` exits non-zero when a scored detector falls under the floor,
+and CI in this repository runs exactly that. It is a gate on the repository, not on a run:
+nothing in `ruleprobe report` reads the floor, and no report of yours will ever fail because
+a detector scored badly. `--json` prints the same numbers as data.
+
+`ruleprobe report --validity` puts each detector's `p=` and `r=` beside its row. It is off
+by default because the report is meant to be read in a minute and an eight-column table is
+not, and because the same two numbers apply to every run - they belong to the detector, not
+to your transcripts.
+
+**Read the number for what it is.** The corpus is synthetic and hand-labelled: no real
+transcript content, no home paths, no personal names. A 1.00 says the detector is right
+about the shapes somebody thought to write down, which is a weaker claim than it looks - the
+false positives a detector meets in the wild are the ones nobody anticipated. It is a floor
+under an obvious mistake and a place to put the next surprising transcript, not a measured
+field accuracy. Growing it is the cheapest contribution this repository takes: add a session
+under `ruleprobe/corpus/sessions/`, label it in `ruleprobe/corpus/labels.yaml`, and the
+table above moves.
+
+**A detector of your own scores itself.** Rather than a corpus, a declarative detector may
+carry an `examples:` block of minimal cases, and `ruleprobe corpus --rules ./docs/rules`
+scores those:
+
+```yaml
+- id: house-style/sudo-install
+  rule: house-style
+  event: tool_use
+  when:
+    command: {starts_with: [sudo, pip]}
+  examples:
+    fire:
+      - bash: sudo pip install ruff
+    skip:
+      - bash: uv pip install ruff
+        note: the tool the rule asks for
+```
+
+`fire` is a list of cases the detector should fire on and `skip` a list it should not. A
+case is `bash: <command>`, or `event: <one event>`, or `events: [...]` for a `session`
+detector, with an optional `note`. Nothing runs them at report time. A detector with no
+examples and no corpus label prints `no examples` rather than a number, and the floor steps
+over it: an unmeasured detector is a gap to see, not a failure to fix.
 
 ## How it is put together
 
@@ -260,6 +331,7 @@ run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
 Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, promote_share=0.30)
+validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall .f1)}
 ```
 
 plus two for the declarative half:
@@ -278,6 +350,7 @@ uv run --python 3.9 python -m unittest discover -s tests   # the floor the packa
 python3 -m compileall ruleprobe
 python3 -m ruleprobe report --root tests/fixtures
 python3 -m ruleprobe report --root docs --rules docs/rules
+python3 -m ruleprobe corpus --floor 0.9                    # the corpus gate CI runs
 ```
 
 ## Origins and neighbours

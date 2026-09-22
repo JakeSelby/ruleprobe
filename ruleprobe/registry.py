@@ -30,16 +30,20 @@ class Detector(object):
     - `gate` - when the detector only applies under some configuration: either a
       `(dimension, allowed_variants_or_None)` pair read against the `stances` dict, or a
       callable taking that dict and returning a bool. `None` is always on.
+    - `examples` - optional, an `Examples(fire, skip)` of minimal cases the detector says
+      it should and should not fire on, scored by `ruleprobe.validity`. A declarative
+      detector fills this from its `examples:` block; `None` means nobody said.
     """
 
-    __slots__ = ("id", "rule", "event", "fn", "gate")
+    __slots__ = ("id", "rule", "event", "fn", "gate", "examples")
 
-    def __init__(self, id, rule, event, fn, gate=None):
+    def __init__(self, id, rule, event, fn, gate=None, examples=None):
         self.id = id
         self.rule = rule
         self.event = event
         self.fn = fn
         self.gate = gate
+        self.examples = examples
 
     def enabled(self, stances):
         if self.gate is None:

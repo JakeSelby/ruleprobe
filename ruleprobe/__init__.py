@@ -13,6 +13,9 @@ The engine is `run(events, ...)` over the event schema in `ruleprobe.events`; a 
 one runtime's transcript into that schema and nothing else in the package knows which
 runtime wrote what.
 
+`measure(session)` counts what a detector found; `validity()` is its counterpart over the
+labelled corpus that ships in `ruleprobe/corpus/`, and says how much that count is worth.
+
 A detector may be written as data instead of as Python: `ruleprobe.matchers` compiles one
 entry into the same `Detector`, and `ruleprobe.rules` finds the files they live in.
 """
@@ -24,13 +27,17 @@ from .registry import DEFAULT, Detector, Registry, from_spec, register_compiler,
 from .report import RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, measure, report
 from .rules import Bundle, Finding, RuleEntry, load_bundle
 from .shell import analyse, pipelines
+from .validity import (CorpusError, DEFAULT_FLOOR, Score, load_corpus,
+                       score_corpus, score_examples, validity,
+                       validity_table)
 
 __version__ = "0.1.0.dev0"
 
 __all__ = [
-    "Bundle", "DeclarativeError", "Detector", "Finding", "Hit", "Registry", "RuleEntry",
-    "Session", "DEFAULT",
+    "Bundle", "CorpusError", "DeclarativeError", "Detector", "Finding", "Hit", "Registry",
+    "RuleEntry", "Score", "Session", "DEFAULT", "DEFAULT_FLOOR",
     "analyse", "compile_detector", "compile_matcher", "counts", "from_spec",
-    "iter_sessions", "load_bundle", "measure", "pipelines", "register_compiler", "report",
-    "run", "RULE_MIN_SESSIONS", "RULE_PROMOTE_SHARE", "__version__",
+    "iter_sessions", "load_bundle", "load_corpus", "measure", "pipelines",
+    "register_compiler", "report", "run", "score_corpus", "score_examples", "validity",
+    "validity_table", "RULE_MIN_SESSIONS", "RULE_PROMOTE_SHARE", "__version__",
 ]

@@ -37,8 +37,27 @@ All notable changes to this project are documented here. The format follows
   asserting they produce identical hits to the Python reference over the corpus and the
   fixture transcripts.
 - A worked example that runs from a clone: `docs/rules/` and `docs/example-session.jsonl`.
+- A labelled corpus, shipped as package data at `ruleprobe/corpus/`: six synthetic sessions
+  in both transcript shapes, every interesting event labelled by hand in `labels.yaml` with
+  the detectors that should fire on it, and a deliberate near-miss beside each - a `cat` of
+  a range, a filtered `find`, a push after the gate ran, a heredoc with `rm -rf` in its body
+  as text. Every shipped detector carries at least five positives and five negatives.
+- `ruleprobe corpus`, and `ruleprobe.validity()` behind it: per-detector precision, recall
+  and F1 with their counts, a total, `--json`, `--corpus DIR` for a corpus of your own, and
+  a non-zero exit under `--floor 0.9`. The floor is this repository's CI gate, not a runtime
+  failure: nothing in `ruleprobe report` reads it.
+- `ruleprobe report --validity`: each detector's corpus precision and recall beside its row.
+  Off by default, because the two numbers belong to the detector rather than to the run.
+- An optional `examples:` block on a declarative detector - `fire:` and `skip:` lists of
+  minimal cases, each `bash:`, `event:` or `events:` - so a detector of your own can be
+  scored without a corpus. A detector with neither says `no examples` rather than a number,
+  and the floor steps over it.
+- `.github/workflows/ci.yml`: the unit tests on 3.9 and the newest 3.x, `compileall`, and
+  `ruleprobe corpus --floor 0.9`.
 
 ### Changed
 
 - A malformed detector entry is a finding with a file, a line and a reason, printed under the
   report; the entry is skipped and every other detector still runs.
+- The README no longer says detector validity is unmeasured; it prints the corpus table
+  instead, and a test asserts the README quotes it byte for byte.

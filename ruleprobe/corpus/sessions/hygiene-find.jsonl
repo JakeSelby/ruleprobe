@@ -1,0 +1,18 @@
+{"type": "session_meta", "timestamp": "2026-01-06T09:00:00.000Z", "payload": {"id": "corpus-hygiene-find", "cwd": "/workspace/example-repo", "cli_version": "0.40.0", "model": "gpt-5-codex"}}
+{"type": "turn_context", "timestamp": "2026-01-06T09:00:01.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:00:02.000Z", "payload": {"type": "function_call", "call_id": "tu-f1", "name": "exec_command", "arguments": "{\"cmd\": \"find .\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:00:03.000Z", "payload": {"type": "function_call_output", "call_id": "tu-f1", "output": "./src\n./docs\n"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:00:04.000Z", "payload": {"type": "function_call", "call_id": "tu-f2", "name": "exec_command", "arguments": "{\"cmd\": \"find src\"}"}}
+{"type": "turn_context", "timestamp": "2026-01-06T09:01:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:01:02.000Z", "payload": {"type": "function_call", "call_id": "tu-f3", "name": "exec_command", "arguments": "{\"cmd\": \"find /tmp/build-output\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:01:04.000Z", "payload": {"type": "function_call", "call_id": "tu-g1", "name": "exec_command", "arguments": "{\"cmd\": \"find . -name '*.py'\"}"}}
+{"type": "turn_context", "timestamp": "2026-01-06T09:02:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:02:02.000Z", "payload": {"type": "function_call", "call_id": "tu-f4", "name": "exec_command", "arguments": "{\"cmd\": \"find docs -print\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:02:04.000Z", "payload": {"type": "function_call", "call_id": "tu-g2", "name": "exec_command", "arguments": "{\"cmd\": \"find . -type f\"}"}}
+{"type": "turn_context", "timestamp": "2026-01-06T09:03:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:02.000Z", "payload": {"type": "function_call", "call_id": "tu-f5", "name": "exec_command", "arguments": "{\"cmd\": \"find vendor\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:04.000Z", "payload": {"type": "function_call", "call_id": "tu-g3", "name": "exec_command", "arguments": "{\"cmd\": \"find . -maxdepth 2\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:06.000Z", "payload": {"type": "function_call", "call_id": "tu-g4", "name": "exec_command", "arguments": "{\"cmd\": \"find . | head -40\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:08.000Z", "payload": {"type": "function_call", "call_id": "tu-g5", "name": "exec_command", "arguments": "{\"cmd\": \"find . > /tmp/all-paths.txt\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:10.000Z", "payload": {"type": "function_call", "call_id": "tu-g6", "name": "exec_command", "arguments": "{\"cmd\": \"find . -newer Makefile\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:03:20.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Five unfiltered walks, six narrowed ones."}]}}
