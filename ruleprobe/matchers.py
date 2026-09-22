@@ -224,7 +224,7 @@ def _path_glob(pattern):
     string. `*` and `?` do not cross a `/` - `src/*.py` is one directory's files, and `**`
     is how you ask for any depth - and a pattern that does not start at the root matches
     any suffix of the path at a component boundary, because `file_path` in a transcript is
-    absolute and nobody writes `/Users/.../src/*.py` in a detector.
+    absolute and nobody writes `/home/you/work/repo/src/*.py` in a detector.
     """
     compiled = _PATH_GLOBS.get(pattern)
     if compiled is not None:

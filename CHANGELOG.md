@@ -64,7 +64,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-Twenty-four findings of the pre-release review, [#2](https://github.com/JakeSelby/ruleprobe/issues/2),
+Every finding of the pre-release review, [#2](https://github.com/JakeSelby/ruleprobe/issues/2),
 each with the reviewer's own input as a regression test in `tests/test_findings.py`.
 
 - **The shell parse.** `cat <<\EOF` is a heredoc header, so its body is no longer parsed as
