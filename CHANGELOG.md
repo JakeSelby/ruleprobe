@@ -61,3 +61,50 @@ All notable changes to this project are documented here. The format follows
   report; the entry is skipped and every other detector still runs.
 - The README no longer says detector validity is unmeasured; it prints the corpus table
   instead, and a test asserts the README quotes it byte for byte.
+
+### Fixed
+
+Twenty-four findings of the pre-release review, [#2](https://github.com/JakeSelby/ruleprobe/issues/2),
+each with the reviewer's own input as a regression test in `tests/test_findings.py`.
+
+- **The shell parse.** `cat <<\EOF` is a heredoc header, so its body is no longer parsed as
+  commands and no longer yields a false `unfiltered-find` hit; a heredoc terminator must be
+  the delimiter alone, as bash has it, and only `<<-` may have it indented; a command that
+  does not tokenize is `unparsed` rather than invisible to every matcher.
+- **The denominator.** A detector that raises leaves the denominator of that detector only,
+  instead of taking the whole row out of every other detector's evidence, and a row is never
+  counted twice in the preamble.
+- **Errors are counted.** `iter_sessions(errors=[...])` collects every transcript that
+  raised or held no session, and `ruleprobe report` prints the count. The directory walks
+  follow symlinks.
+- **Matchers.** `arg: {equals: ...}` no longer raises on a list-valued field; `absent` over
+  a session with no events is not a hit; `command: {contains: ...}` is a substring;
+  a list of `command: {regex: ...}` patterns is alternatives; `order: {within: N}` does not
+  spend its budget on `tool_result` events; `path_glob` is matched as a path, with `*`
+  stopping at a `/`, `**` crossing one, and a relative pattern matching an absolute
+  `file_path`.
+- **The parser.** An escaped quote inside a double-quoted string no longer truncates it at a
+  `#`; `[a: b]` is a one-key mapping and not a tuple; `yes`, `no`, `on`, `off` and a
+  leading-zero number are refused with a line and a reason rather than read one way here and
+  another by YAML.
+- **The readers.** A runtime is chosen by parsing the first line, not by searching it for
+  `"session_meta"`; a streamed partial text block is one message that grows, not two; a
+  Codex user message is a `user_prompt` and `final` is derived there as it is on Claude Code,
+  so a detector means the same thing on both.
+
+### Changed
+
+- `iter_sessions` takes an `errors` list; `measure`, `run`, `report`, `Registry` and
+  `iter_sessions` are otherwise unchanged in signature.
+- `report_data(rows, ...)` is new and is what `report()` renders and `ruleprobe report
+  --json` prints, so the table and the JSON cannot disagree about a denominator, a fold or a
+  note. `--json` now prints that object with the rows under `rows`, and exits non-zero on an
+  empty root as the table does.
+- `ruleprobe report --stance dimension=variant`, repeatable: a `gate:` block was unreachable
+  from the command line, so a gated detector never fired and `--by stance` could only print
+  `(no stances)`. `ruleprobe detectors` names the stance each gate is waiting for.
+- `--since 2024` is refused rather than silently read as 2024 days back.
+- `Registry.rename` removes the detector it renamed.
+- A `user_prompt` event carries the prompt's `text` on both runtimes.
+- `README.md` and `ruleprobe/detectors/common.yaml` no longer claim the shipped detector
+  file uses every matcher; they name the ten it uses and the four it does not.

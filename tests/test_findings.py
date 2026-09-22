@@ -12,12 +12,13 @@ import tempfile
 import unittest
 
 from corpus import bash, tool_use
-from ruleprobe import Detector, Registry, iter_sessions, report, run
+from ruleprobe import Detector, Registry, iter_sessions, measure, report, run
 from ruleprobe.cli import _since, main
 from ruleprobe.declarative import DeclarativeError, parse
 from ruleprobe.matchers import compile_detector
+from ruleprobe.readers import claude_code, codex
 from ruleprobe.report import report_data
-from ruleprobe.shell import Parsed, pipelines, strip_heredocs
+from ruleprobe.shell import MAX_COMMAND, Parsed, pipelines, strip_heredocs
 
 
 def parsed(command):
@@ -265,6 +266,139 @@ class GatingFindingTests(unittest.TestCase):
             self.run_cli("report", "--root", self.FIXTURES, "--since", "2024")
         self.assertEqual(_since("30"), 30)
         self.assertEqual(_since("2024-01-01"), "2024-01-01")
+
+
+def write_session(directory, name, lines):
+    path = os.path.join(directory, name)
+    with open(path, "w", encoding="utf-8") as handle:
+        handle.write("\n".join(json.dumps(line) for line in lines) + "\n")
+    return path
+
+
+class ReaderFindingTests(unittest.TestCase):
+    def test_finding_17_a_streamed_partial_block_is_one_message_not_two(self):
+        lines = [
+            {"type": "user", "sessionId": "s", "cwd": "/w/repo",
+             "message": {"role": "user", "content": "go"}},
+            {"type": "assistant", "sessionId": "s",
+             "message": {"id": "msg_1", "model": "m", "content": [{"type": "text",
+                                                                   "text": "I will "}]}},
+            {"type": "assistant", "sessionId": "s",
+             "message": {"id": "msg_1", "model": "m",
+                         "content": [{"type": "text", "text": "I will run tests."}]}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            session = claude_code.read(write_session(directory, "s.jsonl", lines))
+        texts = [e for e in session.events if e["kind"] == "assistant_text"]
+        self.assertEqual([e["text"] for e in texts], ["I will run tests."])
+
+    def test_finding_17_the_user_prompt_carries_its_text_on_claude_code(self):
+        lines = [{"type": "user", "sessionId": "s", "cwd": "/w/repo",
+                  "message": {"role": "user", "content": "run the tests"}}]
+        with tempfile.TemporaryDirectory() as directory:
+            session = claude_code.read(write_session(directory, "s.jsonl", lines))
+        prompts = [e for e in session.events if e["kind"] == "user_prompt"]
+        self.assertEqual([e["text"] for e in prompts], ["run the tests"])
+
+    def test_finding_18_a_codex_user_message_is_a_user_prompt(self):
+        lines = [
+            {"type": "session_meta", "payload": {"id": "r-1", "cwd": "/w/repo"}},
+            {"type": "turn_context", "payload": {"model": "gpt-5-codex"}},
+            {"type": "response_item",
+             "payload": {"type": "message", "role": "user",
+                         "content": [{"type": "input_text", "text": "run the tests"}]}},
+            {"type": "response_item",
+             "payload": {"type": "message", "role": "assistant",
+                         "content": [{"type": "output_text", "text": "Ran them."}]}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            session = codex.read(write_session(directory, "r.jsonl", lines))
+        prompts = [e for e in session.events if e["kind"] == "user_prompt"]
+        self.assertEqual([e["text"] for e in prompts], ["run the tests"])
+        spec = {"event": "assistant_text", "when": {"message": {"role": "user"}}}
+        self.assertTrue(fires(dict(spec, event="session"), session.events))
+
+    def test_finding_18_the_final_message_is_derived_and_not_read_from_phase(self):
+        lines = [
+            {"type": "session_meta", "payload": {"id": "r-1", "cwd": "/w/repo"}},
+            {"type": "turn_context", "payload": {"model": "gpt-5-codex"}},
+            {"type": "response_item",
+             "payload": {"type": "message", "role": "assistant",
+                         "content": [{"type": "output_text", "text": "Working."}]}},
+            {"type": "response_item",
+             "payload": {"type": "message", "role": "user",
+                         "content": [{"type": "input_text", "text": "and now?"}]}},
+            {"type": "response_item",
+             "payload": {"type": "message", "role": "assistant",
+                         "content": [{"type": "output_text", "text": "Done."}]}},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            session = codex.read(write_session(directory, "r.jsonl", lines))
+        texts = [e for e in session.events if e["kind"] == "assistant_text"]
+        self.assertEqual([(e["text"], e["final"]) for e in texts],
+                         [("Working.", True), ("Done.", True)])
+
+
+class ClaimFindingTests(unittest.TestCase):
+    """Finding 23: two shipped files claimed the corpus file used every matcher. Where the
+    claim was false, the claim is what changed, so these assert the claim is gone."""
+
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def read(self, *parts):
+        with open(os.path.join(self.ROOT, *parts), encoding="utf-8") as handle:
+            return handle.read()
+
+    def test_finding_23_neither_file_claims_every_matcher_is_used(self):
+        self.assertNotIn("every matcher the format has is",
+                         self.read("ruleprobe", "detectors", "common.yaml"))
+        self.assertNotIn("uses all\nbut four", self.read("README.md"))
+        self.assertNotIn("uses all but four", self.read("README.md"))
+
+    def test_finding_23_the_matchers_the_shipped_six_leave_out_are_named(self):
+        readme = self.read("README.md")
+        for name in ("`message`, `order`, `absent` and `not`",):
+            self.assertIn(name, readme)
+
+
+class BlindSpotTests(unittest.TestCase):
+    """Finding 25: the cases the reviewer found no test for and that no other test here
+    covers - a truncated JSONL line, a command past the size cap, and an errored row's
+    effect on a rate through `measure()` rather than on a hand-written row."""
+
+    def test_finding_25_a_garbage_line_does_not_cost_the_rest_of_the_transcript(self):
+        lines = ['{"type": "user", "sessionId": "s", "cwd": "/w/repo", '
+                 '"message": {"role": "user", "content": "go"}}',
+                 "not json at all",
+                 '{"type": "assistant", "sessionId": "s", "message": {"id": "m", '
+                 '"model": "x", "content": [{"type": "text", "text": "Done."}]}}',
+                 '{"type": "assistant", "sessionId": "s", "mess']
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "s.jsonl")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("\n".join(lines) + "\n")
+            session = claude_code.read(path)
+        self.assertEqual([e["kind"] for e in session.events],
+                         ["user_prompt", "assistant_text"])
+
+    def test_finding_25_a_command_past_the_size_cap_is_unparsed_and_not_scanned(self):
+        p = parsed("echo " + "x" * (MAX_COMMAND + 1))
+        self.assertTrue(p.skipped)
+        self.assertEqual(p.pipelines, [])
+
+    def test_finding_25_an_errored_detector_leaves_the_rate_it_could_not_measure(self):
+        def boom(events, ctx):
+            raise ValueError("no")
+
+        registry = Registry([Detector("a/boom", "a", "session", boom),
+                             Detector("a/fine", "a", "session", lambda e, c: [(1, None)])])
+        session = list(iter_sessions(root=GatingFindingTests.FIXTURES))[0]
+        measured = measure(session, registry=registry)
+        self.assertEqual(measured["rules"], {"a/fine": 1})
+        data = report_data([measured], registry=registry)
+        by_id = dict((d["detector"], d) for d in data["detectors"])
+        self.assertEqual(by_id["a/boom"]["of"], 0)
+        self.assertEqual(by_id["a/fine"]["of"], 1)
 
 
 if __name__ == "__main__":

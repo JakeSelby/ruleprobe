@@ -9,7 +9,8 @@ Two shapes cost more care than they look:
 
 - One API response is written as several lines repeating the same message id, each carrying
   one content block, and the early lines of a response carry partial text. A block seen
-  twice is one block, not two events.
+  twice is one block, not two events: the later, longer text replaces the partial in the
+  event already emitted.
 - A subagent's turns may appear in the parent's file as `isSidechain` lines (older Claude
   Code) or in a file of their own (newer). Sidechain lines are that agent's work, not this
   session's, so they make no event here and the subagent's own file is read as its own
@@ -18,7 +19,7 @@ Two shapes cost more care than they look:
 import json
 import os
 
-from ..events import Session, result_text
+from ..events import Session, result_text, text_of
 
 #: Where Claude Code keeps its transcripts.
 ROOT = os.path.join("~", ".claude", "projects")
@@ -47,6 +48,7 @@ def read(path):
     started = ended = ""
     tool_names = {}
     blocks_seen = set()
+    text_blocks = {}
     turn = 0
     pending_final = None
     try:
@@ -94,7 +96,8 @@ def read(path):
                 if pending_final is not None:
                     pending_final["final"] = True
                     pending_final = None
-                events.append({"kind": "user_prompt", "turn": turn})
+                events.append({"kind": "user_prompt", "turn": turn,
+                               "text": _prompt_text(content)})
                 continue
             if kind != "assistant" or sidechain:
                 continue
@@ -104,13 +107,20 @@ def read(path):
                     continue
                 if block.get("type") == "text":
                     text = block.get("text") or ""
-                    key = ("text", mid, block.get("apiBlockIndex", index), text)
-                    if key in blocks_seen:
+                    key = ("text", mid, block.get("apiBlockIndex", index))
+                    # The early lines of a response carry a partial of the same block, so
+                    # the key holds no text: a block seen twice is one event that grows,
+                    # and not two messages for a `message` detector to count.
+                    if mid and key in text_blocks:
+                        seen_block = text_blocks[key]
+                        if len(text) > len(seen_block["text"]):
+                            seen_block["text"] = text
                         continue
-                    blocks_seen.add(key)
                     pending_final = {"kind": "assistant_text", "turn": turn, "text": text,
                                      "final": False, "model": model or ""}
                     events.append(pending_final)
+                    if mid:
+                        text_blocks[key] = pending_final
                 elif block.get("type") == "tool_use":
                     use_id = block.get("id") or ""
                     key = ("tool_use", mid, block.get("apiBlockIndex", index), use_id)
@@ -129,3 +139,14 @@ def read(path):
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="claude-code", events=events, path=path,
                    started=started, ended=ended)
+
+
+def _prompt_text(content):
+    """A user prompt's text, whether the line wrote a string or a list of blocks. A
+    `message: {role: user}` detector reads this, and a Codex rollout carries the same."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(text_of(b.get("text")) for b in content
+                          if isinstance(b, dict) and b.get("type") == "text")
+    return ""

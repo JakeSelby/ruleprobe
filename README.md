@@ -171,8 +171,11 @@ The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `pa
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`), `git` (`subcommand`,
 `args_any`, `args_none`, `token_prefix`), `env` (`name`, `command`), `text` (`source`,
 `regex`, `contains`), `message` (`role`, `final`, `regex`, `contains`), `kind`, and the three
-session matchers `order`, `absent` and `change`. `ruleprobe/detectors/common.yaml` uses all
-but four of them, and `ruleprobe/matchers.py` documents each in one line.
+session matchers `order`, `absent` and `change`. `ruleprobe/matchers.py` documents each in
+one line. The shipped six in `ruleprobe/detectors/common.yaml` use ten of them - `tool`,
+`arg`, `command`, `git`, `env`, `text`, `kind`, `change`, `any` and `all` - because that is
+what those six observables need; `message`, `order`, `absent` and `not` are exercised by the
+examples on this page and in `tests/`, not by a shipped detector.
 
 Three rules about the format worth knowing before you hit them. Every key inside one
 `command` block is read against the *same* pipeline segment, so two constraints on one

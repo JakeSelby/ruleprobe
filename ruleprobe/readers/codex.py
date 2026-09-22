@@ -11,11 +11,15 @@ Two names are translated so a detector sees one vocabulary across runtimes: Code
 
 A thread spawned as a subagent inherits its parent's history and carries the parent's
 `session_meta` further down the file. Only the first one is this rollout's own.
+
+A user message is a `user_prompt`, and the last assistant message before one - or before the
+end - is the final one. Both are derived the way the Claude Code reader derives them, rather
+than read from `payload.phase`, so a detector means the same thing on either runtime.
 """
 import json
 import os
 
-from ..events import Session, result_text
+from ..events import Session, result_text, text_of
 
 #: Where Codex keeps its rollouts.
 ROOT = os.path.join("~", ".codex", "sessions")
@@ -42,6 +46,7 @@ def read(path):
     started = ended = ""
     tool_names = {}
     turn = 0
+    pending_final = None
     try:
         handle = open(path, encoding="utf-8", errors="replace")
     except OSError:
@@ -94,17 +99,37 @@ def read(path):
                                    "tool_use_id": call_id, "tool_name": name,
                                    "text": result_text(payload.get("output"), name)})
                 elif what == "message" and payload.get("role") == "assistant":
-                    text = "\n".join(x.get("text", "") for x in payload.get("content", [])
-                                     if isinstance(x, dict))
-                    events.append({"kind": "assistant_text", "turn": turn, "text": text,
-                                   "final": payload.get("phase") == "final_answer",
-                                   "model": model_now or _model(meta)})
+                    pending_final = {"kind": "assistant_text", "turn": turn,
+                                     "text": _text(payload), "final": False,
+                                     "model": model_now or _model(meta)}
+                    events.append(pending_final)
+                elif what == "message" and payload.get("role") == "user":
+                    # Parity with the Claude Code reader, both ways: a user message is a
+                    # `user_prompt` event, so `message: {role: user}` can fire on a rollout
+                    # at all, and the assistant text before it is the final one, derived
+                    # rather than taken from `phase`, which only one runtime writes.
+                    if pending_final is not None:
+                        pending_final["final"] = True
+                        pending_final = None
+                    events.append({"kind": "user_prompt", "turn": turn,
+                                   "text": _text(payload)})
+    if pending_final is not None:
+        pending_final["final"] = True
     if not session_id and not events:
         return None
     return Session(id=session_id or os.path.basename(path)[:-6],
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="codex", events=events, path=path,
                    started=started, ended=ended)
+
+
+def _text(payload):
+    """A message's text, from the content blocks Codex writes it in."""
+    content = payload.get("content")
+    if isinstance(content, str):
+        return content
+    return "\n".join(text_of(x.get("text")) for x in content or []
+                      if isinstance(x, dict))
 
 
 def _model(meta):
