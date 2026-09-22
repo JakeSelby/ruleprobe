@@ -2,7 +2,8 @@
 """`ruleprobe` on the command line.
 
     ruleprobe report [--by rule|repo|stance] [--since DATE] [--root DIR] [--runtime NAME]
-                     [--rules DIR] [--detectors FILE] [--no-config] [--validity]
+                     [--stance DIM=VARIANT] [--rules DIR] [--detectors FILE] [--no-config]
+                     [--validity] [--json]
     ruleprobe detectors [--rules DIR] [--detectors FILE] [--no-config]
     ruleprobe corpus [--floor F] [--json] [--corpus DIR] [--rules DIR] [--detectors FILE]
 
@@ -16,12 +17,15 @@ detectors are run over them in memory, and a table is printed.
 """
 import argparse
 import json
+import os
+import re
 import sys
 
 from . import __version__
 from .readers import RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry
-from .report import BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, measure, report
+from .report import (BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, measure, report,
+                     report_data)
 from .rules import load_bundle
 from .validity import (CorpusError, DEFAULT_FLOOR, below_floor, scores_as_dict, validity,
                        validity_table)
@@ -37,8 +41,13 @@ def build_parser():
     run_cmd = sub.add_parser("report", help="count detector hits over your transcripts")
     run_cmd.add_argument("--by", choices=list(BY), default="rule",
                          help="group by detector (default), by repository, or by stance")
-    run_cmd.add_argument("--since", default=None, metavar="DATE",
+    run_cmd.add_argument("--since", default=None, metavar="DATE", type=_since,
                          help="a YYYY-MM-DD date, or a number of days back")
+    run_cmd.add_argument("--stance", action="append", default=None, type=_stance,
+                         metavar="DIM=VARIANT",
+                         help="the configuration these sessions ran under, e.g. "
+                              "--stance commits=conventional; repeatable, read by gated "
+                              "detectors and by --by stance")
     run_cmd.add_argument("--root", default=None, metavar="DIR",
                          help="a directory of transcripts to read instead of the defaults")
     run_cmd.add_argument("--runtime", choices=["auto"] + sorted(RUNTIMES), default="auto",
@@ -50,7 +59,8 @@ def build_parser():
     run_cmd.add_argument("--plugins", action="store_true",
                          help="also load detectors installed packages advertise")
     run_cmd.add_argument("--json", action="store_true",
-                         help="print the measured rows as JSON instead of a table")
+                         help="print the report as JSON - the same denominators, folds "
+                              "and notes as the table, plus the rows")
     run_cmd.add_argument("--validity", action="store_true",
                          help="add each detector's precision and recall over the corpus")
 
@@ -85,10 +95,51 @@ def _declarative_options(parser):
 
 
 def _since(value):
+    """`--since` as a number of days or a `YYYY-MM-DD` string.
+
+    A bare four-digit number is refused rather than read as a number of days: `--since 2024`
+    is somebody asking for a year, and answering it with 2024 days back is a window five and
+    a half years wide that nobody was told about.
+    """
     if value is None:
         return None
     text = str(value).strip()
-    return int(text) if text.isdigit() and len(text) <= 4 else text
+    if text.isdigit():
+        if len(text) > 3:
+            raise argparse.ArgumentTypeError(
+                "%r is neither a date nor a plausible number of days back; write a date as "
+                "YYYY-MM-DD, or a number of days under 1000" % text)
+        return int(text)
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", text):
+        raise argparse.ArgumentTypeError(
+            "%r is not a date; write YYYY-MM-DD, or a number of days back" % text)
+    return text
+
+
+def _stance(value):
+    """One `--stance dimension=variant` pair. A gated detector reads these, and `--by
+    stance` groups on them; without one, a `gate:` block is a detector that never fires."""
+    text = str(value)
+    dimension, _sep, variant = text.partition("=")
+    if not _sep or not dimension.strip() or not variant.strip():
+        raise argparse.ArgumentTypeError(
+            "a stance is dimension=variant, e.g. commits=conventional, not %r" % text)
+    return (dimension.strip(), variant.strip())
+
+
+def _gate_note(detector):
+    """What `ruleprobe detectors` says about a gate. It names the dimension, because a
+    detector listed as "gated" with nothing to gate on is one that never fires and never
+    says why: `--stance <dimension>=<variant>` is the thing the reader has to supply."""
+    gate = detector.gate
+    if gate is None:
+        return ""
+    if callable(gate):
+        return "gated (a callable)"
+    dimension, variants = gate
+    if not variants:
+        return "gated on --stance %s=<variant>" % dimension
+    return "gated on --stance %s=%s" % (dimension, "|".join(variants))
 
 
 def _bundle_and_registry(args, plugins=None):
@@ -102,20 +153,27 @@ def _bundle_and_registry(args, plugins=None):
     return bundle, bundle.registry(base)
 
 
+def _read_errors_line(errors):
+    """What to say about the transcripts that never became a row. A swallowed per-item
+    error is unknown, not absent, so the count is printed even when every row is fine."""
+    if not errors:
+        return ""
+    named = ", ".join("%s (%s)" % (os.path.basename(e["path"]), e["error"])
+                      for e in errors[:3])
+    more = "" if len(errors) <= 3 else ", and %d more" % (len(errors) - 3)
+    return "%d transcript(s) produced no session: %s%s" % (len(errors), named, more)
+
+
 def cmd_report(args, out):
     bundle, registry = _bundle_and_registry(args)
-    rows = [measure(session, registry=registry)
+    stances = dict(args.stance or [])
+    read_errors = []
+    rows = [measure(session, stances=stances, registry=registry)
             for session in iter_sessions(root=args.root, runtime=args.runtime,
-                                         since=_since(args.since))]
-    if args.json:
-        summary = bundle.summary()
-        if summary:
-            sys.stderr.write(summary + "\n")
-        out.write(json.dumps(rows, indent=2, sort_keys=True) + "\n")
-        return 0
-    if not rows:
-        out.write("no transcripts found; pass --root to point at a directory of them\n")
-        return 1
+                                         since=args.since, errors=read_errors)]
+    unread = _read_errors_line(read_errors)
+    if unread:
+        sys.stderr.write(unread + "\n")
     scores = None
     if args.validity:
         try:
@@ -123,6 +181,23 @@ def cmd_report(args, out):
         except CorpusError as exc:
             sys.stderr.write("corpus: %s\n" % exc)
             return 2
+    if args.json:
+        # The same numbers the table prints, through the same function: a denominator, a
+        # rename fold or a min_sessions note that the two disagreed about would make the
+        # machine-readable half a second, quieter instrument.
+        data = report_data(rows, by=args.by, min_sessions=args.min_sessions,
+                           promote_share=args.promote_share, registry=registry,
+                           validity=scores)
+        data["rows"] = rows
+        data["read_errors"] = read_errors
+        summary = bundle.summary()
+        if summary:
+            sys.stderr.write(summary + "\n")
+        out.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        return 0 if rows else 1
+    if not rows:
+        out.write("no transcripts found; pass --root to point at a directory of them\n")
+        return 1
     out.write(report(rows, by=args.by, min_sessions=args.min_sessions,
                      promote_share=args.promote_share, registry=registry,
                      validity=scores) + "\n")
@@ -164,8 +239,7 @@ def cmd_corpus(args, out):
 def cmd_detectors(args, out):
     bundle, registry = _bundle_and_registry(args, plugins=True)
     for detector in registry:
-        out.write("%-40s%-20s%s\n" % (detector.id, detector.event,
-                                      "gated" if detector.gate is not None else ""))
+        out.write("%-40s%-20s%s\n" % (detector.id, detector.event, _gate_note(detector)))
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")

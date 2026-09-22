@@ -2,9 +2,11 @@
 #
 # ruleprobe/detectors/common.py is the reference implementation; this file is the same six
 # observables written as data, and tests/test_equivalence.py asserts the two produce
-# identical hits over the corpus. It is here to be read: every matcher the format has is
-# used at least once below, and a detector of your own starts by copying one of these into
-# .ruleprobe/detectors.yaml.
+# identical hits over the corpus. It is here to be read: between them the six use `tool`,
+# `arg`, `command`, `git`, `env`, `text`, `kind`, `change`, `any` and `all`, and a detector
+# of your own starts by copying one of these into .ruleprobe/detectors.yaml. The matchers
+# no shipped detector needs - `message`, `order`, `absent`, `not`, and the keys listed with
+# them in ruleprobe/matchers.py - are worked through in the README instead.
 #
 # Nothing loads this file automatically. The Python versions are what `ruleprobe report`
 # runs; these are the worked examples and the equivalence fixture.

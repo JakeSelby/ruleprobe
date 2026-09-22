@@ -15,4 +15,7 @@
 {"type": "response_item", "timestamp": "2026-01-06T09:03:06.000Z", "payload": {"type": "function_call", "call_id": "tu-g4", "name": "exec_command", "arguments": "{\"cmd\": \"find . | head -40\"}"}}
 {"type": "response_item", "timestamp": "2026-01-06T09:03:08.000Z", "payload": {"type": "function_call", "call_id": "tu-g5", "name": "exec_command", "arguments": "{\"cmd\": \"find . > /tmp/all-paths.txt\"}"}}
 {"type": "response_item", "timestamp": "2026-01-06T09:03:10.000Z", "payload": {"type": "function_call", "call_id": "tu-g6", "name": "exec_command", "arguments": "{\"cmd\": \"find . -newer Makefile\"}"}}
-{"type": "response_item", "timestamp": "2026-01-06T09:03:20.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Five unfiltered walks, six narrowed ones."}]}}
+{"type": "turn_context", "timestamp": "2026-01-06T09:04:00.000Z", "payload": {"model": "gpt-5-codex", "effort": "medium"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:04:02.000Z", "payload": {"type": "function_call", "call_id": "tu-g7", "name": "exec_command", "arguments": "{\"cmd\": \"cat <<\\\\EOF > notes.md\\nfind /\\nEOF\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:04:04.000Z", "payload": {"type": "function_call", "call_id": "tu-g8", "name": "exec_command", "arguments": "{\"cmd\": \"cat <<EOF > notes.md\\n  EOF\\nfind /\\nEOF\"}"}}
+{"type": "response_item", "timestamp": "2026-01-06T09:04:20.000Z", "payload": {"type": "message", "role": "assistant", "phase": "final_answer", "content": [{"type": "output_text", "text": "Five unfiltered walks, eight narrowed ones."}]}}

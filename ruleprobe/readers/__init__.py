@@ -5,6 +5,7 @@ A reader is a module with `ROOT`, `transcripts(root)` and `read(path)`. Adding a
 adding one of those and a line in `RUNTIMES`.
 """
 import datetime
+import json
 import os
 
 from . import claude_code, codex
@@ -32,17 +33,28 @@ def _since_stamp(since):
 
 
 def _detect(path):
-    """The reader for `path`, from its first line. A Codex rollout opens with
-    `session_meta`; a Claude Code transcript does not."""
+    """The reader for `path`, from its first line.
+
+    A Codex rollout opens with a line whose `type` is `session_meta`; a Claude Code
+    transcript does not. The line is parsed rather than searched, because a user prompt that
+    quotes `"session_meta"` - a transcript of somebody working on this package, say - would
+    otherwise be handed to the Codex reader and silently read as nothing.
+    """
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
             first = handle.readline()
     except OSError:
         return None
-    return codex if '"session_meta"' in first else claude_code
+    try:
+        entry = json.loads(first)
+    except ValueError:
+        entry = None
+    if isinstance(entry, dict) and entry.get("type") == "session_meta":
+        return codex
+    return claude_code
 
 
-def iter_sessions(root=None, runtime="auto", since=None):
+def iter_sessions(root=None, runtime="auto", since=None, errors=None):
     """Every session under `root`, in path order.
 
     - `root` - a directory to walk. `None` reads each selected runtime's own default
@@ -53,9 +65,14 @@ def iter_sessions(root=None, runtime="auto", since=None):
     - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.
+    - `errors` - a list, when you pass one, collecting `{"path": ..., "error": ...}` for
+      every transcript a reader could not read and every one that held no session.
 
-    Yields `Session` objects. A file that cannot be read, or holds no session, is skipped
-    silently: a report over a hundred transcripts is not worth losing to one bad file.
+    Yields `Session` objects. A file that cannot be read, or holds no session, is skipped:
+    a report over a hundred transcripts is not worth losing to one bad file. It is counted
+    rather than swallowed, though - a hundred transcripts quietly becoming sixty is a
+    number nobody can see is missing, so `errors` collects each one and
+    `ruleprobe report` says how many there were.
     """
     if runtime != "auto" and runtime not in RUNTIMES:
         raise ValueError("unknown runtime %r; one of auto, %s"
@@ -64,9 +81,13 @@ def iter_sessions(root=None, runtime="auto", since=None):
     for path, reader in _paths(root, runtime):
         try:
             session = reader.read(path)
-        except Exception:
+        except Exception as exc:
+            if errors is not None:
+                errors.append({"path": path, "error": type(exc).__name__})
             continue
         if session is None:
+            if errors is not None:
+                errors.append({"path": path, "error": "no session in it"})
             continue
         if stamp and session.ended and session.ended[:10] < stamp:
             continue
@@ -76,7 +97,7 @@ def iter_sessions(root=None, runtime="auto", since=None):
 def _walk(base):
     """Every `.jsonl` file under `base`, in path order."""
     found = []
-    for directory, _dirs, files in os.walk(base):
+    for directory, _dirs, files in os.walk(base, followlinks=True):
         for name in files:
             if name.endswith(".jsonl"):
                 found.append(os.path.join(directory, name))

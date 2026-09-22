@@ -46,12 +46,18 @@ Other groupings, and a window:
 
 ```sh
 uvx ruleprobe report --by repo --since 30      # last 30 days, one line per repository
-uvx ruleprobe report --by stance               # grouped by the configuration a session ran under
+uvx ruleprobe report --by stance --stance commits=conventional   # grouped by configuration
 uvx ruleprobe report --root ./transcripts      # a directory of your own
 uvx ruleprobe report --rules ./docs/rules      # bind detectors to rule files, and name the gaps
 uvx ruleprobe detectors                        # what would run
 uvx ruleprobe corpus                           # how good each detector is, over the labelled corpus
+uvx ruleprobe report --json                    # the same numbers as data, rows included
 ```
+
+A transcript does not record the configuration it ran under, so `--stance dimension=variant`
+is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
+what a detector's `gate:` block reads: a gated detector with no stance passed never fires,
+and `ruleprobe detectors` names the stance each one is waiting for.
 
 ## Sixty seconds on a rule of your own
 
@@ -165,13 +171,20 @@ The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `pa
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`), `git` (`subcommand`,
 `args_any`, `args_none`, `token_prefix`), `env` (`name`, `command`), `text` (`source`,
 `regex`, `contains`), `message` (`role`, `final`, `regex`, `contains`), `kind`, and the three
-session matchers `order`, `absent` and `change`. `ruleprobe/detectors/common.yaml` uses all
-but four of them, and `ruleprobe/matchers.py` documents each in one line.
+session matchers `order`, `absent` and `change`. `ruleprobe/matchers.py` documents each in
+one line. The shipped six in `ruleprobe/detectors/common.yaml` use ten of them - `tool`,
+`arg`, `command`, `git`, `env`, `text`, `kind`, `change`, `any` and `all` - because that is
+what those six observables need; `message`, `order`, `absent` and `not` are exercised by the
+examples on this page and in `tests/`, not by a shipped detector.
 
-Two rules about the format worth knowing before you hit them. Every key inside one `command`
-block is read against the *same* pipeline segment, so two constraints on one command belong
-in one block rather than in an `all` of two. And a session matcher may only be the whole of
-a `session` detector's `when`, because a hit it produces is not a hit on an event in hand.
+Three rules about the format worth knowing before you hit them. Every key inside one
+`command` block is read against the *same* pipeline segment, so two constraints on one
+command belong in one block rather than in an `all` of two. A session matcher may only be
+the whole of a `session` detector's `when`, because a hit it produces is not a hit on an
+event in hand. And a list is always alternatives: `regex`, `contains` and `path_glob` hold
+when any one of their patterns does. `contains` is a substring, so `contains: no-verify`
+finds the token `--no-verify`; `path_glob` is a path, so `*` stops at a `/`, `**` crosses
+one, and `src/*.py` matches the absolute path a transcript actually carries.
 
 **The format is a YAML subset, and JSON is the same thing.** YAML is not in the standard
 library and this package takes no dependencies, so `ruleprobe/declarative.py` implements the
@@ -255,11 +268,11 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
-transcript-hygiene/unfiltered-find        5    6    5    0    0   1.00    1.00   1.00
+transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
 verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    32   40   32    0    0   1.00    1.00   1.00  floor 0.90
+total                                    32   42   32    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
@@ -323,14 +336,15 @@ over it: an unmeasured detector is a gap to see, not a failure to fix.
 - `ruleprobe/report.py` - rows in, text out. A row is a small dict, so a report can be taken
   over rows you stored months ago rather than over transcripts you still have.
 
-The public API is five names:
+The public API is six names:
 
 ```python
-iter_sessions(root=None, runtime="auto", since=None)   # -> Session(.id .repo .runtime .events)
+iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(.id .repo .events)
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
 Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, promote_share=0.30)
+report_data(rows, by="rule", ...)                       # the same numbers as a dict; --json prints it
 validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall .f1)}
 ```
 

@@ -9,7 +9,8 @@ A session is a list of dicts in transcript order. Every event carries `kind` and
 - `tool_use` - `id` (str), `name` (str), `input` (dict).
 - `tool_result` - `tool_use_id` (str), `tool_name` (str, the name of the `tool_use` it
   answers, resolved by the reader), `text` (str).
-- `user_prompt` - no extra fields.
+- `user_prompt` - `text` (str, the prompt as written; empty when the transcript
+  recorded no text for it).
 - `compact` - no extra fields; one per context-compaction boundary.
 
 A transcript is machine-written but it is not schema-checked, so every field is treated as

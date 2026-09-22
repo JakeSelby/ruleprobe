@@ -8,6 +8,12 @@ just as well, which is the point of keeping the report over rows rather than ove
 Only a row that carries a `rules` map is evidence. One written before a detector existed, or
 one whose detectors could not be loaded, is absent from every count and from the
 denominator: counting it as a session with no hit would turn a gap into a clean bill.
+
+A detector that raised costs its own denominator and nobody else's. The row stays measured,
+and the session is subtracted from the denominator of the detector named in `rules_errors`
+alone - one broken third-party detector may not erase every other detector's evidence. The
+older singular spelling, `rules_error`, names no detector, so a row carrying it is still
+dropped whole: an error nobody attributed cannot be attributed here either.
 """
 from .registry import DEFAULT, run
 
@@ -66,6 +72,20 @@ def folded_rules(row, renamed):
     return out
 
 
+def errored_detectors(row, renamed):
+    """The detector ids that raised on `row`, under their current names.
+
+    A session an entry names is subtracted from that detector's denominator and from no
+    other's, which is the whole difference between "this detector has no evidence here" and
+    "this session has no evidence at all".
+    """
+    out = set()
+    for entry in (row.get("rules_errors") or ()):
+        if isinstance(entry, dict) and isinstance(entry.get("detector"), str):
+            out.add(renamed.get(entry["detector"], entry["detector"]))
+    return out
+
+
 def rule_ids(rows, registry):
     """Every detector id to report on: the registry's, so a detector with no hit is still a
     line, plus any id a row carries that the registry no longer defines - under its current
@@ -77,76 +97,95 @@ def rule_ids(rows, registry):
     return sorted(ids)
 
 
-def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_PROMOTE_SHARE,
-           registry=DEFAULT, validity=None):
-    """The report as text, ready to print.
+def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
+                promote_share=RULE_PROMOTE_SHARE, registry=DEFAULT, validity=None):
+    """The report as data: the same numbers `report()` prints, in the same order.
 
-    - `by="rule"` - one line per detector: hits, the sessions it fired in, the denominator,
-      the share, and a note. `promote?` means the observable is common enough to be worth a
-      look; `unobserved` means the detector has never fired in this window. Both are blank
-      until there are `min_sessions` measured sessions, because a share over five sessions
-      is noise.
-    - `by="repo"` - one line per repository: sessions, hits, and its top three detectors.
-    - `by="stance"` - the same, grouped by each `dimension=variant` a row ran under.
+    `report()` renders this and `ruleprobe report --json` dumps it, so the table and the
+    JSON cannot disagree about a denominator, a fold or a note. The shape is:
 
-    `validity`, when a `{detector_id: Score}` mapping from `ruleprobe.validity` is passed,
-    adds a column saying how good each detector is over the labelled corpus, so a hit rate
-    is read as `p=0.96 r=0.91` and not as a fact. It is off by default because the table is
-    meant to be read in a minute; `ruleprobe report --validity` turns it on.
+    - `by`, `measured`, `unmeasured`, `unattributed`, `errors`, `min_sessions`,
+      `promote_share` - what was counted and under which settings.
+    - `notes` - the preamble lines, in order.
+    - `detectors` - one entry per detector when `by="rule"`: `detector`, `hits`,
+      `sessions`, `of`, `share`, `note`, and `validity` when scores were passed.
+    - `groups` - one entry per repository or stance otherwise: `key`, `sessions`, `hits`,
+      `top`.
     """
     if by not in BY:
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
     rows = [r for r in rows if isinstance(r, dict)]
-    lines = []
-    measured = [r for r in rows
-                if isinstance(r.get("rules"), dict) and not r.get("rules_errors")]
-    legacy = sum(1 for r in rows
-                 if not isinstance(r.get("rules"), dict) and not r.get("rules_error"))
-    errored = sum(1 for r in rows if r.get("rules_error") or r.get("rules_errors"))
-    if legacy or errored:
-        lines.append("%d session(s) carry no rule data (%d unmeasured, %d errored)"
-                     % (legacy + errored, legacy, errored))
+    renamed = registry.renamed
+    measured, unmeasured, unattributed = [], 0, 0
+    for row in rows:
+        if not isinstance(row.get("rules"), dict):
+            unmeasured += 1
+        elif row.get("rules_error") and not row.get("rules_errors"):
+            # The legacy spelling names no detector, so there is nobody to charge the loss
+            # to and the row is dropped whole rather than misattributed.
+            unattributed += 1
+        else:
+            measured.append(row)
+    errors, errored_rows = {}, 0
+    for row in measured:
+        found = errored_detectors(row, renamed)
+        errored_rows += 1 if found else 0
+        for did in found:
+            errors[did] = errors.get(did, 0) + 1
+    notes = []
+    if unmeasured:
+        notes.append("%d session(s) carry no rule data" % unmeasured)
+    if unattributed:
+        notes.append("%d session(s) carry an error naming no detector and are dropped whole"
+                     % unattributed)
+    if errors:
+        named = ", ".join("%s (%d)" % (d, n) for d, n in sorted(errors.items())[:5])
+        more = "" if len(errors) <= 5 else ", and %d more" % (len(errors) - 5)
+        notes.append("%d detector(s) raised in %d session(s): %s%s"
+                     % (len(errors), errored_rows, named, more))
+        notes.append("each is out of its own denominator for those sessions, and no other's")
+    data = {"by": by, "measured": len(measured), "unmeasured": unmeasured,
+            "unattributed": unattributed, "errors": dict(errors),
+            "min_sessions": min_sessions, "promote_share": promote_share,
+            "notes": notes, "detectors": [], "groups": []}
     if not measured:
-        lines.append("no measured sessions")
-        return "\n".join(lines)
-    counted = [(r, folded_rules(r, registry.renamed)) for r in measured]
+        notes.append("no measured sessions")
+        return data
+    counted = [(r, folded_rules(r, renamed), errored_detectors(r, renamed))
+               for r in measured]
 
     if by == "rule":
-        total = len(counted)
-        head = "%-38s%7s%10s%6s%8s  note" % ("detector", "hits", "sessions", "of", "share")
-        width = len(head)
-        if validity is not None:
-            head = "%-*s  validity" % (width, head)
-        lines.append(head)
-        lines.append("-" * len(head))
         for did in rule_ids(measured, registry):
-            hits = sum(hits_of.get(did, 0) for _, hits_of in counted)
-            seen = sum(1 for _, hits_of in counted if hits_of.get(did, 0) > 0)
+            rows_for = [(h, e) for _r, h, e in counted if did not in e]
+            total = len(rows_for)
+            hits = sum(h.get(did, 0) for h, _e in rows_for)
+            seen = sum(1 for h, _e in rows_for if h.get(did, 0) > 0)
             share = seen / float(total) if total else 0.0
             note = ""
             if total >= min_sessions:
-                note = "promote?" if share > promote_share else ("unobserved" if not hits else "")
-            line = "%-38s%7d%10d%6d%8.0f%%  %s" % (did[:38], hits, seen, total,
-                                                   share * 100, note)
+                note = "promote?" if share > promote_share else ("unobserved" if not hits
+                                                                 else "")
+            entry = {"detector": did, "hits": hits, "sessions": seen, "of": total,
+                     "share": share, "note": note}
             if validity is not None:
-                line = "%-*s  %s" % (width, line.rstrip(), _validity_note(validity, did))
-            lines.append(line.rstrip())
-        return "\n".join(lines)
+                entry["validity"] = _validity_note(validity, did)
+            data["detectors"].append(entry)
+        return data
 
     if by == "stance":
         # A row whose stances were guessed after the fact would be filed under a variant the
         # session may never have run under, so it is excluded rather than misattributed.
-        guessed = [r for r, _ in counted if r.get("stances_source") == "rescan"]
+        guessed = [r for r, _h, _e in counted if r.get("stances_source") == "rescan"]
         if guessed:
-            lines.append("%d rescanned session(s) excluded: stance not known at the time"
+            notes.append("%d rescanned session(s) excluded: stance not known at the time"
                          % len(guessed))
-        counted = [(r, h) for r, h in counted if r.get("stances_source") != "rescan"]
+        counted = [x for x in counted if x[0].get("stances_source") != "rescan"]
         if not counted:
-            lines.append("no sessions with a known stance")
-            return "\n".join(lines)
+            notes.append("no sessions with a known stance")
+            return data
 
     groups = {}
-    for row, hits_of in counted:
+    for row, hits_of, _errored in counted:
         if by == "stance":
             stances = row.get("stances") if isinstance(row.get("stances"), dict) else {}
             keys = ["%s=%s" % (k, v) for k, v in sorted(stances.items())] or ["(no stances)"]
@@ -157,13 +196,62 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
             acc[0] += 1
             for did, n in hits_of.items():
                 acc[1][did] = acc[1].get(did, 0) + n
-    head = "%-42s%9s%7s  top detectors" % (by, "sessions", "hits")
-    lines.append(head)
-    lines.append("-" * len(head))
     for key in sorted(groups):
         sessions, counts = groups[key]
         top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+        data["groups"].append({"key": key, "sessions": sessions,
+                               "hits": sum(counts.values()),
+                               "top": [[did, n] for did, n in top]})
+    return data
+
+
+def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_PROMOTE_SHARE,
+           registry=DEFAULT, validity=None):
+    """The report as text, ready to print.
+
+    - `by="rule"` - one line per detector: hits, the sessions it fired in, the denominator,
+      the share, and a note. `promote?` means the observable is common enough to be worth a
+      look; `unobserved` means the detector has never fired in this window. Both are blank
+      until there are `min_sessions` measured sessions, because a share over five sessions
+      is noise. A detector that raised in a session is out of its own `of` column for that
+      session and out of nobody else's.
+    - `by="repo"` - one line per repository: sessions, hits, and its top three detectors.
+    - `by="stance"` - the same, grouped by each `dimension=variant` a row ran under.
+
+    `validity`, when a `{detector_id: Score}` mapping from `ruleprobe.validity` is passed,
+    adds a column saying how good each detector is over the labelled corpus, so a hit rate
+    is read as `p=0.96 r=0.91` and not as a fact. It is off by default because the table is
+    meant to be read in a minute; `ruleprobe report --validity` turns it on.
+
+    `report_data()` is the same thing as a dict, and is what `--json` prints.
+    """
+    data = report_data(rows, by=by, min_sessions=min_sessions,
+                       promote_share=promote_share, registry=registry, validity=validity)
+    lines = list(data["notes"])
+    if not data["detectors"] and not data["groups"]:
+        return "\n".join(lines)
+
+    if data["by"] == "rule":
+        head = "%-38s%7s%10s%6s%8s  note" % ("detector", "hits", "sessions", "of", "share")
+        width = len(head)
+        if validity is not None:
+            head = "%-*s  validity" % (width, head)
+        lines.append(head)
+        lines.append("-" * len(head))
+        for entry in data["detectors"]:
+            line = "%-38s%7d%10d%6d%8.0f%%  %s" % (
+                entry["detector"][:38], entry["hits"], entry["sessions"], entry["of"],
+                entry["share"] * 100, entry["note"])
+            if validity is not None:
+                line = "%-*s  %s" % (width, line.rstrip(), entry.get("validity", ""))
+            lines.append(line.rstrip())
+        return "\n".join(lines)
+
+    head = "%-42s%9s%7s  top detectors" % (data["by"], "sessions", "hits")
+    lines.append(head)
+    lines.append("-" * len(head))
+    for group in data["groups"]:
         lines.append("%-42s%9d%7d  %s"
-                     % (key[:42], sessions, sum(counts.values()),
-                        ", ".join("%s %d" % (d, n) for d, n in top) or "-"))
+                     % (group["key"][:42], group["sessions"], group["hits"],
+                        ", ".join("%s %d" % (did, n) for did, n in group["top"]) or "-"))
     return "\n".join(lines)
