@@ -18,6 +18,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2 # the merge commit's first parent is the base the PR was built on
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
@@ -33,11 +35,8 @@ jobs:
         # On a pull request, a changed __version__ checks as a release of it, so a release PR that
         # leaves entries under ## Unreleased fails here instead of in release.yml after the tag.
         if: github.event_name == 'pull_request'
-        env:
-          BASE_REF: ${{ github.base_ref }}
         run: |
-          git fetch --no-tags --depth=1 origin "$BASE_REF"
-          git show FETCH_HEAD:ruleprobe/__init__.py > "$RUNNER_TEMP/base_init.py"
+          git show HEAD^1:ruleprobe/__init__.py > "$RUNNER_TEMP/base_init.py"
           python scripts/release_preflight.py --base-init "$RUNNER_TEMP/base_init.py"
 
   floor:

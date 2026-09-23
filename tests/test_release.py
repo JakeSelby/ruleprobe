@@ -130,12 +130,28 @@ class PreflightTests(unittest.TestCase):
     def test_a_folded_version_bump_passes(self):
         with tempfile.TemporaryDirectory() as temp:
             root = make_root(temp)
-            self.assertEqual(self.run_main(root, ["--base-init", self.write_base(temp, "1.2.2")], {}), (0, ""))
+            base = self.write_base(temp, "1.2.2")
+            self.assertEqual(release_preflight.release_tag(root, None, base), "v1.2.3")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                result = self.run_main_stdout(root, ["--base-init", base])
+        self.assertEqual(result, (0, ""))
+        self.assertIn("checking as v1.2.3", out.getvalue())
+
+    def run_main_stdout(self, root, argv):
+        """`main(argv)` over `root` without the GitHub ref variables, leaving stdout to the caller."""
+        clean = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF_TYPE", "GITHUB_REF_NAME")}
+        err = io.StringIO()
+        with mock.patch.object(release_preflight, "ROOT", root), \
+                mock.patch.dict(os.environ, clean, clear=True), contextlib.redirect_stderr(err):
+            code = release_preflight.main(argv)
+        return code, err.getvalue()
 
     def test_an_explicit_tag_wins_over_the_base(self):
         with tempfile.TemporaryDirectory() as temp:
             root = make_root(temp)
-            base = self.write_base(temp, "1.2.3")
+            base = self.write_base(temp, "1.2.2")
+            self.assertEqual(release_preflight.release_tag(root, None, base), "v1.2.3")
             self.assertEqual(release_preflight.release_tag(root, "v9.9.9", base), "v9.9.9")
             code, err = self.run_main(root, ["--tag", "v9.9.9", "--base-init", base], {})
         self.assertEqual(code, 1)

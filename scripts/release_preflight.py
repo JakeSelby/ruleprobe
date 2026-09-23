@@ -4,10 +4,10 @@
 Without `--tag`, it checks that `__version__` and the changelog agree; CI runs it so on every change,
 while `## Unreleased` collects entries. With `--tag`, it also refuses Unreleased entries, which a
 release must fold into its version section: run it so before tagging, and the release workflow runs
-it again on the tag. With `--base-init`, the base branch's `ruleprobe/__init__.py`, a changed
-`__version__` makes the run a release of the new version, as if `--tag v<version>` were given: CI
-runs it so on every pull request, so a version bump that leaves Unreleased entries fails before the
-tag. It checks only what a file in this repository can prove; the test suite and the corpus floor
+it again on the tag. `--base-init` takes the path of the base branch's `ruleprobe/__init__.py`;
+when `__version__` differs from the version declared there, the run checks as a release of the new
+version, as if `--tag v<version>` were given. CI runs it so on every pull request, so a version bump
+that leaves Unreleased entries fails before the tag. It checks only what a file in this repository can prove; the test suite and the corpus floor
 are separate gates.
 """
 import argparse
@@ -82,7 +82,8 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", default=os.environ.get("GITHUB_REF_NAME") if os.environ.get("GITHUB_REF_TYPE") == "tag" else None)
     parser.add_argument("--base-init", metavar="PATH",
-                        help="the base branch's ruleprobe/__init__.py; a changed __version__ checks as a release")
+                        help="path to the base branch's ruleprobe/__init__.py; if __version__ differs from it, "
+                             "check as a release of the new version")
     args = parser.parse_args(argv)
     tag = release_tag(ROOT, args.tag, args.base_init)
     if tag is not None and args.tag is None:
