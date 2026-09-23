@@ -144,7 +144,14 @@ def _file_version(doc, path, lines, findings):
     """The schema version a `detectors:` file sets for entries that name none: its top-level
     `version`, else 1. An unknown one is a finding, and `None`, so that only the entries
     that would take it are skipped; an entry with a known `schema_version` of its own wins."""
-    if not isinstance(doc, dict) or "version" not in doc or "detectors" not in doc:
+    if not isinstance(doc, dict) or "detectors" not in doc:
+        return 1
+    if "schema_version" in doc:
+        findings.append(Finding(path, lines.line_of(doc, "schema_version") if lines else 0,
+                                "the file-level key is `version`, not `schema_version`; "
+                                "entries without their own schema_version skipped"))
+        return None
+    if "version" not in doc:
         return 1
     reason = schema_version_error(doc["version"], "version")
     if reason is None:
@@ -173,7 +180,7 @@ def _compile_entries(entries, path, lines, rule=None, default_prefix=None, versi
         return detectors, [Finding(path, 0, "expected a list of detectors, or a mapping "
                                             "with a detectors: list")]
     for index, entry in enumerate(entries):
-        if version is None and not (isinstance(entry, dict) and "schema_version" in entry):
+        if version is None and isinstance(entry, dict) and "schema_version" not in entry:
             continue
         if isinstance(entry, dict) and (rule or default_prefix):
             filled = dict(entry)

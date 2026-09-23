@@ -17,7 +17,7 @@ from ruleprobe.declarative import DeclarativeError, parse_with_lines
 from ruleprobe import matchers
 from ruleprobe.matchers import ENTRY_KEYS, compile_detector
 from ruleprobe.registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION
-from ruleprobe.rules import load_bundle, load_file
+from ruleprobe.rules import load_bundle, load_file, read_rule_file
 
 WHEN = {"tool": "Write"}
 
@@ -173,6 +173,37 @@ class FileVersionTests(Temp):
         detectors, findings = load_file(common)
         self.assertEqual(len(detectors), 6)
         self.assertEqual(findings, [])
+        with open(common, encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertEqual(text.count("\nversion: 1\n"), 1)
+        detectors, findings = load_file(
+            self.write("common.yaml", text.replace("\nversion: 1\n", "\nversion: 9\n")))
+        self.assertEqual(detectors, [])
+        self.assertEqual(len(findings), 1)
+        self.assertIn("version 9 is newer", findings[0].reason)
+
+    def test_a_top_level_schema_version_is_a_finding_not_a_silent_schema_one(self):
+        ids, findings = self.load("schema_version: 2\n"
+                                  "detectors:\n"
+                                  "  - id: a/defaulted\n"
+                                  "    when: {tool: Write}\n"
+                                  "  - id: a/own\n"
+                                  "    schema_version: 2\n"
+                                  "    when: {tool: Edit}\n")
+        self.assertEqual(ids, ["a/own"])
+        self.assertEqual([f.line for f in findings], [1])
+        self.assertIn("the file-level key is `version`", findings[0].reason)
+
+    def test_a_non_mapping_entry_under_a_bad_file_version_keeps_its_own_finding(self):
+        ids, findings = self.load("version: 9\n"
+                                  "detectors:\n"
+                                  "  - just a string\n"
+                                  "  - id: a/own\n"
+                                  "    schema_version: 1\n"
+                                  "    when: {tool: Edit}\n")
+        self.assertEqual(ids, ["a/own"])
+        self.assertEqual(len(findings), 2)
+        self.assertIn("a detector entry is a mapping", findings[1].reason)
 
     def test_discovery_reports_the_finding_and_keeps_the_rest(self):
         repo = os.path.join(self.dir, "repo")
@@ -190,6 +221,33 @@ class FileVersionTests(Temp):
         self.assertEqual([d.id for d in bundle.detectors], ["a/own"])
         self.assertEqual([(f.line, f.reason.split(" ")[0]) for f in bundle.findings],
                          [(1, "version")])
+
+
+class FrontMatterTests(Temp):
+    def test_a_bad_schema_version_on_a_front_matter_entry_is_a_finding(self):
+        path = self.write("house-style.md", "---\n"
+                                            "rule: house-style\n"
+                                            "detector:\n"
+                                            "  id: house-style/npm\n"
+                                            "  schema_version: 3\n"
+                                            "  when: {tool: Write}\n"
+                                            "---\n"
+                                            "\n"
+                                            "Use uv.\n")
+        detectors, entry, findings = read_rule_file(path)
+        self.assertEqual((detectors, entry.state), ([], "unmeasured"))
+        self.assertEqual([f.line for f in findings], [5])
+        self.assertIn("newer than this ruleprobe", findings[0].reason)
+
+    def test_front_matter_version_is_not_a_file_level_default(self):
+        path = self.write("house-style.md", "---\n"
+                                            "version: 9\n"
+                                            "detector:\n"
+                                            "  id: house-style/npm\n"
+                                            "  when: {tool: Write}\n"
+                                            "---\n")
+        detectors, entry, findings = read_rule_file(path)
+        self.assertEqual(([d.id for d in detectors], findings), (["house-style/npm"], []))
 
 
 if __name__ == "__main__":

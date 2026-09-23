@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Matchers: a detector written as data, compiled to the same function a Python one is.
 
-An entry is five keys - `id`, `rule`, `event`, `when`, and an optional `gate` - and `when`
+An entry is `id`, `rule`, `event` and `when`, with an optional `gate`, `description`,
+`examples`, `schema_version` and `kind` (which `registry.from_spec` reads) - and `when`
 is a matcher. A matcher is a mapping; every key in it must hold, so a mapping of two keys is
 an implicit `all`. `any`, `all` and `not` compose them.
 
@@ -45,7 +46,8 @@ detector's `when`, because a hit they produce is not a hit on the event in hand:
   previous event of that kind.
 
 An entry may carry `schema_version`, the integer schema it was written under. Absent, it is
-the file's top-level `version`, and absent there too it is 1. A value that is not a schema
+the top-level `version` of the `detectors:` file it sits in, and absent there too it is 1;
+rule-file front matter has no file-level default, so an entry there without the key is 1. A value that is not a schema
 this package knows - not in `registry.KNOWN_SCHEMA_VERSIONS`, or not an integer - is an
 error, so an entry written for a later schema is refused rather than read under the wrong one.
 
