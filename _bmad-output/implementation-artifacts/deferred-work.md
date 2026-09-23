@@ -42,3 +42,9 @@ the story's review findings hold the full reasoning.
   clients). `ssl`, `smtplib`, `ftplib`, `asyncio` connections, `multiprocessing` and `pty` pass it,
   and the run-time guard does not refuse `os.system`, `os.popen` or `os.spawn*`. Widening either
   amends AD-8's list, so it is the maintainer's call.
+
+## Deferred from: code review of RP-C002.md (2026-09-23)
+
+- No CI job builds at the declared `setuptools>=77` floor; CI and the release build resolve the newest
+  setuptools in isolation, so a wrong floor shows only on a pinned or `--no-isolation` build. A job
+  that builds with `setuptools==77.0.1` would pin it.
