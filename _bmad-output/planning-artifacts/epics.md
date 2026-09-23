@@ -47,7 +47,7 @@ touched in 0.2 only where the contract versions it.
 - FR-9: A failing detector costs only itself. Held (implemented, 0.1.0); extends to `opportunities` under AD-11.
 - FR-10: Declarative detectors in the YAML subset or JSON. Held (implemented, 0.1.0); gains `schema_version` under FR-27.
 - FR-11: Discovery from `.ruleprobe/detectors.yaml`, user config and rule-file front matter. Held (implemented, 0.1.0).
-- FR-12: Event, combinator and session matchers. Held (implemented, 0.1.0); negation changes under #19.
+- FR-12: Event, combinator and session matchers. Held (implemented, 0.1.0); negation, `any`, `all`, `order` and `absent` over skipped commands implemented under #19, unreleased, shipping in v0.2.0.
 - FR-13: Per-file binding classes each rule file as measured, dark or unmeasured. Held (implemented, 0.1.0).
 - FR-14: The report states the share of rules measured. In (partial; share planned, v0.2.0).
 - FR-15: Section-level binding splits one rule file into many rules with stable ids, on headings only (Q2, decided 2026-09-23). In (planned, v0.2.0).
@@ -78,7 +78,7 @@ In scope for 0.2.0: 15 FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33). 
 - NFR-1: Standard library only; `dependencies = []`. A test that fails on any addition is planned (v0.2.0).
 - NFR-2: Python 3.9 floor; no syntax or call newer than 3.9.
 - NFR-3: Deterministic output; byte-identical `--json` for the same inputs and flags.
-- NFR-4: Under-count rather than over-count. Partial: negation over skipped commands over-counts (#19, planned v0.2.0).
+- NFR-4: Under-count rather than over-count. Implemented: positive matchers in 0.1.0; negation, `any`, `all`, `order` and `absent` over skipped commands under #19, unreleased, shipping in v0.2.0.
 - NFR-5: `report` writes and sends nothing. The enforcing test is planned (v0.2.0). Only FR-26's command writes.
 - NFR-6: Corpus floor 0.9 in CI, never lowered to pass a detector.
 - NFR-7: No model in measurement; no command in ruleprobe calls a model, and the core imports no model client.

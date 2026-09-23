@@ -695,9 +695,9 @@ These bind every feature. Each is tested.
   `--json` output (implemented, 0.1.0). Bound: no clock, randomness, locale or dict-order effect in any
   count. `[ASSUMPTION: --since is the one input read against the clock, and a fixed date removes it]`
 - **NFR-4 Under-count rather than over-count.** When a detector or the shell parse cannot decide, it
-  produces no hit (partial: implemented (0.1.0) for positive matchers; negation over skipped commands
-  over-counts (#19, planned v0.2.0)). Bound: every documented miss is a miss, not a guess; a catalog
-  binding that is unsure leaves the rule unmeasured (FR-16).
+  produces no hit (implemented: positive matchers in 0.1.0; negation, `any`, `all`, `order` and
+  `absent` over skipped commands under #19, unreleased, shipping in v0.2.0). Bound: every documented
+  miss is a miss, not a guess; a catalog binding that is unsure leaves the rule unmeasured (FR-16).
 - **NFR-5 `report` writes and sends nothing.** `ruleprobe report` opens no network connection and writes
   no file (implemented, 0.1.0). Bound: a test runs `report` with network access and file writes denied,
   and `report` succeeds (planned, v0.2.0). Only FR-26's command writes, and only where the user says.

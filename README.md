@@ -166,6 +166,14 @@ followed by another; `change` counts a field that differs from the event before 
       scope: session
 ```
 
+Over a Bash command the shell parse skipped - empty or missing, longer than 16,384
+characters, or one that does not tokenize or parse - the segment keys of `command`, `git` and
+`env`, and a `text` read of `source: heredocs`, are undecided rather than false, so `not` and
+`absent` do not count it. Any one such command in a session leaves the session-scope `absent`
+above undecided, and so no hit, whether or not that command was the test run.
+`command: {unparsed: true}` on its own matches those commands; combined with a segment key it
+can never fire.
+
 The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `path_glob`,
 `contains`, `equals`, `exists`), `command` (`name`, `starts_with`, `contains`, `none_of`,
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`), `git` (`subcommand`,

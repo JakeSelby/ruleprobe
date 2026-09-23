@@ -17,3 +17,13 @@ the story's review findings hold the full reasoning.
 - `scripts/bmad_issue_sync.py`'s `live_lifecycle` records every closed issue as `completed`, so the
   three closed as not planned (#28 RP-E009, #59 RP-D011, #60 RP-S020) read `completed`. Its lifecycle
   has two values; a `withdrawn` value would need the audit and the story files to accept it.
+
+## Deferred from: code review of RP-B001.md (2026-09-23)
+
+- AD-4 in the architecture spine lists the undecided reads as the `command`, `git` and `env` segment
+  keys; a `text` read of `source: heredocs` is undecided over a skipped parse too, as the
+  `ruleprobe/matchers.py` docstring says. Amend AD-4 through `bmad-architecture` update intent, for
+  example with #36, which names the 0.2 break.
+- `command: {unparsed: true}` beside a segment key is undecided on a skipped command and false on a
+  parsed one, so it never fires and raises no error. Pre-existing since 0.1.0; a spec-time
+  `DeclarativeError` would change the AD-7 vocabulary.

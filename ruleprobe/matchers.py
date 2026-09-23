@@ -57,6 +57,18 @@ them at report time; `ruleprobe corpus` scores them.
         - bash: uv pip install ruff
           note: the tool the rule asks for
 
+A matcher that cannot decide says so rather than guessing. Over a Bash command the shared
+parse skipped - empty or missing, longer than `MAX_COMMAND`, or one that does not tokenize
+or parse - every `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read
+of `source: heredocs` is undecided, not false. `not` of undecided is undecided; `any` is
+true on any true child, else undecided on any undecided one; `all` is false on any false
+child, else undecided on any undecided one. An undecided `when` is no hit, an `order` hit
+needs `first` and `then` both true, and an `absent` scope holding an undecided candidate is
+no hit - so a negation never turns a command nobody could read into a count. A predicate
+from `compile_matcher` returns that undecided value, which is falsy: a Python caller who
+negates a predicate itself reads it as false and can over-count, so compose through the
+declarative `not`, `any` and `all` instead.
+
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
 fires.
@@ -86,6 +98,54 @@ SNIPPET_KEYS = ("kind", "turn", "id", "name", "input", "text", "final", "model",
 
 #: The `kind` a declarative spec carries when it arrives through `registry.from_spec`.
 SPEC_KIND = "declarative"
+
+
+class _Undecided(object):
+    """The third truth value: the matcher could not read its input. Falsy, so a caller that
+    only asks "did it match" reads it as no match; `not` must never be applied to it."""
+
+    __slots__ = ()
+
+    def __bool__(self):
+        return False
+
+    def __repr__(self):
+        return "UNDECIDED"
+
+
+_UNDECIDED = _Undecided()
+
+
+def _not3(value):
+    return _UNDECIDED if value is _UNDECIDED else not value
+
+
+def _maybe(value):
+    """True or undecided: anything but a decided false."""
+    return value is _UNDECIDED or bool(value)
+
+
+def _any3(values):
+    """Kleene `any`: true on any true, else undecided on any undecided, else false."""
+    undecided = False
+    for value in values:
+        if value is _UNDECIDED:
+            undecided = True
+        elif value:
+            return True
+    return _UNDECIDED if undecided else False
+
+
+def _all3(values):
+    """Kleene `all`: false on any false, else undecided on any undecided, else true."""
+    undecided = False
+    for value in values:
+        if value is _UNDECIDED:
+            undecided = True
+        elif not value:
+            return False
+    return _UNDECIDED if undecided else True
+
 
 ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description", "examples")
 EVENTS = ("tool_use", "assistant_text", "session")
@@ -386,6 +446,8 @@ def _m_command(value, where, owner, key):
             return False
         if not per_segment:
             return True
+        if parsed.skipped:
+            return _UNDECIDED
         for pipe in parsed.pipelines:
             if sole is not None and (len(pipe) == 1) != sole:
                 continue
@@ -417,6 +479,8 @@ def _m_git(value, where, owner, key):
         parsed = env.parsed(event)
         if parsed is None:
             return False
+        if parsed.skipped:
+            return _UNDECIDED
         for segment, _sub, args in git_calls(parsed, subs):
             if args_any and not any(arg in args_any for arg in args):
                 continue
@@ -444,6 +508,8 @@ def _m_env(value, where, owner, key):
         parsed = env.parsed(event)
         if parsed is None:
             return False
+        if parsed.skipped:
+            return _UNDECIDED
         for pipe in parsed.pipelines:
             for segment in pipe:
                 assignments, words = split_assignments(segment)
@@ -479,13 +545,17 @@ def _m_text(value, where, owner, key):
         if source == "command":
             return [parsed.command]
         if source == "heredocs":
-            return list(parsed.heredocs)
+            # A skipped parse never looked for the bodies, so none found is not none there.
+            return None if parsed.skipped else list(parsed.heredocs)
         # `payload`: what the command carried - its heredoc bodies, or the whole command
         # when it was too long to parse and the bodies were never found.
         return [parsed.command] if parsed.skipped else list(parsed.heredocs)
 
     def match(event, env):
-        for text in texts(event, env):
+        found = texts(event, env)
+        if found is None:
+            return _UNDECIDED
+        for text in found:
             if not text:
                 continue
             if any(rx.search(text) for rx in regexes):
@@ -524,20 +594,20 @@ def _m_message(value, where, owner, key):
 
 def _m_any(value, where, owner, key):
     parts = _branches(value, where, owner, key, "any")
-    return lambda event, env: any(part(event, env) for part in parts)
+    return lambda event, env: _any3(part(event, env) for part in parts)
 
 
 def _m_all(value, where, owner, key):
     parts = _branches(value, where, owner, key, "all")
-    return lambda event, env: all(part(event, env) for part in parts)
+    return lambda event, env: _all3(part(event, env) for part in parts)
 
 
 def _m_not(value, where, owner, key):
     if isinstance(value, list):
         parts = _branches(value, where, owner, key, "not")
-        return lambda event, env: not any(part(event, env) for part in parts)
+        return lambda event, env: _not3(_any3(part(event, env) for part in parts))
     part = compile_matcher(value, where)
-    return lambda event, env: not part(event, env)
+    return lambda event, env: _not3(part(event, env))
 
 
 def _branches(value, where, owner, key, what):
@@ -598,17 +668,19 @@ def _a_absent(value, where, owner, key):
             # A session with no events at all - an aborted rollout carrying only its
             # header - is not a session in which something failed to happen. Counting one
             # as a hit walks a rule like `no-test-run` towards 100% on nothing.
-            if not events or any(of(event, env) for event in events):
+            if not events or _any3(of(event, env) for event in events) is not False:
                 return []
             return [(events[-1].get("turn", 0), None)]
-        order, matched = [], set()
+        # A turn is absent only when every event in it is decidedly not `of`: one the
+        # parse could not read may have been the very thing asked for.
+        order, present = [], set()
         for event in events:
             turn = event.get("turn", 0)
             if turn not in order:
                 order.append(turn)
-            if of(event, env):
-                matched.add(turn)
-        return [(turn, None) for turn in order if turn not in matched]
+            if _maybe(of(event, env)):
+                present.add(turn)
+        return [(turn, None) for turn in order if turn not in present]
     return _Aggregate(run)
 
 
@@ -655,7 +727,12 @@ AGGREGATES = {"order": _a_order, "absent": _a_absent, "change": _a_change}
 
 def compile_matcher(spec, where, allow_aggregate=False):
     """A matcher spec as a predicate `f(event, env)`, or an `_Aggregate` when it reads the
-    whole session and `allow_aggregate` says that is where it sits."""
+    whole session and `allow_aggregate` says that is where it sits.
+
+    The predicate returns true, false, or a falsy undecided value, so its truth is "matched"
+    and its falsehood is "not known to match". A Python caller who negates it with its own
+    `not` reads undecided as false and can over-count; compose with the declarative `not`,
+    `any` and `all` instead."""
     if not isinstance(spec, dict):
         where.fail("a matcher is a mapping, not %s" % type(spec).__name__)
     if not spec:
@@ -678,7 +755,7 @@ def compile_matcher(spec, where, allow_aggregate=False):
         parts.append(PREDICATES[name](spec[name], where, spec, name))
     if len(parts) == 1:
         return parts[0]
-    return lambda event, env: all(part(event, env) for part in parts)
+    return lambda event, env: _all3(part(event, env) for part in parts)
 
 
 def _gate(spec, where, owner):
