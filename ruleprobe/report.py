@@ -21,12 +21,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, run
-
-#: The schema `measure()` writes and the highest one `report_data` reads.
-SCHEMA_VERSION = 2
-#: Every row schema this release can count. An absent `schema_version` reads as 1.
-KNOWN_SCHEMA_VERSIONS = (1, 2)
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
