@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Refuse a release whose version, changelog and tag disagree.
 
-Run it before tagging, and the release workflow runs it again on the tag. It checks only what a
-file in this repository can prove; the test suite and the corpus floor are separate gates.
+Without `--tag`, it checks that `__version__` and the changelog agree; CI runs it so on every change,
+while `## Unreleased` collects entries. With `--tag`, it also refuses Unreleased entries, which a
+release must fold into its version section: run it so before tagging, and the release workflow runs
+it again on the tag. It checks only what a file in this repository can prove; the test suite and
+the corpus floor are separate gates.
 """
 import argparse
 import os
@@ -53,7 +56,7 @@ def errors(root=ROOT, tag=None):
         found.append("CHANGELOG.md has no section for {}".format(version))
     elif not re.fullmatch(r"{} \(\d{{4}}-\d{{2}}-\d{{2}}\)".format(re.escape(version)), heading):
         found.append("CHANGELOG.md heading for {} carries no release date: {}".format(version, heading))
-    if re.search(r"^\s*- ", sections.get("Unreleased", ""), re.M):
+    if tag is not None and re.search(r"^\s*- ", sections.get("Unreleased", ""), re.M):
         found.append("CHANGELOG.md still has Unreleased entries; fold them into the version section")
     if tag is not None and tag != "v" + version:
         found.append("tag {} does not match __version__ {}".format(tag, version))

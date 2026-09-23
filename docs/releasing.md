@@ -24,7 +24,7 @@ migration. From 1.0 a breaking change is a major.
    `__version__` in `ruleprobe/__init__.py`. Both must agree:
 
    ```sh
-   python3 scripts/release_preflight.py
+   python3 scripts/release_preflight.py --tag v<version>
    python3 scripts/release_notes.py         # the GitHub release body, exactly
    ```
 

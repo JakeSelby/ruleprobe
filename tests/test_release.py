@@ -55,10 +55,17 @@ class PreflightTests(unittest.TestCase):
             found = release_preflight.errors(make_root(temp, heading="1.2.3"))
         self.assertTrue(any("carries no release date" in line for line in found))
 
-    def test_unreleased_entries_are_refused(self):
+    def test_unreleased_entries_are_refused_on_a_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            found = release_preflight.errors(make_root(temp, unreleased="\n- Pending.\n"), tag="v1.2.3")
+        self.assertTrue(any("Unreleased entries" in line for line in found))
+
+    def test_unreleased_entries_pass_between_releases(self):
+        # #64: CI runs the preflight without a tag on every change, and a user-visible change adds
+        # an Unreleased entry, so only a release may refuse one.
         with tempfile.TemporaryDirectory() as temp:
             found = release_preflight.errors(make_root(temp, unreleased="\n- Pending.\n"))
-        self.assertTrue(any("Unreleased entries" in line for line in found))
+        self.assertEqual(found, [])
 
     def test_prerelease_version_is_refused(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -7,7 +7,7 @@
     "epic": 10,
     "story": 21,
     "task": 6,
-    "bug": 2,
+    "bug": 3,
     "chore": 4,
     "spike": 4,
     "decision": 12
@@ -684,6 +684,19 @@
       "type": "task",
       "native_type": "Task",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-T005.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B002",
+      "github_number": 64,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/64",
+      "title": "fix(release): the preflight fails every pull request that adds an Unreleased entry",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B002.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
