@@ -29,6 +29,16 @@ jobs:
         run: python scripts/bmad_issue_sync.py audit
       - name: Version and changelog agree
         run: python scripts/release_preflight.py
+      - name: A version bump is a folded release
+        # On a pull request, a changed __version__ checks as a release of it, so a release PR that
+        # leaves entries under ## Unreleased fails here instead of in release.yml after the tag.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          git show FETCH_HEAD:ruleprobe/__init__.py > "$RUNNER_TEMP/base_init.py"
+          python scripts/release_preflight.py --base-init "$RUNNER_TEMP/base_init.py"
 
   floor:
     # 3.9 is the floor `requires-python` claims; a newer syntax lands here before it lands on a user.

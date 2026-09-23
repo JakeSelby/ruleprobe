@@ -9,6 +9,7 @@ the story's review findings hold the full reasoning.
   only with `--tag`. The documented `--tag` runs in `docs/releasing.md` steps 2 and 3 refuse it before
   the tag, and `release.yml` after the push. Automatic enforcement, for example running the preflight
   with `--tag` in CI when a PR changes `__version__`, needs the maintainer's call.
+  - Amended 2026-09-23: the maintainer chose CI enforcement; RP-C004 (#68) implements it.
 - The Unreleased check matches only `- ` bullets under a literal `## Unreleased` heading; `* ` or `+ `
   bullets or a `[Unreleased]` heading would pass. Pre-existing; this repository writes neither.
 
