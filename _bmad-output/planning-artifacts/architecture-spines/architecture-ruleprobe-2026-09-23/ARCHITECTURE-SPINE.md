@@ -84,6 +84,8 @@ Read-only. A local AD that weakens either is a conflict to surface, not an overr
     others: `registry.from_spec` imports `matchers`; `report._validity_note` imports `validity`;
     `registry` imports `detectors.common` at its tail to populate `DEFAULT`.
   - A new module takes a place in this graph in the change that adds it, and the spine is updated.
+  - `detectors.catalog` (planned, v0.2.0, story 3.5) is a Python literal module under AD-9's package
+    data rule. `rules` imports it; it imports `matchers` to compile its entries and nothing else.
 
 ```mermaid
 flowchart TD
@@ -100,6 +102,8 @@ flowchart TD
   rules --> matchers
   rules --> registry
   rules --> declarative
+  rules --> detectors_catalog[detectors.catalog]
+  detectors_catalog --> matchers
   matchers --> registry
   matchers --> shell
   matchers --> declarative
@@ -262,6 +266,8 @@ flowchart TD
     the union of the shipped map and the consumer's `Registry(renamed=)` map; the consumer's entry
     wins on a clash. Chains resolve to their end; a cycle is an error when the registry is built.
     `report_data` emits the effective map beside its rows, so stored JSON folds without the registry.
+    The same function folds a row's `compliance` map (AD-11): a retired id's `opportunities`,
+    `followed` and `undecided` sum under the current id, as its hits do.
     [ASSUMPTION: this is the persistence FR-29 asks for]
   - **Shipped ids.** A list of every detector id any release has shipped. A test fails when a listed
     id is neither registered nor folded.
@@ -270,6 +276,9 @@ flowchart TD
     the import system the same way from a directory, a wheel or a zip on `sys.path` on 3.9, and the
     import system loads it once per process, so building a `Registry` adds no file I/O. A test asserts
     the module holds only literals. [ASSUMPTION: the module is `ruleprobe/contract_data.py`]
+  - **Catalog.** The shipped catalog's entries are Python literals in `ruleprobe/detectors/catalog.py`
+    under the same rule, compiled with `compile_detector`, never a data file read when a bundle builds
+    a `Registry` (planned, v0.2.0).
   - **Corpus.** The corpus stays a directory, read only by validity and `ruleprobe corpus`, never at
     import or registry build. A caller that imports from a zip sets `RULEPROBE_CORPUS` or unpacks it,
     as the harness does. [ADOPTED]
