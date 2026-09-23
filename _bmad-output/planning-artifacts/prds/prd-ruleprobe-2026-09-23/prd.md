@@ -182,7 +182,7 @@ neighbours already do it (refs 1, 2). It is the price of being credible.
 - **Corpus**: the labelled sessions that ship in the package.
 - **Floor**: the minimum precision and recall a detector must score on the corpus. Default 0.9.
 - **Schema version**: an integer on each detector entry and each row naming the contract it was written
-  under.
+  under. 0.2.0 writes `2`; an absent key means 1.
 - **Fold map**: a mapping from a retired detector id to its current id. Each consumer supplies its own
   through `Registry(renamed=...)` or `Registry.rename`.
 - **Declared public API**: the names the project promises not to change within a minor series.
@@ -339,25 +339,37 @@ The report states the share of rules measured. **Status:** partial. 0.1.0 prints
 
 #### FR-15: Section-level binding
 The system splits one rule file into many rules, so a `CLAUDE.md` with twelve rules is twelve entries in
-the coverage block. **Status:** planned (v0.2.0). The split unit is open (§11, Q2).
+the coverage block. **Status:** planned (v0.2.0). The split unit is the heading, for 0.2 (§11, Q2,
+decided 2026-09-23). List items are not split units in 0.2.
 
 **Consequences (testable):**
 - A file with twelve rule sections yields twelve rules, each with its own measured, dark or unmeasured
   state.
-- Each rule's id is stable when a section above it is edited. `[ASSUMPTION: derived from the heading
-  text, not the position]`
-- A split unit (Q2) is a rule when its body holds at least one line of text outside a fenced code
+- Each rule's id is stable when a section above it is edited. It derives from the heading text, not the
+  position.
+- A heading section is a rule when its body holds at least one line of text outside a fenced code
   block, a table and a blockquote. A unit that is only a heading, only a fenced block, only a table or
   only a blockquote is not a rule, and is not counted in any of the three states.
   `[ASSUMPTION: this definition; the research's ref 3 says most of a public CLAUDE.md is not rules]`
+- A section holding several bullet rules is one rule.
 - A fixture rule file with three rule sections and one section holding only a fenced example yields
   three rules, and the coverage block counts three.
 - Per-file binding (FR-13) gives the same result as before for a file with one rule.
 
 #### FR-16: Catalog of common rule shapes
 The package ships declarative detectors for common rule shapes, bound to a rule by what the rule says, so
-a stranger's rules are measured without a detector written. **Status:** planned (v0.2.0). The catalog's
-size is open (§11, Q3).
+a stranger's rules are measured without a detector written. **Status:** planned (v0.2.0). The catalog is a
+small set of six to eight shapes (§11, Q3, decided 2026-09-23). The starting list, with each detector
+kind:
+
+1. Run the tests before finishing: `order` or `absent`.
+2. Never skip pre-commit hooks with `--no-verify`: event matcher on `git`.
+3. Never force-push the default branch: event matcher on `git`.
+4. Use the named package manager, not another: event matcher on `command`.
+5. Do not read a whole file into context: event matcher on `command`, as the shipped `whole-file-cat`.
+6. Conventional Commit subjects: event matcher on the `git` commit message.
+   `[ASSUMPTION: subject parsing fits a matcher]`
+7. Never commit a secret-shaped file: event matcher on the `git add` path.
 
 **Consequences (testable):**
 - Every catalog detector carries `examples:` and scores at or above the floor in CI.
@@ -367,8 +379,7 @@ size is open (§11, Q3).
 - A catalog binding is shown as catalog-bound, not as the user's own detector.
 - The binding rule: each catalog entry carries one anchored text pattern. A rule binds an entry only
   when its text matches exactly one entry's pattern. A rule that matches none, or more than one, stays
-  unmeasured. Binding under-counts. `[ASSUMPTION: one anchored pattern per entry, exact-one match;
-  the pattern form is for the spine]`
+  unmeasured. Binding under-counts. The pattern form is fixed by the spine (AD-12).
 - Binding reads the rule text with no model.
 
 ### 4.6 The report
@@ -378,12 +389,14 @@ opportunity for rules that ask for something to be done. Realizes UJ-1 and UJ-3.
 
 #### FR-17: Hits per session
 `ruleprobe report` prints, per detector, hits, sessions with a hit, measured sessions and share.
-**Status:** implemented (0.1.0).
+**Status:** implemented (0.1.0); the marker's rename is planned (v0.2.0).
 
 **Consequences (testable):**
 - A detector with zero hits in the window is listed, not omitted.
-- `unobserved` and `promote?` stay blank until `min_sessions` (default 20) measured sessions.
-- `promote?` appears above `promote_share` (default 0.30). Its wording is open (§11, Q11).
+- `unobserved` and the threshold marker stay blank until `min_sessions` (default 20) measured sessions.
+- The marker appears above the share threshold (default 0.30). In 0.2.0 it is a neutral "frequent"
+  marker with no advice, replacing 0.1.0's `promote?`, and the parameter and flag names
+  (`promote_share`, `--promote-share`) follow in the 0.2 break (§11, Q11, decided 2026-09-23).
 
 #### FR-18: Grouping and window
 The report groups by rule, by repository or by stance variant, and filters by date. **Status:**
@@ -427,8 +440,9 @@ No compliance figure is shown below a minimum opportunity count. **Status:** pla
 
 **Consequences (testable):**
 - Below the minimum, the report prints the counts and no rate.
-- The minimum is a parameter of `report` and `report_data`, default 20.
-  `[ASSUMPTION: mirrors min_sessions=20; open, §11 Q7]`
+- The minimum is a parameter of `report` and `report_data`, default 20, applied to each printed group,
+  as `min_sessions` is (§11, Q7, decided 2026-09-23).
+- A `--by repo` block with fewer than 20 opportunities of its own prints the counts and no rate.
 
 ### 4.7 Detector validity
 
@@ -497,15 +511,16 @@ all three once, as its one breaking change (maintainer decision 4, 2026-09-23). 
 Every declarative detector entry carries a schema version. **Status:** planned (v0.2.0).
 
 **Consequences (testable):**
-- An entry with no schema version is read as the 0.1 schema.
+- 0.2.0 writes the integer `2` (§11, Q9, decided 2026-09-23).
+- An entry with no schema version is read as the 0.1 schema, version 1.
 - An entry with a schema version newer than the package knows is a finding, not a silent load.
 
 #### FR-28: Schema version on rows
 Every row and every `report_data` result carries a schema version. **Status:** planned (v0.2.0).
 
 **Consequences (testable):**
-- `measure()` writes the version into the row.
-- A row with no version is read as the 0.1 schema.
+- `measure()` writes the version into the row: the integer `2` in 0.2.0.
+- A row with no version is read as the 0.1 schema, version 1.
 
 #### FR-29: Fold map
 A renamed detector id folds onto its new id when rows are reported. **Status:** partial. Implemented
@@ -583,6 +598,9 @@ planned (v0.2.0); eight names declared in 0.1.0.
     (`ruleprobe/validity.py:56`);
   - `declarative.load(path)` returning `(document, lines)` (`ruleprobe/declarative.py:126`);
   - `ruleprobe.__file__`, used to find `corpus/` beside it (`scripts/detector_corpus.py`).
+- Root `__all__` names outside this list stay importable and undeclared: the README says they are not
+  covered by FR-31. A name joins the declared API only with a contract test (§11, Q8, decided
+  2026-09-23).
 - A contract test exercises each declared name and each call shape and attribute above, including a
   detector function called as `fn(events, ctx)` that reads `ctx.bash`, `ctx.finals` and `Parsed.event`.
   It fails on any removal or signature change.
@@ -599,8 +617,10 @@ schema do not change incompatibly. **Status:** planned (v0.2.0).
 **Consequences (testable):**
 - A 0.2.x release passes the 0.2.0 contract test unchanged.
 - A detector rename in 0.2.x ships a fold map entry (FR-29).
-- A breaking change needs a new minor and a changelog entry naming it. Whether a 0.x minor may break
-  again after 0.2.0 is open (§11, Q12).
+- A breaking change needs a new minor and a changelog entry naming it.
+- A later 0.x minor may break the declared surface, with notice: its changelog section opens with a
+  Breaking heading naming the migration, and the contract test is updated in the same change (§11,
+  Q12, decided 2026-09-23).
 
 ### 4.9 The third reader
 
@@ -608,37 +628,40 @@ schema do not change incompatibly. **Status:** planned (v0.2.0).
 Realizes UJ-4.
 
 #### FR-32: Third reader
-The system reads a third runtime's transcripts into the event schema. **Status:** planned (v0.2.0).
-Cursor or Gemini CLI is open (§11, Q1).
+The system reads Gemini CLI's transcripts into the event schema. **Status:** planned (v0.2.0). The
+maintainer chose Gemini CLI on 2026-09-23 (§11, Q1). Spike RP-SP003 confirms its transcript location and
+format and lists its file-tool mappings; if Gemini CLI cannot be read reliably, it reports back rather
+than switching runtime.
 
 **Consequences (testable):**
-- `--runtime <name>` reads that runtime's sessions, and `auto` includes it.
+- `--runtime <name>` reads Gemini CLI's sessions, and `auto` includes it.
 - The runtime's shell and file tools reach detectors under the shared names (`Bash`, and the file tools).
 - The README names the runtime and lists what its transcripts do not record.
 
 #### FR-33: Third reader in the corpus
-Labelled sessions from the third runtime join the corpus. **Status:** planned (v0.2.0).
+Labelled Gemini CLI sessions join the corpus. **Status:** planned (v0.2.0).
 
 **Consequences (testable):**
 - The corpus holds at least one labelled session from each runtime the package reads.
-- Every detector that applies to the third runtime scores at or above 0.9 on its sessions in CI.
+- Every detector that applies to Gemini CLI scores at or above 0.9 on its sessions in CI.
 
-### 4.10 Model-assisted detector drafting (proposed)
+### 4.10 Model-assisted detector drafting (withdrawn)
 
 **Description:** A separate command could read a rule's prose and draft a declarative detector for a person
-to review and commit. It is a proposal, not a commitment (maintainer decision 2, 2026-09-23). Whether it
-belongs in 0.2.0, a later minor or nowhere is open (§11, Q4).
+to review and commit. The maintainer withdrew it from ruleprobe on 2026-09-23 (§11, Q4): it needs a
+model, so it moves into the scope of the future judge library tracked in
+[#21](https://github.com/JakeSelby/ruleprobe/issues/21) (RP-E002). The text below is kept as the record.
 
 #### FR-34: Opt-in drafting command
 A user can run a separate, opt-in command that drafts a declarative detector from a rule's text.
-**Status:** proposed.
+**Status:** withdrawn (2026-09-23; moved to #21).
 
 **Consequences (testable):**
 - The command only runs when the user names it and supplies the model access.
 - Its output is a detector entry with `examples:`, printed or written to a path the user names.
 - It never changes a registry, a corpus or a rule file by itself.
 - `ruleprobe report`, `detectors` and `corpus` make no model call, whether or not the command exists.
-- The package keeps no runtime dependency for it. `[ASSUMPTION: an optional extra or a separate package]`
+- The package keeps no runtime dependency for it.
 
 **Non-goals of FR-34:** it does not bind rules at report time; it does not score detectors; it does not
 make a drafted detector count before a person commits it; it does not ship with the core install.
@@ -681,7 +704,7 @@ These bind every feature. Each is tested.
 - **NFR-6 Corpus floor 0.9 in CI.** CI runs `ruleprobe corpus --floor 0.9` and fails under it
   (implemented, 0.1.0). Bound: the floor is not lowered to pass a detector; a detector under it is
   fixed or removed.
-- **NFR-7 No model in measurement.** No command but FR-34's calls a model, and 0.1.0 has none
+- **NFR-7 No model in measurement.** No command in ruleprobe calls a model, and 0.1.0 has none
   (implemented, 0.1.0). Bound: the core package imports no model client.
 - **NFR-8 Local data only.** Transcripts are read where the runtime wrote them or where `--root`
   points (implemented, 0.1.0).
@@ -726,10 +749,10 @@ FR-29's persisted fold entries and rename test only); FR-32 and FR-33 (third rea
 **Held (implemented, 0.1.0):** FR-1 to FR-13, FR-17 to FR-20, FR-23 and FR-24, unchanged except where
 the contract work versions them.
 
-**Proposed only:** FR-34.
+**Withdrawn:** FR-34 (2026-09-23; moved to #21).
 
-**Out:** §7, and compliance by position in the session (research recommendation 4), which stays an open
-question (§11, Q5).
+**Out:** §7, and compliance by position in the session (research recommendation 4), kept out of 0.2.0 by
+the maintainer on 2026-09-23 (§11, Q5).
 
 **Beyond 0.2:** FR-35's seam is proposed for 0.3 (#21). A separate, provider-neutral judge library is
 future and unscheduled. It would own judging and depend on ruleprobe's seam, never the reverse. It is
@@ -741,8 +764,8 @@ Non-goal: no model client, credential or vendor adapter enters ruleprobe.
 ## 9. Success metrics
 
 **Baseline, 2026-09-23:** 0 GitHub stars; 0 known outside users. Unless stated otherwise, the
-window runs from the 0.2.0 release to 2027-03-23. `[ASSUMPTION: the window and every target are carried
-from the brief and are not maintainer-set; §11 Q6]`
+window runs for six months from the 0.2.0 release. The maintainer kept every target as written and set
+this window on 2026-09-23 (§11, Q6).
 
 - **SM-1 Sixty-second test.** Cohort: five first-time testers outside the project, each with an unedited
   `CLAUDE.md` or `AGENTS.md` and their own transcripts. Target: four of five see at least one of their own
@@ -797,30 +820,33 @@ transcript giving a different report. Any one is a failure regardless of the oth
 
 ## 11. Open questions
 
-1. **Third reader: Cursor or Gemini CLI?** Blocks FR-32, FR-33, SM-6. Needed for v0.2.0.
-2. **Section-level binding: split on headings, list items, or both?** Blocks FR-15. Needed for v0.2.0.
-3. **How many rule shapes must the catalog hold before SM-1 can pass?** Blocks FR-16, SM-1. Needed for
-   v0.2.0.
-4. **Does the drafting command belong in 0.2.0, a later minor, or nowhere?** Blocks FR-34. Needed before
-   v0.2.0 scope is frozen.
+1. **Third reader: Cursor or Gemini CLI?** Closed 2026-09-23: Gemini CLI. The spike RP-SP003 still
+   confirms its format and reports back if it cannot be read reliably (RP-SP003, #54).
+2. **Section-level binding: split on headings, list items, or both?** Closed 2026-09-23: headings only
+   for 0.2 (RP-D008, #45).
+3. **How many rule shapes must the catalog hold before SM-1 can pass?** Closed 2026-09-23: a small set
+   of six to eight shapes, listed in FR-16, each clearing the floor (RP-D009, #46).
+4. **Does the drafting command belong in 0.2.0, a later minor, or nowhere?** Closed 2026-09-23: nowhere
+   in ruleprobe; FR-34 is withdrawn and drafting moves to the judge library tracked in #21 (RP-D011,
+   #59).
 5. **Should the report also break compliance down by position in the session (research recommendation
-   4)?** Would extend FR-21. Needed before v0.2.0 scope is frozen, to confirm it stays out.
-6. **Are the targets and the 2027-03-23 window right?** Blocks SM-1 to SM-8. Needed before the v0.2.0
-   release.
-7. **Is 20 the right minimum opportunity count?** Blocks FR-22. Needed for v0.2.0.
+   4)?** Closed 2026-09-23: out of 0.2.0 (RP-D007, #44).
+6. **Are the targets and the 2027-03-23 window right?** Closed 2026-09-23: targets kept as written; the
+   window becomes six months from the 0.2.0 release (RP-D010, #57).
+7. **Is 20 the right minimum opportunity count?** Closed 2026-09-23: 20, per printed group (RP-D004,
+   #38).
 8. **Do the root `__all__` names outside FR-30's list join the declared API, or stay importable and
-   undeclared?** Blocks FR-30, FR-31. Needed for v0.2.0.
-9. **Is the schema version an integer, and does 0.2.0 write `2`?** Blocks FR-27, FR-28. Needed for
-   v0.2.0.
-10. **How does a Python detector declare an opportunity?** Blocks FR-21 for Python detectors, including
-    the harness's own. Needed for v0.2.0.
-11. **What does `promote?` become?** Blocks FR-17's wording in the 0.2 break. The README says it means
-    "either the rule is worth stating more loudly or the rule is wrong", which sits beside "ruleprobe
-    prescribes nothing". Options: keep it, reword it, or drop it. Recommendation: keep the threshold
-    marker and give it neutral wording ("frequent") with no advice attached, so the report stays
-    descriptive. Needed before v0.2.0 scope is frozen.
-12. **May a 0.x minor break again after 0.2.0?** Blocks FR-31. Maintainer decision 4 takes the break
-    once; 0.x semantics usually let a minor break. Needed at v0.2.0.
+   undeclared?** Closed 2026-09-23: importable and undeclared; a name joins only with a contract test
+   (RP-D002, #30).
+9. **Is the schema version an integer, and does 0.2.0 write `2`?** Closed 2026-09-23: yes; an absent
+   key means 1 (RP-D001, #29).
+10. **How does a Python detector declare an opportunity?** Closed 2026-09-23: through the keyword-only
+    `opportunities` callable of AD-11 (RP-D005, #39).
+11. **What does `promote?` become?** Closed 2026-09-23: a neutral "frequent" marker with no advice;
+    the parameter names follow in the break (RP-D006, #40).
+12. **May a 0.x minor break again after 0.2.0?** Closed 2026-09-23: yes, with notice: a Breaking
+    changelog heading naming the migration, and the contract test updated in the same change (RP-D003,
+    #31).
 13. **README count of declared names.** The README says "six names" but lists seven lines plus two
     (`README.md:339`); FR-30's count of eight is right. A docs fix for the 0.2 stories, not a PRD
     change.
@@ -828,12 +854,8 @@ transcript giving a different report. Any one is a failure regardless of the oth
 ## 12. Assumptions index
 
 - §2.3 UJ-1: the explain path's CLI form is left to the architecture spine.
-- §4.5 FR-15: a rule's id derives from its heading text, not its position.
 - §4.5 FR-15: what counts as a rule within a split unit.
-- §4.5 FR-16: one anchored pattern per catalog entry, bound on an exact-one match.
+- §4.5 FR-16: Conventional Commit subject parsing fits a matcher.
 - §4.6 FR-21: compliance per opportunity starts from the `order` and `absent` shapes.
-- §4.6 FR-22: the minimum opportunity count defaults to 20.
-- §4.10 FR-34: drafting ships as an optional extra or a separate package.
 - §5 NFR-3: `--since` is the one clock-dependent input.
 - §5 NFR-9: the reference volume; no timing measured, and the bound is SM-1's minute.
-- §9: the window and every target are carried from the brief, not maintainer-set.

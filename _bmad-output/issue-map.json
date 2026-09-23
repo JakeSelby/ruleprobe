@@ -6,7 +6,7 @@
   "next_ids": {
     "epic": 10,
     "story": 21,
-    "task": 5,
+    "task": 6,
     "bug": 2,
     "chore": 4,
     "spike": 4,
@@ -75,7 +75,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E001.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -140,7 +140,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S006.md",
       "parent_bmad_id": "RP-E001",
       "parent_github_number": 10,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -673,6 +673,19 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S020.md",
       "parent_bmad_id": "RP-E009",
       "parent_github_number": 28,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-T005",
+      "github_number": 62,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/62",
+      "title": "docs(planning): record the maintainer's 0.2 decisions",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T005.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
       "lifecycle": "active",
       "provenance": "authored"
     }

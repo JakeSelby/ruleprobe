@@ -30,7 +30,8 @@ it blocks FR-32, FR-33 and SM-6. The choice rests on which runtime's transcripts
 
 ## Experiment
 
-For each candidate, from public documentation and a synthetic session, record:
+For Gemini CLI, the runtime the maintainer chose, from public documentation and a synthetic session,
+record:
 
 - the transcript location and format;
 - whether shell commands, file writes, tool-use ids and turns are recorded;
@@ -43,19 +44,21 @@ not closed by a lossy mapping.
 
 ## Exit criterion
 
-- Both candidates have every field above recorded, or marked not recorded.
-- The choice is stated with its trade-off.
+- Gemini CLI has every field above recorded, or marked not recorded.
+- If a field cannot be read reliably, the gap is reported to the maintainer.
 - The chosen runtime's file tools are each listed as exact or native, so the part of FR-32 that holds
   is known before RP-S019.
 
 ## Result
 
-Not yet run.
+Runtime chosen by the maintainer on 2026-09-23: Gemini CLI. The format check is not yet run.
 
 ## Decision
 
-Open: which candidate's transcripts record shell commands, file writes, tool-use ids and turns in a
-form a reader can map under AD-3. The corpus records no recommendation. The result unblocks RP-S019.
+Decided 2026-09-23 by the maintainer: the third runtime is Gemini CLI. The spike still runs, for
+Gemini CLI only, to confirm its transcript location and format and to list its file tools as exact
+or native. If it finds Gemini CLI cannot be read reliably, it reports back to the maintainer rather
+than switching runtime. The result unblocks RP-S019.
 
 ## Dev notes
 
@@ -69,3 +72,4 @@ form a reader can map under AD-3. The corpus records no recommendation. The resu
 ## Change log
 
 - 2026-09-23: written from the planning corpus before implementation.
+- 2026-09-23: runtime chosen by the maintainer: Gemini CLI; the format check still runs.

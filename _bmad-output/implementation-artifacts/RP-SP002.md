@@ -29,8 +29,8 @@ What is each shipped detector's precision on real hits, as opposed to its agreem
 synthetic corpus? The release notes for 0.2.0 (story 6.2) wait on it, so the release can say what
 corpus agreement does not.
 
-This spike is proposed, and the maintainer is to confirm it before it runs; `epics.md` marks it
-"(proposed, maintainer to confirm)".
+The maintainer confirmed this spike on 2026-09-23. It runs before the 0.2.0 release notes
+(story 6.2).
 
 ## Experiment
 
@@ -56,7 +56,7 @@ Not yet run.
 
 ## Decision
 
-Open: whether the maintainer confirms the spike, and then the measured figures. The result feeds the
+Confirmed by the maintainer on 2026-09-23. Open: the measured figures. The result feeds the
 0.2.0 release text (story 6.2) and adds field negatives toward SM-8 (at least ten from real false
 positives). Published figures carry numbers and synthetic stand-ins only, no transcript content.
 
@@ -72,3 +72,4 @@ positives). Published figures carry numbers and synthetic stand-ins only, no tra
 ## Change log
 
 - 2026-09-23: written from the planning corpus before implementation.
+- 2026-09-23: confirmed by the maintainer; runs before the 0.2.0 release notes.

@@ -148,8 +148,10 @@ flowchart TD
     translated input keeps the native key beside the canonical one, as `cmd` sits beside `command`.
   - A native tool with no exact canonical twin keeps its native name. It then matches no canonical
     detector, which under-counts (AD-4). A lossy mapping is never made to gain a hit.
+  - The third reader to map is Gemini CLI (PRD Q1, decided 2026-09-23). Spike RP-SP003 lists each of
+    its file tools as exact or native before its reader is built; a native one stays native.
   - [ASSUMPTION: the canonical file-tool list above is what `ruleprobe/detectors/common.py` reads
-    today; the third reader's file tools are mapped to it or left native, decided in its story]
+    today; Gemini CLI's file tools are mapped to it or left native, decided in its story]
 
 ### AD-4: Detectors under-count rather than over-count [ADOPTED for positive matchers; PROPOSED for negation, #19]
 
@@ -232,13 +234,15 @@ flowchart TD
 
 ### AD-8: The package envelope: no dependency, no network, no write, no model, deterministic [ADOPTED; enforcing tests PROPOSED]
 
-- **Binds:** NFR-1, NFR-2, NFR-3, NFR-5, NFR-7, NFR-8, FR-34; all modules.
+- **Binds:** NFR-1, NFR-2, NFR-3, NFR-5, NFR-7, NFR-8; all modules.
 - **Prevents:** one feature quietly adding a dependency, a network call, a file write or an
   order-dependent count.
 - **Rule:**
   - `dependencies = []`. Standard library only, no syntax or call newer than Python 3.9.
   - No module in the package imports `socket`, `urllib`, `http`, `subprocess` or a model client.
-    FR-34, if it is built, ships outside the core install and the core never imports it.
+    No command anywhere in ruleprobe calls a model. Drafting a detector from prose (FR-34) was
+    withdrawn on 2026-09-23 and moved to the judge library tracked in #21, so ruleprobe has no
+    drafting command and no boundary for one (PRD Q4).
   - `open()` is for reading. The one write in the package is the FR-26 label command, under a
     directory the user names. `report`, `detectors`, `corpus` and the explain path write nothing.
   - The clock is read only to resolve `--since`, in `ruleprobe/readers/__init__.py`.
@@ -257,9 +261,9 @@ flowchart TD
     for its entries, and an entry's own key wins. 0.1.0 ignores the top-level `version` that
     `common.yaml` already carries; from 0.2 it is read, and a value that is not a known schema version
     is a finding. An entry above the highest version the package knows is a finding; a row above it is
-    excluded from counts and reported, as FR-20 excludes a row with no `rules` map. [ASSUMPTION: key
-    name and file-level default; integer is the PRD glossary's working type, and both the type and the
-    value 0.2.0 writes stay open under PRD Q9]
+    excluded from counts and reported, as FR-20 excludes a row with no `rules` map. The value is an
+    integer, and 0.2.0 writes `2` (PRD Q9, decided 2026-09-23). [ASSUMPTION: key name and file-level
+    default]
   - **The 0.2 break** carries the schema version, the fold map, the declared API below, and AD-4's
     undecided rule for `not` and `absent`, which changes counts for existing user detector files.
   - **Fold map.** One function resolves renamed ids for `report`, `report_data` and validity. It reads
@@ -286,12 +290,16 @@ flowchart TD
     including `fn(events, ctx)`, `Context`, `Parsed`, `hit`, `git_calls` 3-tuples, positional
     `Detector(id, rule, event, fn, gate)`, `Registry(list)`, the validity helpers and
     `declarative.load` returning `(document, lines)`. The README renders from it. A name joins only
-    with its test. The list is re-derived from agent-harness `main` before each release.
+    with its test. Root `__all__` names outside FR-30's list stay importable and undeclared (PRD Q8,
+    decided 2026-09-23). The list is re-derived from agent-harness `main` before each release.
   - **Non-name dependencies.** `SECRET_PATTERNS` stays a plain module-level assignment of a literal
     list in `ruleprobe/detectors/common.py`. The wheel is pure Python, named
     `ruleprobe-<version>-py3-none-any.whl`, carries `corpus/`, and imports from a zip on `sys.path`:
     no import-time file read, and no file read when a `Registry` is built or `report_data` runs.
   - Within a minor series none of the above changes incompatibly (FR-31).
+  - **Later breaks.** A later 0.x minor may break the declared surface, with notice: its changelog
+    section opens with a Breaking heading naming the migration, and the contract test is updated in the
+    same change (PRD Q12, decided 2026-09-23).
 
 ### AD-10: How a reader is added [ADOPTED]
 
@@ -333,13 +341,13 @@ flowchart TD
   - A Python detector may set `opportunities` by hand.
   - A row carries `compliance`: detector id to `{"opportunities": N, "followed": M, "undecided": U}`,
     only for detectors that define one. `report` and `report_data` show `undecided` beside the other
-    two, apply the PRD Q7 minimum, default 20, to `opportunities`, and never replace hits per
-    session.
+    two, apply the minimum of 20 `opportunities` to each printed group, as `min_sessions` is applied
+    (PRD Q7, decided 2026-09-23), and never replace hits per session.
   - `run()` and its return are unchanged. `measure()` calls each enabled detector's `opportunities`,
     behind the same `enabled(stances)` gate and the same isolation as `run()`: a raise is recorded in
     `rules_errors` against that detector and costs only its own figures.
-  - [ASSUMPTION: a second callable rather than a second return value; PRD Q10 stays open on the
-    Python ergonomics]
+  - A Python detector declares opportunities through this keyword-only callable, not a second return
+    value (PRD Q10, decided 2026-09-23).
 
 ### AD-12: Rule binding and rule ids [ADOPTED per file; PROPOSED per section and catalog]
 
@@ -354,12 +362,15 @@ flowchart TD
     `--rules`. A section rule's id is that path, `#`, and a slug of its heading text, so it survives an
     edit above it. A slug repeated in one file takes an ordinal suffix in document order
     (`CLAUDE.md#testing`, `CLAUDE.md#testing-2`); a collision that remains is a finding.
-    [ASSUMPTION: this id form; the split unit is PRD Q2]
+    The split unit is the heading only, for 0.2 (PRD Q2, decided 2026-09-23); list items are not split,
+    so a section of bullet rules is one rule.
   - Detector precedence is fixed: shipped, then catalog, then the three discovery places in
     `load_bundle`'s order; a later id replaces an earlier one (`Registry.add`). A rule bound to a
     catalog id the user replaced is reported as bound to the user's own.
   - A catalog entry carries one anchored pattern. A rule binds an entry only when exactly one entry
     matches; none or several leaves it unmeasured. Binding reads text; no model.
+  - The 0.2 catalog is a small set of six to eight shapes, each with `examples:` at the floor, listed
+    with their detector kinds in PRD FR-16 (PRD Q3, decided 2026-09-23).
 
 ### AD-13: Explain, label and redaction [PROPOSED]
 
@@ -458,29 +469,16 @@ No service, no hosted component, no environment beyond a developer machine and C
 | FR-23, FR-24, FR-33 corpus and floor | `validity.py`, `corpus/` | AD-6 |
 | FR-25, FR-26 explain and label | `cli.py`, `report.py`, `validity.py` | AD-13, AD-8 |
 | FR-27 to FR-31 versioned contract | `registry.py`, `report.py`, `declarative.py`, contract test | AD-9 |
-| FR-34 drafting (proposed) | outside the core install | AD-8 |
+| FR-34 drafting (withdrawn 2026-09-23; moved to #21) | not in ruleprobe | AD-8 |
 | NFR-1 to NFR-8 | all | AD-8, AD-4, AD-6 |
 
 ## Deferred
 
-- **Third runtime** (PRD Q1). AD-10 fixes how a reader is added; which one is a product call.
-- **Split unit for sections** (PRD Q2). AD-12 fixes the id and binding; whether the unit is
-  headings or list items is open.
-- **Catalog size** (PRD Q3). The catalog's shape is fixed by AD-6, AD-7 and AD-12; its size is a
-  product call.
-- **Drafting command** (FR-34, PRD Q4). Only its boundary is fixed (AD-8): outside the core, no model
-  in `report`.
-- **Compliance by position** (PRD Q5). Needs AD-11 first.
-- **Minimum opportunity count** (PRD Q7). AD-11 applies a minimum; 20 is the working default.
-  Revisit when Q7 is answered, before v0.2.0.
-- **Root `__all__` names outside FR-30** (PRD Q8). AD-9's contract test holds FR-30's list only; a
-  builder adds no other name to it until Q8 is answered, before v0.2.0.
+- **Compliance by position** (PRD Q5). Out of 0.2.0 (decided 2026-09-23); a candidate beyond 0.2. Needs
+  AD-11 first.
 - **A trigger key for `absent`.** Without one, every turn is an opportunity for `scope: turn`
   (AD-11). Adding one is an AD-7 vocabulary change. Revisit when the catalog's first `absent` rule
   shows a rate diluted by turns where the rule could not apply.
-- **Schema version value** (PRD Q9) and **later 0.x breaks** (PRD Q12). AD-9 fixes the key and the
-  rules, not the number or the policy after 0.2.0.
-- **`promote?` wording** (PRD Q11). Presentation only; no unit can diverge on it.
 - **Performance** (NFR-9). No timing exists; the batch-per-session shape bounds memory per session.
   A measured timing decides whether anything needs fixing here.
 - **Concurrency.** Single process, one session at a time. Parallel reading is not planned.

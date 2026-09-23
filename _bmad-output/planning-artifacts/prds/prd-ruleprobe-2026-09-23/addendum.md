@@ -14,8 +14,9 @@ mechanism notes for the architecture spine (#14). Reference numbers point at the
 
 - **A model inside `ruleprobe report`.** Rejected (maintainer decision 2, 2026-09-23). It would end
   deterministic output (NFR-3) and put a third-party judgment inside every number. The literature
-  demotes a model judge to an advisor behind a deterministic layer (refs 26, 27). The only model path is
-  FR-34's separate command, and it is proposed, not committed.
+  demotes a model judge to an advisor behind a deterministic layer (refs 26, 27). No model path remains
+  in ruleprobe: FR-34's drafting command was withdrawn on 2026-09-23 and moved to the judge library
+  tracked in #21.
 - **Closing the sixty-second gap with a model.** Rejected (maintainer decision 7). Section-level binding
   and a catalog do it deterministically. The trade-off: a catalog binds fewer rules than a model would,
   and the unbound ones stay visibly unmeasured.
