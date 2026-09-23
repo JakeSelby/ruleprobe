@@ -1,11 +1,17 @@
 # SPDX-License-Identifier: MIT
 """The registry: what it accepts, what it refuses, how a gate reads, and the two seams
 third-party detectors arrive through."""
+import builtins
+import contextlib
+import io
+import os
 import unittest
+from unittest import mock
 
 from corpus import bash, say
-from ruleprobe import DEFAULT, Detector, Registry, from_spec, register_compiler, run
-from ruleprobe.registry import COMPILERS
+from ruleprobe import (DEFAULT, Detector, Registry, contract_data, from_spec,
+                       register_compiler, run)
+from ruleprobe.registry import COMPILERS, fold_map
 
 
 def never(events, ctx):
@@ -120,6 +126,98 @@ class DeclarativeSeamTests(unittest.TestCase):
         detector = from_spec({"kind": "test-shape", "id": "a/b", "rule": "a"})
         registry = Registry([detector])
         self.assertIn("a/b", run([say("anything")], registry=registry))
+
+
+@contextlib.contextmanager
+def traced_file_reads():
+    """Record every file or directory the block opens or lists, and let each go through."""
+    seen = []
+    patches = []
+    for owner, name in ((builtins, "open"), (io, "open"), (io, "open_code"), (io, "FileIO"),
+                        (os, "open"), (os, "listdir"), (os, "scandir")):
+        real = getattr(owner, name)
+
+        def traced(*args, _real=real, _name=name, **kwargs):
+            seen.append((_name, args[0] if args else None))
+            return _real(*args, **kwargs)
+
+        patches.append(mock.patch.object(owner, name, traced))
+    with contextlib.ExitStack() as stack:
+        for patch in patches:
+            stack.enter_context(patch)
+        yield seen
+
+
+class FoldMapTests(unittest.TestCase):
+    """The one function every read folds renamed ids through."""
+
+    def test_the_shipped_map_applies_with_no_map_of_your_own(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
+            self.assertEqual(Registry().fold_map(), {"a/old": "a/one"})
+            self.assertEqual(Registry().renamed, {})
+
+    def test_the_consumer_wins_a_clash_with_the_shipped_map(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
+            registry = Registry(renamed={"a/old": "a/two"})
+            self.assertEqual(registry.fold_map(), {"a/old": "a/two"})
+
+    def test_a_chain_resolves_to_its_end_across_both_maps(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/x": "a/y"}):
+            registry = Registry(renamed={"a/y": "a/z", "a/w": "a/x"})
+            self.assertEqual(registry.fold_map(), {"a/w": "a/z", "a/x": "a/z", "a/y": "a/z"})
+
+    def test_a_cycle_raises_when_the_registry_is_built(self):
+        with self.assertRaises(ValueError):
+            Registry(renamed={"a/x": "a/y", "a/y": "a/x"})
+        with self.assertRaises(ValueError):
+            Registry(renamed={"a/w": "a/x", "a/x": "a/y", "a/y": "a/x"})
+
+    def test_a_cycle_through_the_shipped_map_raises_when_the_registry_is_built(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/x": "a/y"}):
+            with self.assertRaises(ValueError):
+                Registry(renamed={"a/y": "a/x"})
+
+    def test_a_rename_that_closes_a_cycle_raises_and_changes_nothing(self):
+        registry = Registry([Detector("a/x", "a", "session", never)], {"a/x": "a/y"})
+        with self.assertRaises(ValueError):
+            registry.rename("a/y", "a/x")
+        self.assertEqual(registry.renamed, {"a/x": "a/y"})
+        self.assertIn("a/x", registry)
+
+    def test_an_id_renamed_to_itself_is_no_rename_and_no_cycle(self):
+        registry = Registry([Detector("a/x", "a", "session", never)])
+        registry.rename("a/x", "a/x")
+        self.assertEqual(registry.fold_map(), {})
+        self.assertIn("a/x", registry)
+
+    def test_the_consumer_may_undo_a_shipped_rename(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
+            self.assertEqual(Registry(renamed={"a/old": "a/old"}).fold_map(), {})
+
+    def test_a_resolved_map_resolves_to_itself(self):
+        folds = fold_map({"a/w": "a/x", "a/x": "a/y"})
+        self.assertEqual(fold_map(folds), folds)
+
+    def test_the_default_registry_folds_the_shipped_map_and_holds_no_map_of_its_own(self):
+        self.assertEqual(DEFAULT.renamed, {})
+        self.assertEqual(DEFAULT.fold_map(), fold_map(contract_data.RENAMED))
+
+
+class NoFileReadTests(unittest.TestCase):
+    def test_building_copying_renaming_and_folding_a_registry_reads_no_file(self):
+        with traced_file_reads() as seen:
+            registry = Registry([Detector("a/one", "a", "session", never)], {"a/old": "a/one"})
+            registry.copy().rename("a/older", "a/old")
+            registry.fold_map()
+            DEFAULT.copy().fold_map()
+        self.assertEqual(seen, [])
+
+    def test_the_trace_sees_a_read(self):
+        with traced_file_reads() as seen:
+            with open(__file__, encoding="utf-8") as handle:
+                handle.readline()
+            os.listdir(os.path.dirname(__file__))
+        self.assertEqual([name for name, _path in seen], ["open", "listdir"])
 
 
 if __name__ == "__main__":

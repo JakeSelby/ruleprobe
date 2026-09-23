@@ -8,6 +8,7 @@ returns `{detector_id: [Hit, ...]}` with the detectors that found nothing omitte
 A detector that raises is skipped, so one bad pattern cannot cost a session its record.
 `run(..., strict=True)` re-raises instead, which is how a corpus is tested.
 """
+from .contract_data import RENAMED as SHIPPED_RENAMED
 from .events import Hit
 from .shell import analyse
 
@@ -64,17 +65,50 @@ class Detector(object):
         return "Detector(%r, rule=%r, event=%r)" % (self.id, self.rule, self.event)
 
 
+def fold_map(renamed=None):
+    """The effective fold map: `{retired_id: current_id}`, the one place a rename resolves.
+
+    It is the shipped map in `ruleprobe.contract_data` with `renamed`, a consumer's own map,
+    laid over it: the consumer's entry wins a clash. Each id is followed to the end of its
+    chain, so `a -> b` and `b -> c` fold `a` onto `c`, and an entry mapping an id to itself is
+    no rename and is left out. A cycle raises `ValueError`, since no id in it is current.
+
+    The report, `report_data` and validity all fold through this, and `report_data` emits its
+    result, so a stored JSON report folds with no registry at hand. Passing a map this has
+    already returned gives the same map back.
+    """
+    merged = dict(SHIPPED_RENAMED)
+    merged.update(renamed or {})
+    out = {}
+    for start in sorted(merged):
+        chain, current = [start], merged[start]
+        while current in merged and merged[current] != current:
+            if current in chain:
+                raise ValueError("the fold map has a cycle: %s"
+                                 % " -> ".join(chain + [current]))
+            chain.append(current)
+            current = merged[current]
+        if current != start:
+            out[start] = current
+    return out
+
+
 class Registry(object):
     """An ordered set of detectors, keyed by id, plus the renames folded on read.
 
     A registry is mutable and cheap: build your own rather than mutating `DEFAULT` when you
     want the six generic detectors left alone.
+
+    `renamed` is this registry's own `{old_id: new_id}` map; `fold_map()` is what a read
+    folds through, with the shipped renames under it. A cycle across the two raises
+    `ValueError` here, when the registry is built, rather than on the first read.
     """
 
     def __init__(self, detectors=None, renamed=None):
         self._order = []
         self._by_id = {}
         self.renamed = dict(renamed or {})
+        fold_map(self.renamed)
         for detector in detectors or ():
             self.add(detector)
 
@@ -109,11 +143,21 @@ class Registry(object):
         instead, so one measurement stays one line and one series across it. Leaving the old
         detector registered as well would double every hit into the successor and keep the
         old id on the table for ever as an `unobserved` line, so the rename removes it.
+
+        A rename that would close a cycle raises `ValueError` and changes nothing.
         """
+        candidate = dict(self.renamed)
+        candidate[old_id] = new_id
+        fold_map(candidate)
         self.renamed[old_id] = new_id
         if old_id != new_id:
             self.remove(old_id)
         return self
+
+    def fold_map(self):
+        """The effective fold map a read of this registry's rows goes through: see the
+        module-level `fold_map`."""
+        return fold_map(self.renamed)
 
     def get(self, detector_id):
         return self._by_id.get(detector_id)

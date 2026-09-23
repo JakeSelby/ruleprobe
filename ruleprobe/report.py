@@ -21,7 +21,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, run
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, fold_map, run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -64,8 +64,10 @@ def folded_rules(row, renamed):
 
     A rename would otherwise split one measurement across two lines, and the older half
     would look like a detector that stopped firing. A stored row is never rewritten for it:
-    the fold is done on every read instead.
+    the fold is done on every read instead. `renamed` is read through `fold_map`, so the
+    shipped renames apply under it and a chain folds to its end.
     """
+    folds = fold_map(renamed)
     out = {}
     for did, n in (row.get("rules") or {}).items():
         if not isinstance(did, str):
@@ -74,7 +76,7 @@ def folded_rules(row, renamed):
             count = int(n or 0)
         except (TypeError, ValueError):
             count = 0
-        key = renamed.get(did, did)
+        key = folds.get(did, did)
         out[key] = out.get(key, 0) + count
     return out
 
@@ -84,12 +86,13 @@ def errored_detectors(row, renamed):
 
     A session an entry names is subtracted from that detector's denominator and from no
     other's, which is the whole difference between "this detector has no evidence here" and
-    "this session has no evidence at all".
+    "this session has no evidence at all". `renamed` is read through `fold_map`.
     """
+    folds = fold_map(renamed)
     out = set()
     for entry in (row.get("rules_errors") or ()):
         if isinstance(entry, dict) and isinstance(entry.get("detector"), str):
-            out.add(renamed.get(entry["detector"], entry["detector"]))
+            out.add(folds.get(entry["detector"], entry["detector"]))
     return out
 
 
@@ -112,9 +115,10 @@ def rule_ids(rows, registry):
     """Every detector id to report on: the registry's, so a detector with no hit is still a
     line, plus any id a row carries that the registry no longer defines - under its current
     name when the registry says it was renamed."""
+    folds = registry.fold_map()
     ids = set(registry.ids())
     for row in rows:
-        ids.update(registry.renamed.get(k, k) for k in (row.get("rules") or {})
+        ids.update(folds.get(k, k) for k in (row.get("rules") or {})
                    if isinstance(k, str))
     return sorted(ids)
 
@@ -130,6 +134,8 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     - `by`, `measured`, `unmeasured`, `unknown_schema`, `unattributed`, `errors`,
       `min_sessions`, `promote_share` - what was counted and under which settings.
     - `notes` - the preamble lines, in order.
+    - `renamed` - the effective fold map the counts were read through, `{retired_id:
+      current_id}`, so a stored result folds a retired id with no registry at hand.
     - `detectors` - one entry per detector when `by="rule"`: `detector`, `hits`,
       `sessions`, `of`, `share`, `note`, and `validity` when scores were passed.
     - `groups` - one entry per repository or stance otherwise: `key`, `sessions`, `hits`,
@@ -138,7 +144,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     if by not in BY:
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
     rows = [r for r in rows if isinstance(r, dict)]
-    renamed = registry.renamed
+    renamed = registry.fold_map()
     measured, unmeasured, unknown_schema, unattributed = [], 0, 0, 0
     for row in rows:
         if not _is_known_schema(row):
@@ -178,7 +184,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
             "unmeasured": unmeasured, "unknown_schema": unknown_schema,
             "unattributed": unattributed, "errors": dict(errors),
             "min_sessions": min_sessions, "promote_share": promote_share,
-            "notes": notes, "detectors": [], "groups": []}
+            "notes": notes, "renamed": dict(renamed), "detectors": [], "groups": []}
     if not measured:
         notes.append("no measured sessions")
         return data

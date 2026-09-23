@@ -17,8 +17,9 @@ import shutil
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
-from ruleprobe import DEFAULT, Registry
+from ruleprobe import DEFAULT, Registry, contract_data
 from ruleprobe.cli import main
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
@@ -571,6 +572,54 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         row = [l for l in text.splitlines() if l.startswith("x/sudo")][0]
         self.assertIn("1.00", row)
+
+
+class FoldTests(Temp):
+    """A label written under a retired id scores the detector that id became.
+
+    The case is the hand-computed one in `ArithmeticTests`, with its labels written under
+    older names; the counts must come out the same."""
+
+    def labels_under(self, fire_id, near_id):
+        return (CASE_LABELS.replace("fire: [x/cat]", "fire: [%s]" % fire_id)
+                .replace("near: [x/cat]", "near: [%s]" % near_id))
+
+    def counts(self, score):
+        return (score.tp, score.fp, score.fn, score.positives, score.negatives)
+
+    def test_a_label_under_a_consumer_renamed_id_scores_the_current_one(self):
+        path = self.corpus(self.labels_under("x/old-cat", "x/old-cat"),
+                           {"case.jsonl": cc_lines(CASE_EVENTS)})
+        registry = Registry([compile_detector(CAT)], {"x/old-cat": "x/cat"})
+        self.assertEqual(self.counts(score_corpus(registry, path)["x/cat"]), (1, 2, 1, 2, 1))
+
+    def test_labels_split_across_a_chain_merge_under_the_current_id(self):
+        path = self.corpus(self.labels_under("x/oldest-cat", "x/old-cat"),
+                           {"case.jsonl": cc_lines(CASE_EVENTS)})
+        registry = Registry([compile_detector(CAT)],
+                            {"x/oldest-cat": "x/old-cat", "x/old-cat": "x/cat"})
+        self.assertEqual(self.counts(score_corpus(registry, path)["x/cat"]), (1, 2, 1, 2, 1))
+
+    def test_a_shipped_rename_folds_a_label_with_no_map_of_your_own(self):
+        path = self.corpus(self.labels_under("x/old-cat", "x/cat"),
+                           {"case.jsonl": cc_lines(CASE_EVENTS)})
+        with mock.patch.dict(contract_data.RENAMED, {"x/old-cat": "x/cat"}):
+            scores = validity(Registry([compile_detector(CAT)]), path)
+        self.assertEqual(self.counts(scores["x/cat"]), (1, 2, 1, 2, 1))
+        self.assertNotIn("x/old-cat", scores)
+
+    def test_without_the_fold_a_retired_label_scores_nothing(self):
+        """The near miss: the same labels, no rename, and the detector is not named."""
+        path = self.corpus(self.labels_under("x/old-cat", "x/old-cat"),
+                           {"case.jsonl": cc_lines(CASE_EVENTS)})
+        self.assertFalse(score_corpus(Registry([compile_detector(CAT)]), path)["x/cat"].scored)
+
+    def test_scoring_a_corpus_under_a_fold_leaves_the_corpus_as_loaded(self):
+        path = self.corpus(self.labels_under("x/old-cat", "x/old-cat"),
+                           {"case.jsonl": cc_lines(CASE_EVENTS)})
+        corpus = load_corpus(path)
+        score_corpus(Registry([compile_detector(CAT)], {"x/old-cat": "x/cat"}), corpus=corpus)
+        self.assertEqual(sorted(corpus[0].fire), ["x/old-cat"])
 
 
 if __name__ == "__main__":

@@ -113,9 +113,13 @@ flowchart TD
   detectors_common --> events
   registry --> shell
   registry --> events
+  registry --> contract_data
   shell --> events
   readers --> events
 ```
+
+Amended 2026-09-23: `contract_data` joins the graph as a leaf imported only by `registry`, which
+exposes its fold map to `report` and `validity` through `fold_map` (#34)
 
 ### AD-2: The event schema is the one contract between readers and detectors [ADOPTED]
 
