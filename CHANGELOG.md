@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
   predicate itself reads it as false and can over-count, and should compose through the
   declarative `not`, `any` and `all` instead.
 
+### Added
+
+- Rows and the `report_data` result carry `schema_version`, which this release writes as 2
+  ([#33](https://github.com/JakeSelby/ruleprobe/issues/33)). A row with no version, or a null one,
+  reads as 1; a row with a version this release does not know is left out of every count, tallied
+  in `unknown_schema`, and noted by `report`.
+
 ### Changed
 
 - The package declares its licence as the SPDX expression `MIT`, with `LICENSE` as its licence
