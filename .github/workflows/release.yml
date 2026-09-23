@@ -1,0 +1,81 @@
+# A pushed `v*` tag publishes: the gates run again on the tagged commit, the wheel and sdist are
+# built once, PyPI receives them through trusted publishing (no stored token), and the GitHub
+# release carries the same files and the changelog section as its notes. `stable` then follows.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - name: Tag, version and changelog agree
+        run: python scripts/release_preflight.py --tag "$GITHUB_REF_NAME"
+      - name: Source gates
+        run: |
+          python -m unittest discover -s tests
+          python -m ruleprobe corpus --no-config --floor 0.9
+      - name: Build
+        run: |
+          python -m pip install build==1.6.1
+          python -m build
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/ruleprobe/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+
+  github-release:
+    needs: pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/release_notes.py > "$RUNNER_TEMP/notes.md"
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "ruleprobe $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+
+  advance-stable:
+    needs: github-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # A refused push must not turn a published release red; the release procedure runs `--check`.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Advance stable to the release
+        run: python3 scripts/advance_stable.py "$GITHUB_REF_NAME"

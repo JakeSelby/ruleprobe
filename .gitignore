@@ -10,3 +10,17 @@ venv/
 .coverage
 htmlcov/
 .DS_Store
+
+# BMad is installed locally, but only repository-owned customizations and
+# intentionally published artifacts are versioned. See docs/bmad.md.
+/_bmad/*
+!/_bmad/custom/
+!/_bmad/custom/**
+/.agents/
+/.claude/skills/
+/.github/agents/
+.claude/plans/
+.agent-harness/task.json
+.agent-harness/sync.lock
+.agent-harness/evidence/
+uv.lock

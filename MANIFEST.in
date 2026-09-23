@@ -1,0 +1,2 @@
+# Repository tooling tests: they import scripts/, which the sdist does not carry.
+exclude tests/test_bmad_issue_sync.py tests/test_issue_ownership.py tests/test_release.py

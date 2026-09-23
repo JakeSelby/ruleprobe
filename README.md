@@ -367,6 +367,12 @@ python3 -m ruleprobe report --root docs --rules docs/rules
 python3 -m ruleprobe corpus --floor 0.9                    # the corpus gate CI runs
 ```
 
+## Contributing and releases
+
+Issues, false positives and labelled corpus sessions are welcome; [CONTRIBUTING.md](CONTRIBUTING.md)
+says how a change lands, and [docs/releasing.md](docs/releasing.md) how a version ships. Questions go
+to [Discussions](https://github.com/JakeSelby/ruleprobe/discussions).
+
 ## Origins and neighbours
 
 The engine was carved out of [agent-harness](https://github.com/JakeSelby/agent-harness),

@@ -1,0 +1,26 @@
+name: Idea
+description: A shape ruleprobe cannot measure yet, a reader for another agent, or a change to the report.
+labels: ["idea", "type::story"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What you want to measure or see
+      description: The rule you are trying to measure, or the question the report should answer.
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What happens today, and what you tried
+      description: A detector you wrote that could not say it, or a runtime whose transcripts are not read.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Where does it land?
+      options:
+        - A matcher or detector-format change
+        - A new reader (another agent's transcripts)
+        - A shipped generic detector
+        - The report or the CLI
+        - Not sure

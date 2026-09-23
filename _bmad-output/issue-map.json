@@ -1,0 +1,56 @@
+{
+  "schema_version": 2,
+  "repository": "JakeSelby/ruleprobe",
+  "native_type_projection": "labels-only",
+  "generated_at": "2026-09-23",
+  "next_ids": {
+    "epic": 1,
+    "story": 1,
+    "task": 1,
+    "bug": 1,
+    "chore": 4,
+    "spike": 1,
+    "decision": 1
+  },
+  "items": [
+    {
+      "bmad_id": "RP-C003",
+      "github_number": 2,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/2",
+      "title": "Pre-publication review: 25 findings, 9 blocking",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C003.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C001",
+      "github_number": 5,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/5",
+      "title": "chore(repo): stand up the open-source delivery system, BMad planning and the release pipeline",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C001.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C002",
+      "github_number": 6,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/6",
+      "title": "chore(packaging): declare the licence as an SPDX expression",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C002.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    }
+  ]
+}
