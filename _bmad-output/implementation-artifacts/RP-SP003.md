@@ -53,9 +53,11 @@ not closed by a lossy mapping.
 
 Runtime chosen by the maintainer on 2026-09-23: Gemini CLI. Run 2026-09-23 from public sources only.
 
-**Verdict:** every field a shipped detector reads is recorded and readable reliably; context compaction
-is not, and three gaps go to the maintainer below. `write_file` and `replace` map exactly, so FR-32
-holds for `Bash`, `Write` and `Edit`.
+**Verdict:** shell commands, file writes, tool-use ids and tool results are recorded and readable
+reliably. One shipped detector, `cache-hygiene/compact`, cannot be served on Gemini: compaction leaves
+no record a reader can tell apart. Turns are derivable only on an unverified reading (open item 3).
+`write_file` and `replace` map exactly to `Write` and `Edit`; `Bash` holds on macOS and Linux, pending
+open item 2. Four calls go to the maintainer below.
 
 **Sources read.** `google-gemini/gemini-cli` main at `8e70c862f9fceb8d1667656c92dde8c13460836d`
 (2026-09-23) and release `v0.60.0` at `733edcb597ce690ac2e2fe3b3b3690b60a4c8f27` (2026-09-15);
@@ -91,7 +93,7 @@ for `https://github.com/google-gemini/gemini-cli/blob/8e70c862f9fceb8d1667656c92
   L61–69), with identical required keys in both model-family tool sets.
 - Tool-use ids: recorded, as `toolCalls[].id`, stable within the file
   (`…/packages/core/src/core/turn.ts` L474–485). Calls are written only on completion, so one cut
-  off by a crash is absent.
+  off by a crash is absent (`…/packages/core/src/core/geminiChat.ts` L1689–1715).
 - Tool results: recorded, in `toolCalls[].result` as a `functionResponse` part.
 - Turns: not recorded, derivable. A turn starts at each `type: "user"` record that is not all
   `functionResponse` parts, since tool responses are also written as `user` records
@@ -113,16 +115,37 @@ for `https://github.com/google-gemini/gemini-cli/blob/8e70c862f9fceb8d1667656c92
 - Caveats that touch no detector key: `file_path` may be relative (`…/packages/core/src/tools/edit.ts`
   L501), and the applied change can differ from the recorded args (edit.ts L81, L587). As with Claude
   Code, the args are the proposal, not the file on disk.
-- Shell: `run_shell_command` maps to `Bash` with `command`, exact on macOS and Linux (`bash -c`). On
-  Windows `command` is PowerShell
+- Agent: `invoke_agent` is the name candidate for `Agent` (`…/packages/core/src/tools/tool-names.ts`
+  L191), but its arguments were not checked. Unverified: native until they are (open item 4). A
+  subagent's own session links through `toolCalls[].agentId`.
+- Shell: `run_shell_command` maps to `Bash` with `command`, exact on macOS and Linux (`bash -c`),
+  pending open item 2. On Windows `command` is PowerShell
   (`…/packages/core/src/tools/definitions/dynamic-declaration-helpers.ts` L59–79), see below.
   `dir_path` has no canonical twin and stays native.
+
+**Reader rules the evidence supports.** Each is from the evidence, not tested.
+
+- Ignore `$rewindTo`: the rewound calls still ran, so keep them.
+- Skip `user` records whose parts are all `functionResponse`, and `info`, `error` and `warning`
+  records, which are UI notices.
+- Prefer the `.jsonl` when a legacy `.json` of the same session sits beside it.
+- `final` is the last `gemini` record with non-empty, non-thought text before the next prompt or the
+  end of the file.
+- A cancelled or errored call is a `toolCalls[]` entry with `status` `cancelled` or `error`; an error
+  result carries `error` in place of `output` in its `functionResponse`.
+- A write the user edited holds the user's version in its args with `modified_by_user: true`, and the
+  model's proposal in `ai_proposed_content` (`…/packages/core/src/tools/write-file.ts` L85–90).
+- A relative `file_path` resolves against `.project_root`; a missing `.project_root` leaves the repo
+  unknown. Both are inferred from the path and repo findings above.
+- The model can change by router or fallback, not only by the user; `model` on each `gemini` record
+  captures all three.
 
 **Licence.** Apache License 2.0 (`…/LICENSE`); the docs used are Markdown in the same repository under
 the same licence. Nothing was copied into ruleprobe.
 
 **Against the Exit criterion.** Every Experiment field is recorded or marked not recorded; the three
-gaps that cannot be read reliably are reported below; each file tool is listed as exact or native.
+gaps that cannot be read reliably are reported below, with the unverified agent tool; each file
+tool is listed as exact or native.
 Plan in RP-S019 for the legacy `.json` format, the 30-day retention and subagent sub-directories.
 
 ### Open for the maintainer
@@ -134,13 +157,18 @@ Plan in RP-S019 for the legacy `.json` format, the 30-day retention and subagent
 2. **Windows shell sessions run PowerShell, and the platform is not recorded.** Options: map every
    `run_shell_command` to `Bash` and rely on the AD-5 parse failing closed on PowerShell; infer Windows
    from drive-letter paths and keep those commands native; or keep the shell tool native everywhere.
-   Recommendation, not a decision: map to `Bash`, keep a PowerShell near-miss in the corpus to prove
-   the parse fails closed, and state the gap in the README note.
+   A PowerShell command can tokenize as Bash (for example `$env:X=1; git commit`), so the shell parse
+   cannot be relied on to refuse it. Recommendation, not a decision: map to `Bash` on macOS and Linux
+   paths, keep drive-letter sessions native, and state the gap in the README note.
 3. **Non-prompt `user` records may inflate `turn` (unverified).** `GeminiChat.addHistory` and
    `setHistory` also write `user` records (geminiChat.ts L1205–1230); whether a CLI-injected one
    reaches the file is not established. Options: accept the rule above and measure; or also require a
    `displayContent` or plain-text part. Recommendation, not a decision: settle it with labelled real
    sessions in RP-S019 before tightening the rule.
+4. **The agent tool is unclassified.** `invoke_agent` is the likely twin of `Agent`, but its
+   arguments were not checked. Options: check them and map it exactly; or keep it native, so
+   `Agent` detectors under-count on Gemini. Recommendation, not a decision: keep it native until
+   its arguments are checked in RP-S019.
 
 ## Decision
 
@@ -164,8 +192,8 @@ than switching runtime. The result unblocks RP-S019.
   commits above, its source and its docs. Nothing was installed or run, and no search was used.
 - **Synthetic session:** one hand-authored 20-line session with a fictional project; a throwaway
   derivation over it gave one prompt, two assistant texts with only the last `final`, and three
-  tool pairs named `Bash`, `Write` and `Edit`, all in turn 1. It is not committed: corpus sessions
-  belong to RP-T003.
+  tool pairs named `Bash`, `Write` and `Edit`, all in turn 1. It covers a single turn only. It is
+  not committed: corpus sessions belong to RP-T003.
 - **File list:** this story file only.
 
 ## Change log
@@ -173,3 +201,5 @@ than switching runtime. The result unblocks RP-S019.
 - 2026-09-23: written from the planning corpus before implementation.
 - 2026-09-23: runtime chosen by the maintainer: Gemini CLI; the format check still runs.
 - 2026-09-23: format check run; result recorded, three gaps opened for the maintainer.
+- 2026-09-23: review fixes: `cache-hygiene/compact` named as unserved, `Bash` qualified, the agent
+  tool listed and opened, reader rules added, a citation corrected.
