@@ -19,7 +19,7 @@ import os
 from collections import namedtuple
 
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
-from .matchers import compile_detector
+from .matchers import compile_detector, schema_version_error
 from .registry import DEFAULT, Registry
 
 __all__ = ["Bundle", "Finding", "RuleEntry", "discover", "load_bundle", "load_file",
@@ -134,7 +134,24 @@ def load_file(path):
         doc, lines = load(path)
     except DeclarativeError as exc:
         return [], [Finding(exc.path, exc.line, exc.reason)]
-    return _compile_entries(_entries(doc), path, lines)
+    findings = []
+    version = _file_version(doc, path, lines, findings)
+    detectors, problems = _compile_entries(_entries(doc), path, lines, version=version)
+    return detectors, findings + problems
+
+
+def _file_version(doc, path, lines, findings):
+    """The schema version a `detectors:` file sets for entries that name none: its top-level
+    `version`, else 1. An unknown one is a finding, and `None`, so that only the entries
+    that would take it are skipped; an entry with a known `schema_version` of its own wins."""
+    if not isinstance(doc, dict) or "version" not in doc or "detectors" not in doc:
+        return 1
+    reason = schema_version_error(doc["version"], "version")
+    if reason is None:
+        return doc["version"]
+    findings.append(Finding(path, lines.line_of(doc, "version") if lines else 0,
+                            reason + "; entries without their own schema_version skipped"))
+    return None
 
 
 def _entries(doc):
@@ -147,12 +164,17 @@ def _entries(doc):
     return None
 
 
-def _compile_entries(entries, path, lines, rule=None, default_prefix=None):
+def _compile_entries(entries, path, lines, rule=None, default_prefix=None, version=1):
+    """`version` is the file's default schema version, or `None` when the file named one
+    it does not know: an entry without its own `schema_version` is then skipped, its
+    finding already made once against the file."""
     detectors, findings = [], []
     if entries is None:
         return detectors, [Finding(path, 0, "expected a list of detectors, or a mapping "
                                             "with a detectors: list")]
     for index, entry in enumerate(entries):
+        if version is None and not (isinstance(entry, dict) and "schema_version" in entry):
+            continue
         if isinstance(entry, dict) and (rule or default_prefix):
             filled = dict(entry)
             if rule and not filled.get("rule"):

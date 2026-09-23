@@ -44,6 +44,11 @@ detector's `when`, because a hit they produce is not a hit on the event in hand:
 - `change` - `kind`, `field`, `ignore_prefix`, `ignore_empty`: a field that differs from the
   previous event of that kind.
 
+An entry may carry `schema_version`, the integer schema it was written under. Absent, it is
+the file's top-level `version`, and absent there too it is 1. A value that is not a schema
+this package knows - above `SCHEMA_VERSION`, below 1, or not an integer - is an error, so an
+entry written for a later schema is refused rather than read under the wrong one.
+
 An entry may also carry `examples`, which is how a detector states its own precision and
 recall rather than being taken on trust. `fire` is a list of minimal cases it should fire
 on, `skip` a list it should not; each case is `bash: <command>`, or `event: <one event>`,
@@ -147,7 +152,10 @@ def _all3(values):
     return _UNDECIDED if undecided else True
 
 
-ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description", "examples")
+ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description", "examples",
+              "schema_version")
+#: The highest detector schema this package reads; every integer from 1 up to it is known.
+SCHEMA_VERSION = 2
 EVENTS = ("tool_use", "assistant_text", "session")
 _TEXT_SOURCES = ("command", "heredocs", "payload", "assistant")
 
@@ -235,6 +243,19 @@ def _flag(value, where, container, key):
     if value is None or isinstance(value, bool):
         return value
     where.fail("%r must be true or false" % key, container, key)
+
+
+def schema_version_error(value, key="schema_version"):
+    """Why `value` is not a known schema version, or `None` when it is one. A boolean is
+    refused although Python counts it as an integer, as `arg_count` refuses one."""
+    if not isinstance(value, int) or isinstance(value, bool):
+        return "%s must be an integer, not %r" % (key, value)
+    if value < 1:
+        return "%s %d is not a schema version; they start at 1" % (key, value)
+    if value > SCHEMA_VERSION:
+        return ("%s %d is newer than this ruleprobe reads (%d); upgrade ruleprobe"
+                % (key, value, SCHEMA_VERSION))
+    return None
 
 
 def _count(value, where, container, key):
@@ -848,6 +869,10 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
     if not isinstance(spec, dict):
         where.fail("a detector entry is a mapping, not %s" % type(spec).__name__)
     _allowed(spec, ENTRY_KEYS, where, spec, None, "detector")
+    if "schema_version" in spec:
+        reason = schema_version_error(spec["schema_version"])
+        if reason:
+            where.fail(reason, spec, "schema_version")
     detector_id = spec.get("id")
     if not isinstance(detector_id, str) or "/" not in detector_id:
         where.fail("a detector needs an id of the shape rule/observable", spec, "id")
