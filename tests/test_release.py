@@ -1,9 +1,13 @@
 """The release scripts: version and changelog agreement, notes, and the stable branch."""
+import contextlib
+import io
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -59,6 +63,30 @@ class PreflightTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             found = release_preflight.errors(make_root(temp, unreleased="\n- Pending.\n"), tag="v1.2.3")
         self.assertTrue(any("Unreleased entries" in line for line in found))
+
+    def run_main(self, root, argv, environ):
+        """`main(argv)` over `root`, with the GitHub ref variables replaced by `environ`."""
+        clean = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF_TYPE", "GITHUB_REF_NAME")}
+        err = io.StringIO()
+        with mock.patch.object(release_preflight, "ROOT", root), \
+                mock.patch.dict(os.environ, dict(clean, **environ), clear=True), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = release_preflight.main(argv)
+        return code, err.getvalue()
+
+    def test_main_passes_the_tag_to_the_unreleased_check(self):
+        # The refusal depends on --tag reaching errors(), from the flag or from a tag ref in CI.
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, unreleased="\n- Pending.\n")
+            self.assertEqual(self.run_main(root, [], {}), (0, ""))
+            code, err = self.run_main(root, ["--tag", "v1.2.3"], {})
+            self.assertEqual(code, 1)
+            self.assertIn("Unreleased entries", err)
+            code, err = self.run_main(root, [], {"GITHUB_REF_TYPE": "tag", "GITHUB_REF_NAME": "v1.2.3"})
+            self.assertEqual(code, 1)
+            self.assertIn("Unreleased entries", err)
+            self.assertEqual(self.run_main(root, [], {"GITHUB_REF_TYPE": "branch", "GITHUB_REF_NAME": "main"}),
+                             (0, ""))
 
     def test_unreleased_entries_pass_between_releases(self):
         # #64: CI runs the preflight without a tag on every change, and a user-visible change adds
