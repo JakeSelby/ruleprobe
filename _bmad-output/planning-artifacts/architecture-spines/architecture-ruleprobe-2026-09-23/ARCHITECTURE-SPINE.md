@@ -153,7 +153,7 @@ flowchart TD
   - [ASSUMPTION: the canonical file-tool list above is what `ruleprobe/detectors/common.py` reads
     today; Gemini CLI's file tools are mapped to it or left native, decided in its story]
 
-### AD-4: Detectors under-count rather than over-count [ADOPTED for positive matchers; PROPOSED for negation, #19]
+### AD-4: Detectors under-count rather than over-count [ADOPTED; negation implemented under #19, ships in v0.2.0]
 
 - **Binds:** NFR-4, FR-5, FR-12, FR-16, FR-21; every detector and matcher.
 - **Prevents:** a new matcher or detector that guesses on input it cannot read, so a report shows a
@@ -164,8 +164,8 @@ flowchart TD
     unparsed, empty or over `MAX_COMMAND`.
   - Negation must not turn an undecidable input into a hit. In 0.1.0 it does
     ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)): a segment matcher returns false for a
-    skipped parse, so both `not` over it and `absent` of it fire (partial, 0.1.0; fix planned,
-    v0.2.0, under #19).
+    skipped parse, so both `not` over it and `absent` of it fire (historical, 0.1.0; implemented
+    under #19, unreleased, shipping in v0.2.0).
   - The segment matchers are every `command` key except `regex` and `unparsed`, every `git` key and
     every `env` key. Over a command the parse skipped, a segment matcher returns undecided.
   - `any`, `all` and `not` pass undecided through: `not` of undecided is undecided; `any` is true on

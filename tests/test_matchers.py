@@ -13,6 +13,7 @@ from corpus import FAKE_KEY, bash, compact, prompt, say, tool_use
 from ruleprobe import Registry, run
 from ruleprobe.declarative import DeclarativeError, parse_with_lines
 from ruleprobe.matchers import compile_detector
+from ruleprobe.shell import MAX_COMMAND, Parsed
 
 WRITE = tool_use("Write", {"file_path": "a/b.py", "content": "hello"})
 
@@ -354,6 +355,145 @@ class SpecErrorTests(unittest.TestCase):
         with self.assertRaises(DeclarativeError) as caught:
             compile_detector(document["detectors"][0], "detectors.yaml", lines)
         self.assertEqual(caught.exception.line, 5)
+
+
+# --- a command the shell parse skipped (#19) ----------------------------------------
+
+#: The inputs from #19: over-long, and an unbalanced quote, each as a bare and a `uv` call.
+SKIPPED = ("pytest -q -k " + "x" * MAX_COMMAND,
+           "pytest -q -k 'foo",
+           "uv run pytest -q -k " + "x" * MAX_COMMAND,
+           "uv run pytest -q -k 'foo")
+UNREAD_PUSH = "git push origin 'main"
+UNREAD_ENV = "FOO=1 pytest -k 'foo"
+PYTEST = {"command": {"contains": "pytest"}}
+
+
+def negated(matcher):
+    """A matcher under `not`, on Bash calls only, so a false child is a hit."""
+    return {"tool": "Bash", "not": matcher}
+
+
+class UndecidedTests(unittest.TestCase):
+    """Over a skipped parse a segment matcher is undecided, and no combinator makes that a
+    hit. Each negative case is paired with a parsed command that does hit, so a matcher
+    that never fires cannot pass."""
+
+    def test_the_inputs_are_ones_the_parse_skipped(self):
+        for command in SKIPPED + (UNREAD_PUSH, UNREAD_ENV):
+            with self.subTest(command=command[:30]):
+                self.assertTrue(Parsed(bash(command)).skipped)
+
+    def test_not_over_a_skipped_command_is_no_hit(self):
+        for command in SKIPPED:
+            with self.subTest(command=command[:30]):
+                self.assertEqual(count(negated(PYTEST), [bash(command)]), 0)
+        self.assertEqual(count(negated(PYTEST), [bash("ls")]), 1)
+
+    def test_absent_of_a_skipped_command_is_no_hit_in_either_scope(self):
+        for scope in ("session", "turn"):
+            when = {"absent": {"of": PYTEST, "scope": scope}}
+            for command in SKIPPED:
+                with self.subTest(scope=scope, command=command[:30]):
+                    self.assertEqual(count(when, [bash(command)], event="session"), 0)
+            self.assertEqual(count(when, [bash("ls")], event="session"), 1)
+
+    def test_not_and_absent_of_git_over_a_skipped_command_are_no_hit(self):
+        push = {"git": {"subcommand": "push"}}
+        self.assertEqual(count(negated(push), [bash(UNREAD_PUSH)]), 0)
+        self.assertEqual(count({"absent": {"of": push}}, [bash(UNREAD_PUSH)],
+                               event="session"), 0)
+        self.assertEqual(count(negated(push), [bash("git status")]), 1)
+        self.assertEqual(count({"absent": {"of": push}}, [bash("git status")],
+                               event="session"), 1)
+
+    def test_every_segment_key_is_undecided_over_a_skipped_command(self):
+        # Each key, with a parsed command it is false on, so `not` of it is a hit there.
+        keys = [({"command": {"name": "pytest"}}, "echo"),
+                ({"command": {"starts_with": ["pytest"]}}, "echo"),
+                ({"command": {"contains": "pytest"}}, "echo"),
+                ({"command": {"none_of": ["-q"]}}, "echo -q"),
+                ({"command": {"arg_count": 3}}, "echo"),
+                ({"command": {"sole_segment": True}}, "echo | cat"),
+                ({"command": {"redirect": False}}, "echo > a"),
+                ({"git": {"subcommand": "push", "args_any": ["origin"]}}, "git push"),
+                ({"git": {"subcommand": "push", "args_none": ["--force"]}},
+                 "git push --force"),
+                ({"git": {"subcommand": "push", "token_prefix": "orig"}}, "git push"),
+                ({"env": {"name": "FOO"}}, "echo"),
+                ({"env": {"name": "FOO", "command": "pytest"}}, "FOO=1 echo")]
+        for matcher, parsed_false in keys:
+            with self.subTest(matcher=matcher):
+                self.assertEqual(count(negated(matcher), [bash(UNREAD_PUSH)]), 0)
+                self.assertEqual(count(negated(matcher), [bash(UNREAD_ENV)]), 0)
+                self.assertEqual(count(negated(matcher), [bash(parsed_false)]), 1)
+
+    def test_regex_and_unparsed_keep_their_answer_over_a_skipped_command(self):
+        skipped = [bash(SKIPPED[1])]
+        self.assertEqual(count({"command": {"regex": "^pytest"}}, skipped), 1)
+        self.assertEqual(count(negated({"command": {"regex": "^ls"}}), skipped), 1)
+        self.assertEqual(count({"command": {"unparsed": True}}, skipped), 1)
+        self.assertEqual(count(negated({"command": {"unparsed": False}}), skipped), 1)
+        # A decided `regex` or `unparsed` settles the block before any segment key is read.
+        self.assertEqual(count(negated({"command": {"regex": "^ls", "name": "pytest"}}),
+                               skipped), 1)
+
+    def test_not_of_undecided_is_undecided_and_so_is_its_double(self):
+        skipped = [bash(SKIPPED[1])]
+        self.assertEqual(count(negated(PYTEST), skipped), 0)
+        self.assertEqual(count(negated({"not": PYTEST}), skipped), 0)
+        self.assertEqual(count(negated([{"tool": "Write"}, PYTEST]), skipped), 0)
+
+    def test_any_is_true_on_a_true_child(self):
+        self.assertEqual(count({"any": [PYTEST, {"tool": "Bash"}]}, [bash(SKIPPED[1])]), 1)
+
+    def test_any_is_undecided_on_an_undecided_child_and_no_true_one(self):
+        self.assertEqual(count(negated({"any": [{"tool": "Write"}, PYTEST]}),
+                               [bash(SKIPPED[1])]), 0)
+
+    def test_any_is_false_when_every_child_is_false(self):
+        self.assertEqual(count(negated({"any": [{"tool": "Write"}, {"tool": "Edit"}]}),
+                               [bash(SKIPPED[1])]), 1)
+
+    def test_all_is_false_on_a_false_child(self):
+        self.assertEqual(count(negated({"all": [PYTEST, {"tool": "Write"}]}),
+                               [bash(SKIPPED[1])]), 1)
+
+    def test_all_is_undecided_on_an_undecided_child_and_no_false_one(self):
+        self.assertEqual(count(negated({"all": [{"tool": "Bash"}, PYTEST]}),
+                               [bash(SKIPPED[1])]), 0)
+        self.assertEqual(count(negated({"tool": "Bash", "command": PYTEST["command"]}),
+                               [bash(SKIPPED[1])]), 0)
+
+    def test_all_is_true_when_every_child_is_true(self):
+        self.assertEqual(count({"all": [{"tool": "Bash"}, {"command": {"unparsed": True}}]},
+                               [bash(SKIPPED[1])]), 1)
+
+    def test_an_undecided_when_is_no_hit(self):
+        for when in (PYTEST, negated(PYTEST), {"any": [PYTEST]}, {"all": [PYTEST]}):
+            with self.subTest(when=when):
+                self.assertEqual(count(when, [bash(SKIPPED[0])]), 0)
+
+    def test_order_needs_first_and_then_both_true(self):
+        unread = bash(SKIPPED[1], id="tu1")
+        first_undecided = {"order": {"first": {"not": {"command": {"name": "echo"}}},
+                                     "then": {"git": {"subcommand": "push"}}}}
+        self.assertEqual(count(first_undecided, [unread, bash("git push", id="tu2")],
+                               event="session"), 0)
+        then_undecided = {"order": {"first": {"git": {"subcommand": "add"}},
+                                    "then": {"not": {"command": {"name": "echo"}}}}}
+        self.assertEqual(count(then_undecided, [bash("git add a", id="tu0"), unread],
+                               event="session"), 0)
+        self.assertEqual(count(then_undecided,
+                               [bash("git add a", id="tu0"), bash("ls", id="tu2")],
+                               event="session"), 1)
+
+    def test_an_absent_scope_with_an_undecided_candidate_is_no_hit(self):
+        events = [bash(SKIPPED[1], turn=1, id="tu1"), bash("ls", turn=2, id="tu2")]
+        when = {"absent": {"of": PYTEST, "scope": "turn"}}
+        self.assertEqual([h[1] for h in hits(when, events, event="session")], [2])
+        when = {"absent": {"of": PYTEST, "scope": "session"}}
+        self.assertEqual(count(when, events, event="session"), 0)
 
 
 if __name__ == "__main__":
