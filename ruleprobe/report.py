@@ -93,15 +93,17 @@ def errored_detectors(row, renamed):
     return out
 
 
-def row_schema_version(row):
-    """The schema `row` was written under: its `schema_version`, or 1 when it has none."""
-    return row.get("schema_version", 1)
+def _row_schema_version(row):
+    """The schema `row` was written under: its `schema_version`, or 1 when it has none. A
+    null is read as none, since a store with a nullable column writes one for every 0.1 row."""
+    version = row.get("schema_version")
+    return 1 if version is None else version
 
 
-def is_known_schema(row):
+def _is_known_schema(row):
     """Whether this release can count `row`. A boolean is not a version, though Python
     would compare `True` equal to 1."""
-    version = row_schema_version(row)
+    version = _row_schema_version(row)
     return (isinstance(version, int) and not isinstance(version, bool)
             and version in KNOWN_SCHEMA_VERSIONS)
 
@@ -139,7 +141,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     renamed = registry.renamed
     measured, unmeasured, unknown_schema, unattributed = [], 0, 0, 0
     for row in rows:
-        if not is_known_schema(row):
+        if not _is_known_schema(row):
             # Checked first: a newer schema may shape even its `rules` map differently.
             unknown_schema += 1
         elif not isinstance(row.get("rules"), dict):

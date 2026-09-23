@@ -53,7 +53,8 @@ class ReportCommandTests(unittest.TestCase):
 
     def test_json_is_byte_identical_across_two_runs(self):
         # Separate processes under different hash seeds, so an order that depends on set or
-        # dict hashing, or on the walk, shows up as a difference rather than a repeat.
+        # dict hashing shows up as a difference rather than a repeat. It guards hash order
+        # only: two runs over one directory walk it the same way.
         root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         outputs = []
         for seed in ("1", "2"):
@@ -61,7 +62,8 @@ class ReportCommandTests(unittest.TestCase):
             done = subprocess.run(
                 [sys.executable, "-m", "ruleprobe", "report", "--root", FIXTURES,
                  "--no-config", "--json", "--validity"],
-                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=120)
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertTrue(done.stdout.strip())
             outputs.append(done.stdout)

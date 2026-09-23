@@ -148,6 +148,19 @@ class SchemaVersionTests(unittest.TestCase):
         self.assertEqual((data["measured"], data["unknown_schema"]), (1, 0))
         self.assertEqual((data["detectors"][0]["hits"], data["detectors"][0]["of"]), (3, 1))
 
+    def test_a_null_schema_version_is_read_as_absent_and_counted_as_before(self):
+        data = report_data([row({"a/one": 3}, schema_version=None)], registry=REGISTRY)
+        self.assertEqual((data["measured"], data["unknown_schema"]), (1, 0))
+        self.assertEqual((data["detectors"][0]["hits"], data["detectors"][0]["of"]), (3, 1))
+
+    def test_an_excluded_row_stays_out_of_the_repo_and_stance_groupings(self):
+        rows = [row({"a/one": 1}, repo="kept", stances={"d": "v"}),
+                row({"a/one": 9}, repo="newer", stances={"d": "w"}, schema_version=3)]
+        by_repo = report_data(rows, by="repo", registry=REGISTRY)
+        self.assertEqual([(g["key"], g["hits"]) for g in by_repo["groups"]], [("kept", 1)])
+        by_stance = report_data(rows, by="stance", registry=REGISTRY)
+        self.assertEqual([(g["key"], g["hits"]) for g in by_stance["groups"]], [("d=v", 1)])
+
     def test_a_row_with_no_schema_version_is_schema_1_and_counted_as_before(self):
         legacy = row({"a/one": 3})
         self.assertNotIn("schema_version", legacy)
@@ -172,7 +185,7 @@ class SchemaVersionTests(unittest.TestCase):
                       " (highest known: 2) and are excluded", text)
 
     def test_a_version_that_is_not_a_known_one_is_excluded_like_a_newer_one(self):
-        for bad in ("2", 2.0, True, 0, -1, None, [2]):
+        for bad in ("2", 2.0, True, 0, -1, [2]):
             with self.subTest(schema_version=bad):
                 data = report_data([row({"a/one": 1}), row({"a/one": 9}, schema_version=bad)],
                                    registry=REGISTRY)

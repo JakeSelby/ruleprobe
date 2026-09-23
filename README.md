@@ -54,6 +54,9 @@ uvx ruleprobe corpus                           # how good each detector is, over
 uvx ruleprobe report --json                    # the same numbers as data, rows included
 ```
 
+Each row and the `--json` result carry `schema_version`, and a row with a version this release
+does not know is left out of every count and tallied in `unknown_schema`.
+
 A transcript does not record the configuration it ran under, so `--stance dimension=variant`
 is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
 what a detector's `gate:` block reads: a gated detector with no stance passed never fires,
