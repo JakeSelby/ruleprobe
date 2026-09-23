@@ -161,7 +161,8 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
         notes.append("%d session(s) carry no rule data" % unmeasured)
     if unknown_schema:
         notes.append("%d session(s) carry a schema_version this release does not know"
-                     " (highest known: %d) and are excluded" % (unknown_schema, SCHEMA_VERSION))
+                     " (highest known: %d) and are excluded"
+                     % (unknown_schema, max(KNOWN_SCHEMA_VERSIONS)))
     if unattributed:
         notes.append("%d session(s) carry an error naming no detector and are dropped whole"
                      % unattributed)

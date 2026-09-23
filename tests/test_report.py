@@ -4,7 +4,8 @@ import unittest
 
 from ruleprobe import Detector, Registry, measure, report
 from ruleprobe.readers import claude_code
-from ruleprobe.report import SCHEMA_VERSION, folded_rules, report_data
+from ruleprobe.report import (KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, folded_rules,
+                              report_data)
 from test_readers import CLAUDE
 
 
@@ -132,12 +133,20 @@ class MeasureTests(unittest.TestCase):
                       report([measured], registry=registry))
 
 
-
 class SchemaVersionTests(unittest.TestCase):
     def test_measure_writes_the_current_schema_version(self):
         measured = measure(claude_code.read(CLAUDE))
         self.assertEqual(SCHEMA_VERSION, 2)
         self.assertEqual(measured["schema_version"], 2)
+
+    def test_the_written_version_is_the_highest_known_one(self):
+        # Bumping one without the other would make `measure()` write rows `report_data` drops.
+        self.assertEqual(SCHEMA_VERSION, max(KNOWN_SCHEMA_VERSIONS))
+
+    def test_a_row_marked_schema_1_is_counted_as_before(self):
+        data = report_data([row({"a/one": 3}, schema_version=1)], registry=REGISTRY)
+        self.assertEqual((data["measured"], data["unknown_schema"]), (1, 0))
+        self.assertEqual((data["detectors"][0]["hits"], data["detectors"][0]["of"]), (3, 1))
 
     def test_a_row_with_no_schema_version_is_schema_1_and_counted_as_before(self):
         legacy = row({"a/one": 3})
