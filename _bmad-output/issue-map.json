@@ -8,7 +8,7 @@
     "story": 21,
     "task": 6,
     "bug": 3,
-    "chore": 4,
+    "chore": 5,
     "spike": 4,
     "decision": 12
   },
@@ -697,6 +697,19 @@
       "type": "bug",
       "native_type": "Bug",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B002.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C004",
+      "github_number": 68,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/68",
+      "title": "ci(release): a version bump that leaves Unreleased entries fails CI",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C004.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
