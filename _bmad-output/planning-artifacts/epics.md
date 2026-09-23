@@ -25,8 +25,8 @@ This document breaks the ruleprobe 0.2.0 requirements into epics and stories. It
 and the [architecture spine](architecture-spines/architecture-ruleprobe-2026-09-23/ARCHITECTURE-SPINE.md).
 No UX document exists; the CLI output shapes are in the PRD's FRs.
 
-Scope is what PRD §8 puts in 0.2.0 (planned, v0.2.0), plus FR-34 as a separate epic that is proposed
-only and may be dropped. The planning corpus epic RP-E001 (#10) is not part of 0.2. Every item here is
+Scope is what PRD §8 puts in 0.2.0 (planned, v0.2.0), plus Epic 7 for FR-34, which the maintainer withdrew on
+2026-09-23 and moved to #21; it is kept as the record. The planning corpus epic RP-E001 (#10) is not part of 0.2. Every item here is
 proposed until it is filed with `scripts/bmad_issue_sync.py new`. Inferences carry `[ASSUMPTION: ...]`.
 
 ## Requirements Inventory
@@ -50,28 +50,28 @@ touched in 0.2 only where the contract versions it.
 - FR-12: Event, combinator and session matchers. Held (implemented, 0.1.0); negation changes under #19.
 - FR-13: Per-file binding classes each rule file as measured, dark or unmeasured. Held (implemented, 0.1.0).
 - FR-14: The report states the share of rules measured. In (partial; share planned, v0.2.0).
-- FR-15: Section-level binding splits one rule file into many rules with stable ids. In (planned, v0.2.0).
-- FR-16: A shipped catalog of declarative detectors for common rule shapes, bound by one anchored pattern on an exact-one match. In (planned, v0.2.0).
-- FR-17: `report` prints hits, sessions with a hit, measured sessions and share per detector. Held (implemented, 0.1.0); `promote?` wording open (Q11).
+- FR-15: Section-level binding splits one rule file into many rules with stable ids, on headings only (Q2, decided 2026-09-23). In (planned, v0.2.0).
+- FR-16: A shipped catalog of declarative detectors for common rule shapes, bound by one anchored pattern on an exact-one match; a small set of six to eight shapes (Q3, decided 2026-09-23). In (planned, v0.2.0).
+- FR-17: `report` prints hits, sessions with a hit, measured sessions and share per detector. Held (implemented, 0.1.0); `promote?` becomes a neutral "frequent" marker in the break (Q11, decided 2026-09-23).
 - FR-18: Grouping by rule, repository or stance, and a date window. Held (implemented, 0.1.0).
 - FR-19: `report_data` and `--json` carry the same numbers as the table. Held (implemented, 0.1.0).
 - FR-20: Only a row with a `rules` map is evidence. Held (implemented, 0.1.0).
 - FR-21: Compliance per opportunity (`opportunities`, `followed`) beside hits per session, from `order` and `absent`. In (planned, v0.2.0).
-- FR-22: No compliance rate below a minimum opportunity count, default 20. In (planned, v0.2.0).
+- FR-22: No compliance rate below a minimum opportunity count, default 20, per printed group (Q7, decided 2026-09-23). In (planned, v0.2.0).
 - FR-23: `ruleprobe corpus` scores precision and recall; `--floor 0.9` fails under it. Held (implemented, 0.1.0).
 - FR-24: `examples:` with `fire` and `skip` cases on a declarative detector. Held (implemented, 0.1.0).
 - FR-25: An explain path per hit, redacted, writing nothing. In (planned, v0.2.0).
 - FR-26: One command turns a false positive into a labelled negative in a user-named corpus, redacted. In (planned, v0.2.0).
-- FR-27: A schema version on every detector entry. In (planned, v0.2.0).
-- FR-28: A schema version on every row and `report_data` result. In (planned, v0.2.0).
+- FR-27: A schema version on every detector entry: an integer, `2` in 0.2.0 (Q9, decided 2026-09-23). In (planned, v0.2.0).
+- FR-28: A schema version on every row and `report_data` result: an integer, `2` in 0.2.0. In (planned, v0.2.0).
 - FR-29: Fold map. In for the persisted fold entries and the shipped-id rename test only (in-memory fold implemented, 0.1.0).
-- FR-30: A declared public API covering every name, call shape and non-name dependency agent-harness uses, held by a contract test. In (planned, v0.2.0).
-- FR-31: Versioning policy: no incompatible change within a minor series. In (planned, v0.2.0).
-- FR-32: A third reader, Cursor or Gemini CLI (Q1). In (planned, v0.2.0).
-- FR-33: Labelled third-runtime sessions in the corpus, at or above the floor. In (planned, v0.2.0).
-- FR-34: A separate, opt-in command that drafts a declarative detector from a rule's text. Proposed only.
+- FR-30: A declared public API covering every name, call shape and non-name dependency agent-harness uses, held by a contract test; other root names stay importable and undeclared (Q8, decided 2026-09-23). In (planned, v0.2.0).
+- FR-31: Versioning policy: no incompatible change within a minor series; a later 0.x minor may break with notice (Q12, decided 2026-09-23). In (planned, v0.2.0).
+- FR-32: A third reader, Gemini CLI (Q1, decided 2026-09-23). In (planned, v0.2.0).
+- FR-33: Labelled Gemini CLI sessions in the corpus, at or above the floor. In (planned, v0.2.0).
+- FR-34: A separate, opt-in command that drafts a declarative detector from a rule's text. Withdrawn (2026-09-23; moved to #21).
 
-In scope for 0.2.0: 15 FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33). Proposed epic: FR-34.
+In scope for 0.2.0: 15 FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33). Withdrawn epic: FR-34 (moved to #21).
 
 ### NonFunctional Requirements
 
@@ -81,7 +81,7 @@ In scope for 0.2.0: 15 FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33). 
 - NFR-4: Under-count rather than over-count. Partial: negation over skipped commands over-counts (#19, planned v0.2.0).
 - NFR-5: `report` writes and sends nothing. The enforcing test is planned (v0.2.0). Only FR-26's command writes.
 - NFR-6: Corpus floor 0.9 in CI, never lowered to pass a detector.
-- NFR-7: No model in measurement; the core imports no model client.
+- NFR-7: No model in measurement; no command in ruleprobe calls a model, and the core imports no model client.
 - NFR-8: Local data only.
 - NFR-9: `report --rules --since 30` inside sixty seconds over 500 sessions and 200 MB. No timing measured.
 
@@ -120,7 +120,7 @@ Every in-scope FR maps to at least one story. Held FRs appear where a 0.2 story 
 - FR-14: Epic 3 (3.3) - measured share in the coverage block.
 - FR-15: Epic 3 (3.4) - section-level binding with stable ids.
 - FR-16: Epic 3 (3.5) - shipped catalog and exact-one binding.
-- FR-17: Epic 2 (2.6) - `promote?` wording settled in the break.
+- FR-17: Epic 2 (2.6) - `promote?` renamed to a neutral "frequent" marker in the break.
 - FR-21: Epic 2 (2.4, 2.5, 2.6) - opportunities and followed beside hits.
 - FR-22: Epic 2 (2.6) - no rate below the minimum.
 - FR-25: Epic 4 (4.1) - `ruleprobe explain`.
@@ -132,13 +132,13 @@ Every in-scope FR maps to at least one story. Held FRs appear where a 0.2 story 
 - FR-31: Epic 1 (1.9) - versioning policy.
 - FR-32: Epic 5 (5.2) - third reader.
 - FR-33: Epic 5 (5.3) - third-runtime corpus sessions.
-- FR-34: Epic 7 (7.2) - proposed only, droppable.
+- FR-34: none. Withdrawn 2026-09-23 and moved to #21 (RP-E002); Epic 7 (7.2) is kept as the record, unbuilt.
 - NFR-1, NFR-5: Epic 1 (1.10) - the enforcing tests AD-8 plans.
 - NFR-4: Epic 1 (1.7, #19).
 - NFR-9: Epic 3 (3.6) - measured, not assumed.
 
-Coverage: 15 of 15 in-scope FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33), plus FR-34 in a
-proposed epic. FR-1 to FR-5, FR-7, FR-8, FR-11, FR-13, FR-18 to FR-20, FR-23 and FR-24 are held unchanged
+Coverage: 15 of 15 in-scope FRs (FR-14, FR-15, FR-16, FR-21, FR-22, FR-25 to FR-33), and FR-34 is
+withdrawn (moved to #21). FR-1 to FR-5, FR-7, FR-8, FR-11, FR-13, FR-18 to FR-20, FR-23 and FR-24 are held unchanged
 and get no story; the contract test (1.8) and the existing suites hold them.
 
 ## Epic List
@@ -178,7 +178,8 @@ published for the harness to vendor.
 
 ### Epic 7 (proposed, maintainer may drop): Draft a detector from a rule's text
 A separate, opt-in command outside the core install drafts a declarative detector for a person to
-review and commit. No story here is in 0.2.0 unless the maintainer answers Q4 that way.
+review and commit. Withdrawn on 2026-09-23: the maintainer answered Q4 "nowhere in ruleprobe", and drafting moved to #21
+(RP-E002). Kept as the record.
 **FRs covered:** FR-34.
 
 ## How to read a story
@@ -199,13 +200,15 @@ together. Every later epic writes rows and entries against it.
 
 **Kind:** decision · **Binds:** FR-27, FR-28; AD-9 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** an integer; 0.2.0 writes `2`; an absent key means 1 (RP-D001, #29).
+
 As a maintainer of a downstream ledger,
 I want the schema version's type and the 0.2.0 value fixed before any code writes it,
 So that every stored row and entry carries one value for good.
 
 **Acceptance Criteria:**
 
-1. **Given** PRD Q9, **When** the decision is recorded, **Then** it states the type and the value 0.2.0 writes, with the trade-off. [ASSUMPTION: integer, and 0.2.0 writes `2`, since absent means 1 under AD-9]
+1. **Given** PRD Q9, **When** the decision is recorded, **Then** it states the type and the value 0.2.0 writes, with the trade-off.
 2. **Given** the decision, **When** it differs from the spine's working form, **Then** AD-9 is amended through `bmad-architecture` update intent in the same change.
 
 **Files:** `_bmad-output/implementation-artifacts/<id>.md`; the spine if amended.
@@ -215,6 +218,8 @@ So that every stored row and entry carries one value for good.
 
 **Kind:** decision · **Binds:** FR-30, FR-31; AD-9 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** root `__all__` names outside FR-30 stay importable and undeclared; a name joins the declared API only with a contract test (RP-D002, #30).
+
 As a downstream tool author,
 I want to know whether names like `measure`, `load_corpus` and `Bundle` are promised,
 So that I import only what will not move.
@@ -222,13 +227,15 @@ So that I import only what will not move.
 **Acceptance Criteria:**
 
 1. **Given** PRD Q8 and the root `__all__` in `ruleprobe/__init__.py`, **When** the decision is recorded, **Then** each name outside FR-30's list is marked declared or importable-undeclared.
-2. **Given** a name marked declared, **When** 1.8 lands, **Then** it has a contract test. [ASSUMPTION: default is undeclared; SM-4's counter says the list is not grown to avoid a break]
+2. **Given** a name marked declared, **When** 1.8 lands, **Then** it has a contract test.
 
 **Files:** story file only. **Tests:** none; 1.8 proves it.
 
 ### Story 1.3: `decision(contract): whether a 0.x minor may break again after 0.2.0`
 
 **Kind:** decision · **Binds:** FR-31 · **Depends on:** none
+
+**Decided 2026-09-23 by the maintainer:** a later 0.x minor may break the declared surface with notice: its changelog section opens with a Breaking heading naming the migration, and the contract test is updated in the same change (RP-D003, #31).
 
 As a downstream tool author,
 I want the break policy after 0.2.0 stated,
@@ -393,19 +400,23 @@ how many were followed, beside hits per session (maintainer decision 3).
 
 **Kind:** decision · **Binds:** FR-22; AD-11 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** 20, per printed group (RP-D004, #38).
+
 As a developer reading a compliance figure,
 I want a floor under which no rate is shown,
 So that I never act on a rate from three opportunities.
 
 **Acceptance Criteria:**
 
-1. **Given** PRD Q7 and the working default of 20, **When** the decision is recorded, **Then** it names the default and whether it is per rule or per group under `--by`. [ASSUMPTION: 20, per printed group]
+1. **Given** PRD Q7 and the working default of 20, **When** the decision is recorded, **Then** it names the default and whether it is per rule or per group under `--by`.
 
 **Files:** story file only. **Tests:** none; 2.6 proves it.
 
 ### Story 2.2: `decision(registry): how a Python detector declares an opportunity`
 
 **Kind:** decision · **Binds:** FR-21, FR-6, FR-30; AD-11 · **Depends on:** none
+
+**Decided 2026-09-23 by the maintainer:** the keyword-only `opportunities` callable of AD-11 (RP-D005, #39).
 
 As a downstream tool with Python detectors,
 I want the opportunity hook fixed before it is declared,
@@ -421,13 +432,15 @@ So that my `fn(events, ctx)` detectors keep working and can opt in.
 
 **Kind:** decision · **Binds:** FR-17; maintainer decision 1 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** `promote?` is renamed to a neutral "frequent" marker with no advice; the parameter names follow in the break (RP-D006, #40).
+
 As a developer reading the report,
 I want the threshold marker to describe, not advise,
 So that the report stays an instrument.
 
 **Acceptance Criteria:**
 
-1. **Given** PRD Q11 and its recommendation, **When** the decision is recorded, **Then** it chooses keep, reword or drop. [ASSUMPTION: reword to a neutral marker such as "frequent" with no advice, per the PRD's recommendation]
+1. **Given** PRD Q11 and its recommendation, **When** the decision is recorded, **Then** it chooses keep, reword or drop.
 
 **Files:** story file only. **Tests:** none; 2.6 proves it.
 
@@ -496,13 +509,15 @@ So that I can say how often a rule was followed when it applied.
 
 **Kind:** decision · **Binds:** FR-21; PRD §8 · **Depends on:** none · **Sequenced before:** 6.2
 
+**Decided 2026-09-23 by the maintainer:** compliance by position is out of 0.2.0 (RP-D007, #44).
+
 As the maintainer,
 I want PRD Q5 confirmed before 0.2.0 scope freezes,
 So that compliance by position in the session neither slips in nor is dropped by default.
 
 **Acceptance Criteria:**
 
-1. **Given** PRD Q5 and §8's Out line, **When** the decision is recorded, **Then** it confirms that compliance by position stays out of 0.2.0, or names the story that brings it in. [ASSUMPTION: it stays out, as §8 says]
+1. **Given** PRD Q5 and §8's Out line, **When** the decision is recorded, **Then** it confirms that compliance by position stays out of 0.2.0, or names the story that brings it in.
 
 **Files:** story file only. **Tests:** none.
 
@@ -515,19 +530,23 @@ detector written and no model (maintainer decision 7).
 
 **Kind:** decision · **Binds:** FR-15; AD-12 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** headings only for 0.2 (RP-D008, #45).
+
 As a developer with a long rule file,
 I want the split unit fixed,
 So that my file becomes the rules I would name.
 
 **Acceptance Criteria:**
 
-1. **Given** PRD Q2 and the addendum's trade-off, **When** the decision is recorded, **Then** it chooses headings, list items or both, and how a list-item rule's id is formed if chosen. [ASSUMPTION: headings for 0.2, since AD-12's id is a heading slug]
+1. **Given** PRD Q2 and the addendum's trade-off, **When** the decision is recorded, **Then** it chooses headings, list items or both, and how a list-item rule's id is formed if chosen.
 
 **Files:** story file; the spine if AD-12's id form changes. **Tests:** none; 3.4 proves it.
 
 ### Story 3.2: `decision(detectors): the catalog's first shapes and how many`
 
 **Kind:** decision · **Binds:** FR-16, SM-1; AD-6, AD-12 · **Depends on:** none
+
+**Decided 2026-09-23 by the maintainer:** a small set of six to eight shapes, each with `examples:` that clear the 0.9 floor, binding by exact-one match (AD-12). The starting list: run the tests before finishing (`order` or `absent`); never skip pre-commit hooks with `--no-verify` (event, `git`); never force-push the default branch (event, `git`); use the named package manager, not another (event, `command`); do not read a whole file into context (event, `command`, as the shipped `whole-file-cat`); Conventional Commit subjects (event, `git` message) `[ASSUMPTION: subject parsing fits a matcher]`; never commit a secret-shaped file (event, `git add` path) (RP-D009, #46).
 
 As a first-time user,
 I want the catalog to hold the rule shapes most files state,
@@ -659,9 +678,11 @@ So that the detector's score reflects the field, not only the corpus.
 **Files:** `ruleprobe/cli.py` (`label`), `ruleprobe/validity.py` (`.events.jsonl` loader, `event_key`), `ruleprobe/declarative.py` (minimal emitter), `README.md` (How good are the detectors?).
 **Tests:** `tests/test_cli.py`, `tests/test_validity.py`, `tests/test_declarative.py` (emitter round trip).
 
-### Story 4.3: `spike(validity): field precision per shipped detector from hand-sampled hits` (proposed, maintainer to confirm)
+### Story 4.3: `spike(validity): field precision per shipped detector from hand-sampled hits`
 
 **Kind:** spike · **Binds:** FR-26, SM-8, NFR-6; AD-6 · **Depends on:** 3.5, 4.1, 4.2 · **Sequenced before:** 6.2
+
+**Confirmed by the maintainer on 2026-09-23:** the spike runs before the 0.2.0 release notes (6.2) (RP-SP002, #53).
 
 As the maintainer,
 I want each shipped detector's precision measured on real hits,
@@ -683,6 +704,8 @@ Runtime-neutral becomes a fact (maintainer decision 5).
 ### Story 5.1: `spike(readers): choose the third runtime, Cursor or Gemini CLI`
 
 **Kind:** spike · **Binds:** FR-32, FR-33; AD-3, AD-10 · **Depends on:** none
+
+**Runtime chosen by the maintainer on 2026-09-23:** Gemini CLI. The spike still runs to confirm Gemini CLI's transcript location and format and to list its file-tool mappings; if it finds Gemini CLI cannot be read reliably, it reports back rather than switching runtime (RP-SP003, #54).
 
 As the maintainer,
 I want evidence of what each candidate's transcripts record,
@@ -738,6 +761,8 @@ So that "runtime-neutral" is a measured claim.
 
 **Kind:** decision · **Binds:** SM-1 to SM-8 · **Depends on:** none
 
+**Decided 2026-09-23 by the maintainer:** every SM target is kept as written; the window becomes six months from the 0.2.0 release, replacing 2027-03-23 (RP-D010, #57).
+
 As the maintainer,
 I want the targets and the 2027-03-23 window confirmed,
 So that the release is judged against numbers I set.
@@ -767,11 +792,15 @@ So that I bump my pin with no code change.
 
 ## Epic 7 (proposed, maintainer may drop): Draft a detector from a rule's text
 
-Proposed only (maintainer decision 2). Nothing here is in 0.2.0 unless 7.1 says so.
+**Withdrawn 2026-09-23 by the maintainer (7.1, RP-D011):** drafting from prose needs a model, so it moves
+to the judge library tracked in [#21](https://github.com/JakeSelby/ruleprobe/issues/21) (RP-E002). The two
+items below are kept as the record and are not built in ruleprobe.
 
 ### Story 7.1: `decision(draft): whether the drafting command belongs in 0.2.0, a later minor or nowhere`
 
 **Kind:** decision · **Binds:** FR-34; AD-8 · **Depends on:** none
+
+**Decided 2026-09-23 by the maintainer:** nowhere in ruleprobe. Drafting moves to the judge library tracked in #21 (RP-E002), because it needs a model; FR-34 is withdrawn and NFR-7 loses its exception (RP-D011, #59). Withdrawn with its epic.
 
 As the maintainer,
 I want the drafting command's place decided before 0.2.0 scope freezes,
@@ -786,6 +815,8 @@ So that it neither slips in nor blocks the release.
 ### Story 7.2: `feat(draft): an opt-in command that drafts a detector from a rule's text`
 
 **Kind:** story (proposed) · **Binds:** FR-34, NFR-1, NFR-7; AD-8 · **Depends on:** 7.1, 1.4, 1.10
+
+**Withdrawn 2026-09-23 by the maintainer (7.1):** moved to #21 (RP-E002); kept here as the record, not built in ruleprobe (RP-S020, #60).
 
 As a maintainer of a rule set,
 I want a draft detector with `examples:` from a rule's prose,
@@ -805,39 +836,39 @@ Out of scope and not given stories: a judge, tracked as a future capability unde
 
 ## Open questions
 
-1. PRD Q1: third runtime. Answered by spike 5.1.
-2. PRD Q2: split unit. Decision 3.1.
-3. PRD Q3: catalog shapes and size. Decision 3.2.
-4. PRD Q4: drafting command. Decision 7.1.
-5. PRD Q5: compliance by position stays out of 0.2.0; confirm. Decision 2.7.
-6. PRD Q6: targets and window. Decision 6.1.
-7. PRD Q7: minimum opportunity count. Decision 2.1.
-8. PRD Q8: root `__all__` names. Decision 1.2.
-9. PRD Q9: schema version type and value. Decision 1.1.
-10. PRD Q10: Python opportunity hook. Decision 2.2.
-11. PRD Q11: `promote?`. Decision 2.3.
-12. PRD Q12: later 0.x breaks. Decision 1.3.
+1. Closed 2026-09-23: PRD Q1, third runtime: Gemini CLI; spike 5.1 still confirms its format.
+2. Closed 2026-09-23: PRD Q2, split unit: headings only for 0.2 (3.1).
+3. Closed 2026-09-23: PRD Q3, catalog: a small set of six to eight shapes (3.2).
+4. Closed 2026-09-23: PRD Q4, drafting command: nowhere in ruleprobe; moved to #21 (7.1).
+5. Closed 2026-09-23: PRD Q5, compliance by position: out of 0.2.0 (2.7).
+6. Closed 2026-09-23: PRD Q6, targets kept; the window is six months from the 0.2.0 release (6.1).
+7. Closed 2026-09-23: PRD Q7, minimum opportunity count: 20, per printed group (2.1).
+8. Closed 2026-09-23: PRD Q8, root `__all__` names: importable and undeclared (1.2).
+9. Closed 2026-09-23: PRD Q9, schema version: an integer; 0.2.0 writes `2`; absent means 1 (1.1).
+10. Closed 2026-09-23: PRD Q10, Python opportunity hook: AD-11's keyword-only `opportunities` callable (2.2).
+11. Closed 2026-09-23: PRD Q11, `promote?`: a neutral "frequent" marker with no advice (2.3).
+12. Closed 2026-09-23: PRD Q12, later 0.x breaks: allowed with notice, a Breaking changelog heading and the contract test updated in the same change (1.3).
 13. Closed 2026-09-23: the catalog is a Python literal module, `ruleprobe/detectors/catalog.py`, under AD-9, and sits in AD-1's graph (spine amended; readiness M1).
 14. Closed 2026-09-23: AD-11 already places `undecided` outside both `opportunities` and `followed`, so its identity holds as written. 2.4 AC6 and 2.5 AC1 follow it (readiness H1).
-15. The field-precision spike (4.3) is proposed, not approved. Confirm or drop it before 6.2.
-16. Epic 7 is proposed and droppable.
+15. Closed 2026-09-23: the maintainer confirmed the field-precision spike (4.3); it runs before 6.2.
+16. Closed 2026-09-23: Epic 7 is withdrawn and drafting moved to #21 (7.1).
 17. FR-29 says a fold entry persists "with the rows". AD-9 reads that as `report_data` emitting the effective map, and 1.6 AC4 follows. A ledger of `measure()` rows, which UJ-3 stores, carries none; shipped renames still fold through `contract_data.py`. Confirm the spine's reading, or add the map to rows (readiness L1).
 18. 1.8 AC7 has a test compare the README with the contract list, where AD-9 says the README "renders from" it. Accept the test, or amend AD-9 (readiness L8).
 19. FR-32 says file tools reach detectors under the shared names; AD-3 lets a tool with no exact twin stay native. 5.1 AC3 records the gap. Amend FR-32 to match AD-3, or keep it and accept the gap (readiness L4).
 
 ## Validation (step 4)
 
-- **FR coverage:** 15 of 15 in-scope FRs bound by at least one story; FR-34 bound in the proposed epic.
+- **FR coverage:** 15 of 15 in-scope FRs bound by at least one story; FR-34 withdrawn (moved to #21), its epic kept as the record.
 - **Starter template:** none; brownfield package at 0.1.0.
 - **Forward dependencies:** none within an epic. Cross-epic dependencies point only at earlier epics.
 - **File churn:** `ruleprobe/report.py` changes in Epics 1, 2 and 4, and `ruleprobe/rules.py` in 1 and 3.
   Consolidation was considered and rejected: the brief sequences the contract first so every later
   row and entry is written against it, and each epic delivers a separate user outcome.
-- **Items:** 33 (15 stories, 3 tasks, 3 spikes, 11 decisions, 1 existing bug). Epic 7's two items are
-  proposed and droppable; spike 4.3 is proposed, maintainer to confirm. Decision 2.7 was added on
+- **Items:** 33 (15 stories, 3 tasks, 3 spikes, 11 decisions, 1 existing bug). Epic 7's two items were
+  withdrawn on 2026-09-23 (moved to #21); spike 4.3 was confirmed on 2026-09-23. Decision 2.7 was added on
   2026-09-23 from the implementation readiness report (L5).
 - **Readiness:** the findings of `implementation-readiness-2026-09-23.md` (gate CONCERNS) are applied
-  here on 2026-09-23; L7 stays as open question 15, and L1, L4 and L8 need the maintainer (open
+  here on 2026-09-23; L7 was open question 15, closed on 2026-09-23, and L1, L4 and L8 need the maintainer (open
   questions 17 to 19).
 
 ## Beyond 0.2
