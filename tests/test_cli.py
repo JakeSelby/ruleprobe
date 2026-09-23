@@ -42,6 +42,17 @@ class ReportCommandTests(unittest.TestCase):
         self.assertEqual(data["measured"], 2)
         self.assertEqual([d["of"] for d in data["detectors"]], [2] * len(data["detectors"]))
 
+    def test_json_carries_the_schema_version_on_the_result_and_every_row(self):
+        _, text = run_cli("report", "--root", FIXTURES, "--json")
+        data = json.loads(text)
+        self.assertEqual(data["schema_version"], 2)
+        self.assertEqual([r["schema_version"] for r in data["rows"]], [2, 2])
+
+    def test_json_is_byte_identical_across_two_runs(self):
+        first = run_cli("report", "--root", FIXTURES, "--json", "--validity")
+        second = run_cli("report", "--root", FIXTURES, "--json", "--validity")
+        self.assertEqual(first, second)
+
     def test_an_empty_root_says_what_to_do_and_exits_non_zero(self):
         code, text = run_cli("report", "--root", FIXTURES + "/nothing-here")
         self.assertEqual(code, 1)

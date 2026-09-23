@@ -14,8 +14,19 @@ and the session is subtracted from the denominator of the detector named in `rul
 alone - one broken third-party detector may not erase every other detector's evidence. The
 older singular spelling, `rules_error`, names no detector, so a row carrying it is still
 dropped whole: an error nobody attributed cannot be attributed here either.
+
+Every row and every `report_data` result carries `schema_version`, an integer; a row without
+one was written by 0.1 and is schema 1. A row whose version this package does not know - one
+written by a newer release, or a value that is not a known version at all - is excluded from
+every count and denominator and counted apart, as a row with no `rules` map is: its hits may
+not mean what this release's hits mean.
 """
 from .registry import DEFAULT, run
+
+#: The schema `measure()` writes and the highest one `report_data` reads.
+SCHEMA_VERSION = 2
+#: Every row schema this release can count. An absent `schema_version` reads as 1.
+KNOWN_SCHEMA_VERSIONS = (1, 2)
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -39,6 +50,7 @@ def measure(session, stances=None, registry=DEFAULT):
     errors = []
     hits = run(session.events, stances, registry=registry, errors=errors)
     row = {
+        "schema_version": SCHEMA_VERSION,
         "session_id": session.id,
         "repo": session.repo,
         "runtime": session.runtime,
@@ -86,6 +98,19 @@ def errored_detectors(row, renamed):
     return out
 
 
+def row_schema_version(row):
+    """The schema `row` was written under: its `schema_version`, or 1 when it has none."""
+    return row.get("schema_version", 1)
+
+
+def is_known_schema(row):
+    """Whether this release can count `row`. A boolean is not a version, though Python
+    would compare `True` equal to 1."""
+    version = row_schema_version(row)
+    return (isinstance(version, int) and not isinstance(version, bool)
+            and version in KNOWN_SCHEMA_VERSIONS)
+
+
 def rule_ids(rows, registry):
     """Every detector id to report on: the registry's, so a detector with no hit is still a
     line, plus any id a row carries that the registry no longer defines - under its current
@@ -104,8 +129,9 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     `report()` renders this and `ruleprobe report --json` dumps it, so the table and the
     JSON cannot disagree about a denominator, a fold or a note. The shape is:
 
-    - `by`, `measured`, `unmeasured`, `unattributed`, `errors`, `min_sessions`,
-      `promote_share` - what was counted and under which settings.
+    - `schema_version` - the schema this result is written under.
+    - `by`, `measured`, `unmeasured`, `unknown_schema`, `unattributed`, `errors`,
+      `min_sessions`, `promote_share` - what was counted and under which settings.
     - `notes` - the preamble lines, in order.
     - `detectors` - one entry per detector when `by="rule"`: `detector`, `hits`,
       `sessions`, `of`, `share`, `note`, and `validity` when scores were passed.
@@ -116,9 +142,12 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
     rows = [r for r in rows if isinstance(r, dict)]
     renamed = registry.renamed
-    measured, unmeasured, unattributed = [], 0, 0
+    measured, unmeasured, unknown_schema, unattributed = [], 0, 0, 0
     for row in rows:
-        if not isinstance(row.get("rules"), dict):
+        if not is_known_schema(row):
+            # Checked first: a newer schema may shape even its `rules` map differently.
+            unknown_schema += 1
+        elif not isinstance(row.get("rules"), dict):
             unmeasured += 1
         elif row.get("rules_error") and not row.get("rules_errors"):
             # The legacy spelling names no detector, so there is nobody to charge the loss
@@ -135,6 +164,9 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     notes = []
     if unmeasured:
         notes.append("%d session(s) carry no rule data" % unmeasured)
+    if unknown_schema:
+        notes.append("%d session(s) carry a schema_version this release does not know"
+                     " (highest known: %d) and are excluded" % (unknown_schema, SCHEMA_VERSION))
     if unattributed:
         notes.append("%d session(s) carry an error naming no detector and are dropped whole"
                      % unattributed)
@@ -144,7 +176,8 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
         notes.append("%d detector(s) raised in %d session(s): %s%s"
                      % (len(errors), errored_rows, named, more))
         notes.append("each is out of its own denominator for those sessions, and no other's")
-    data = {"by": by, "measured": len(measured), "unmeasured": unmeasured,
+    data = {"schema_version": SCHEMA_VERSION, "by": by, "measured": len(measured),
+            "unmeasured": unmeasured, "unknown_schema": unknown_schema,
             "unattributed": unattributed, "errors": dict(errors),
             "min_sessions": min_sessions, "promote_share": promote_share,
             "notes": notes, "detectors": [], "groups": []}
