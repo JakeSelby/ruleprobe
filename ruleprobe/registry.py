@@ -11,7 +11,7 @@ A detector that raises is skipped, so one bad pattern cannot cost a session its 
 from .events import Hit
 from .shell import analyse
 
-#: The contract's schema version: what 0.2.0 writes, and every version it can read (AD-9).
+#: The schema version this release writes, and every schema version it reads.
 SCHEMA_VERSION = 2
 KNOWN_SCHEMA_VERSIONS = (1, 2)
 
