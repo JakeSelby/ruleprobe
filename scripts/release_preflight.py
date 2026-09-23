@@ -4,8 +4,11 @@
 Without `--tag`, it checks that `__version__` and the changelog agree; CI runs it so on every change,
 while `## Unreleased` collects entries. With `--tag`, it also refuses Unreleased entries, which a
 release must fold into its version section: run it so before tagging, and the release workflow runs
-it again on the tag. It checks only what a file in this repository can prove; the test suite and
-the corpus floor are separate gates.
+it again on the tag. `--base-init` takes the path of the base branch's `ruleprobe/__init__.py`;
+when `__version__` differs from the version declared there, the run checks as a release of the new
+version, as if `--tag v<version>` were given. CI runs it so on every pull request, so a version bump
+that leaves Unreleased entries fails before the tag. It checks only what a file in this repository can prove; the test suite and the corpus floor
+are separate gates.
 """
 import argparse
 import os
@@ -17,13 +20,25 @@ ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 
 
-def package_version(root=ROOT):
-    """The one version source: `__version__` in the package, which pyproject reads too."""
-    text = (root / "ruleprobe" / "__init__.py").read_text(encoding="utf-8")
+def package_version(root=ROOT, init=None):
+    """The one version source: `__version__` in the package, which pyproject reads too.
+
+    `init` reads it from another copy of `__init__.py` instead, such as the base branch's.
+    """
+    path = init if init is not None else root / "ruleprobe" / "__init__.py"
+    text = Path(path).read_text(encoding="utf-8")
     match = re.search(r'^__version__ = "([^"]+)"$', text, re.M)
     if not match:
-        raise ValueError("ruleprobe/__init__.py declares no __version__")
+        raise ValueError("{} declares no __version__".format(path))
     return match.group(1)
+
+
+def release_tag(root=ROOT, tag=None, base_init=None):
+    """The tag to check as a release: `tag`, else `v<version>` when `__version__` differs from `base_init`'s."""
+    if tag is not None or base_init is None:
+        return tag
+    version = package_version(root)
+    return "v" + version if version != package_version(init=base_init) else None
 
 
 def changelog_sections(text):
@@ -66,8 +81,14 @@ def errors(root=ROOT, tag=None):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", default=os.environ.get("GITHUB_REF_NAME") if os.environ.get("GITHUB_REF_TYPE") == "tag" else None)
+    parser.add_argument("--base-init", metavar="PATH",
+                        help="path to the base branch's ruleprobe/__init__.py; if __version__ differs from it, "
+                             "check as a release of the new version")
     args = parser.parse_args(argv)
-    found = errors(ROOT, args.tag)
+    tag = release_tag(ROOT, args.tag, args.base_init)
+    if tag is not None and args.tag is None:
+        print("release preflight: __version__ changed from the base; checking as {}".format(tag))
+    found = errors(ROOT, tag)
     for line in found:
         print("release error: " + line, file=sys.stderr)
     if not found:

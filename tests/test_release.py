@@ -104,6 +104,67 @@ class PreflightTests(unittest.TestCase):
         sections = release_preflight.changelog_sections("## 1.2.30 (2026-01-02)\n\n- x\n")
         self.assertEqual(release_preflight.version_section(sections, "1.2.3"), (None, None))
 
+    def write_base(self, temp, version):
+        base = Path(temp) / "base_init.py"
+        base.write_text('"""Doc."""\n__version__ = "{}"\n'.format(version))
+        return str(base)
+
+    def test_a_version_bump_with_unreleased_entries_is_refused(self):
+        # #68: CI passes the base branch's __init__.py, so a release PR that leaves Unreleased
+        # entries fails before the tag rather than in the release workflow after it.
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, unreleased="\n- Pending.\n")
+            base = self.write_base(temp, "1.2.2")
+            self.assertEqual(release_preflight.release_tag(root, None, base), "v1.2.3")
+            code, err = self.run_main(root, ["--base-init", base], {})
+        self.assertEqual(code, 1)
+        self.assertIn("Unreleased entries", err)
+
+    def test_an_unchanged_version_keeps_unreleased_entries(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, unreleased="\n- Pending.\n")
+            base = self.write_base(temp, "1.2.3")
+            self.assertIsNone(release_preflight.release_tag(root, None, base))
+            self.assertEqual(self.run_main(root, ["--base-init", base], {}), (0, ""))
+
+    def test_a_folded_version_bump_passes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            base = self.write_base(temp, "1.2.2")
+            self.assertEqual(release_preflight.release_tag(root, None, base), "v1.2.3")
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                result = self.run_main_stdout(root, ["--base-init", base])
+        self.assertEqual(result, (0, ""))
+        self.assertIn("checking as v1.2.3", out.getvalue())
+
+    def run_main_stdout(self, root, argv):
+        """`main(argv)` over `root` without the GitHub ref variables, leaving stdout to the caller."""
+        clean = {k: v for k, v in os.environ.items() if k not in ("GITHUB_REF_TYPE", "GITHUB_REF_NAME")}
+        err = io.StringIO()
+        with mock.patch.object(release_preflight, "ROOT", root), \
+                mock.patch.dict(os.environ, clean, clear=True), contextlib.redirect_stderr(err):
+            code = release_preflight.main(argv)
+        return code, err.getvalue()
+
+    def test_an_explicit_tag_wins_over_the_base(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            base = self.write_base(temp, "1.2.2")
+            self.assertEqual(release_preflight.release_tag(root, None, base), "v1.2.3")
+            self.assertEqual(release_preflight.release_tag(root, "v9.9.9", base), "v9.9.9")
+            code, err = self.run_main(root, ["--tag", "v9.9.9", "--base-init", base], {})
+        self.assertEqual(code, 1)
+        self.assertIn("does not match", err)
+
+    def test_a_base_without_a_version_is_an_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            base = Path(temp) / "base_init.py"
+            base.write_text('"""Doc."""\n')
+            with self.assertRaises(ValueError):
+                release_preflight.release_tag(root, None, str(base))
+
 
 class NotesTests(unittest.TestCase):
     def test_notes_are_the_version_section_and_an_install_line(self):
