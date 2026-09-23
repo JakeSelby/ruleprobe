@@ -47,9 +47,10 @@ detector's `when`, because a hit they produce is not a hit on the event in hand:
 
 An entry may carry `schema_version`, the integer schema it was written under. Absent, it is
 the top-level `version` of the `detectors:` file it sits in, and absent there too it is 1;
-rule-file front matter has no file-level default, so an entry there without the key is 1. A value that is not a schema
-this package knows - not in `registry.KNOWN_SCHEMA_VERSIONS`, or not an integer - is an
-error, so an entry written for a later schema is refused rather than read under the wrong one.
+rule-file front matter has no file-level default, so an entry there without the key is 1. A
+value that is not a schema this package knows - not in `registry.KNOWN_SCHEMA_VERSIONS`, or
+not an integer - is an error, so an entry written for a later schema is refused rather than
+read under the wrong one.
 
 An entry may also carry `examples`, which is how a detector states its own precision and
 recall rather than being taken on trust. `fire` is a list of minimal cases it should fire

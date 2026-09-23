@@ -142,22 +142,29 @@ def load_file(path):
 
 def _file_version(doc, path, lines, findings):
     """The schema version a `detectors:` file sets for entries that name none: its top-level
-    `version`, else 1. An unknown one is a finding, and `None`, so that only the entries
-    that would take it are skipped; an entry with a known `schema_version` of its own wins."""
+    `version`, else 1. An unknown one, or a top-level `schema_version`, is a finding, and
+    `None`, so that only the entries that would take it are skipped; an entry with a known
+    `schema_version` of its own wins. Each finding names the entries it skipped."""
     if not isinstance(doc, dict) or "detectors" not in doc:
         return 1
+    problems = []
     if "schema_version" in doc:
-        findings.append(Finding(path, lines.line_of(doc, "schema_version") if lines else 0,
-                                "the file-level key is `version`, not `schema_version`; "
-                                "entries without their own schema_version skipped"))
-        return None
-    if "version" not in doc:
-        return 1
-    reason = schema_version_error(doc["version"], "version")
-    if reason is None:
-        return doc["version"]
-    findings.append(Finding(path, lines.line_of(doc, "version") if lines else 0,
-                            reason + "; entries without their own schema_version skipped"))
+        problems.append(("schema_version",
+                         "the file-level key is `version`, not `schema_version`"))
+    if "version" in doc:
+        reason = schema_version_error(doc["version"], "version")
+        if reason:
+            problems.append(("version", reason))
+    if not problems:
+        return doc.get("version", 1)
+    entries = doc["detectors"] if isinstance(doc["detectors"], list) else []
+    skipped = [e for e in entries if isinstance(e, dict) and "schema_version" not in e]
+    ids = [e["id"] for e in skipped if isinstance(e.get("id"), str)]
+    note = "; skipped %d %s without their own schema_version%s" % (
+        len(skipped), "entry" if len(skipped) == 1 else "entries",
+        ": " + ", ".join(ids) if ids else "")
+    for key, reason in problems:
+        findings.append(Finding(path, lines.line_of(doc, key) if lines else 0, reason + note))
     return None
 
 

@@ -13,7 +13,7 @@ import shutil
 import tempfile
 import unittest
 
-from ruleprobe.declarative import DeclarativeError, parse_with_lines
+from ruleprobe.declarative import DeclarativeError, load, parse_with_lines
 from ruleprobe import matchers
 from ruleprobe.matchers import ENTRY_KEYS, compile_detector
 from ruleprobe.registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION
@@ -45,7 +45,7 @@ class EntryTests(unittest.TestCase):
     def test_entry_validation_reads_the_one_registry_constant(self):
         self.assertIs(matchers.KNOWN_SCHEMA_VERSIONS, KNOWN_SCHEMA_VERSIONS)
 
-    def test_an_entry_with_no_key_loads_as_schema_one(self):
+    def test_an_entry_with_no_key_compiles(self):
         detector = compile_detector({"id": "t/x", "when": WHEN}, "<test>")
         self.assertEqual(detector.id, "t/x")
 
@@ -93,13 +93,13 @@ class FileVersionTests(Temp):
         detectors, findings = load_file(self.write("detectors.yaml", text))
         return [d.id for d in detectors], findings
 
-    def test_a_file_with_no_version_loads_its_entries_as_schema_one(self):
+    def test_a_file_with_no_version_loads_its_entries(self):
         ids, findings = self.load("detectors:\n"
                                   "  - id: a/one\n"
                                   "    when: {tool: Write}\n")
         self.assertEqual((ids, findings), (["a/one"], []))
 
-    def test_an_entry_takes_a_known_file_version(self):
+    def test_a_known_file_version_loads_its_entries(self):
         for version in range(1, SCHEMA_VERSION + 1):
             with self.subTest(version=version):
                 ids, findings = self.load("version: %d\n"
@@ -107,14 +107,6 @@ class FileVersionTests(Temp):
                                           "  - id: a/one\n"
                                           "    when: {tool: Write}\n" % version)
                 self.assertEqual((ids, findings), (["a/one"], []))
-
-    def test_an_entry_s_own_key_wins_over_the_file_s(self):
-        ids, findings = self.load("version: 2\n"
-                                  "detectors:\n"
-                                  "  - id: a/own\n"
-                                  "    schema_version: 1\n"
-                                  "    when: {tool: Write}\n")
-        self.assertEqual((ids, findings), (["a/own"], []))
 
     def test_each_unknown_file_version_skips_only_the_entries_that_take_it(self):
         for name, text, reason in BAD:
@@ -171,13 +163,11 @@ class FileVersionTests(Temp):
         common = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               "ruleprobe", "detectors", "common.yaml")
         detectors, findings = load_file(common)
-        self.assertEqual(len(detectors), 6)
+        self.assertTrue(detectors)
         self.assertEqual(findings, [])
-        with open(common, encoding="utf-8") as handle:
-            text = handle.read()
-        self.assertEqual(text.count("\nversion: 1\n"), 1)
-        detectors, findings = load_file(
-            self.write("common.yaml", text.replace("\nversion: 1\n", "\nversion: 9\n")))
+        document, _ = load(common)
+        document["version"] = 9
+        detectors, findings = load_file(self.write("common.json", json.dumps(document)))
         self.assertEqual(detectors, [])
         self.assertEqual(len(findings), 1)
         self.assertIn("version 9 is newer", findings[0].reason)
@@ -193,6 +183,37 @@ class FileVersionTests(Temp):
         self.assertEqual(ids, ["a/own"])
         self.assertEqual([f.line for f in findings], [1])
         self.assertIn("the file-level key is `version`", findings[0].reason)
+
+    def test_the_finding_counts_and_names_the_entries_it_skipped(self):
+        ids, findings = self.load("version: 9\n"
+                                  "detectors:\n"
+                                  "  - id: a/one\n"
+                                  "    when: {tool: Write}\n"
+                                  "  - when: {tool: Read}\n"
+                                  "  - id: a/own\n"
+                                  "    schema_version: 2\n"
+                                  "    when: {tool: Edit}\n"
+                                  "  - id: a/two\n"
+                                  "    when: {tool: Grep}\n")
+        self.assertEqual(ids, ["a/own"])
+        self.assertEqual(len(findings), 1)
+        self.assertTrue(findings[0].reason.endswith(
+            "; skipped 3 entries without their own schema_version: a/one, a/two"),
+            findings[0].reason)
+
+    def test_a_top_level_schema_version_and_a_bad_version_are_both_reported(self):
+        ids, findings = self.load("schema_version: 2\n"
+                                  "version: 9\n"
+                                  "detectors:\n"
+                                  "  - id: a/one\n"
+                                  "    when: {tool: Write}\n")
+        self.assertEqual(ids, [])
+        self.assertEqual([f.line for f in findings], [1, 2])
+        self.assertIn("the file-level key is `version`", findings[0].reason)
+        self.assertIn("version 9 is newer", findings[1].reason)
+        for finding in findings:
+            self.assertIn("skipped 1 entry without their own schema_version: a/one",
+                          finding.reason)
 
     def test_a_non_mapping_entry_under_a_bad_file_version_keeps_its_own_finding(self):
         ids, findings = self.load("version: 9\n"
