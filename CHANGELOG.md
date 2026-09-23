@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows
   predicate itself reads it as false and can over-count, and should compose through the
   declarative `not`, `any` and `all` instead.
 
+## 0.2.0 (2026-09-23)
+
+### Changed
+
+- Temporary: proves the release-fold step fails in CI; reverted in the next commit.
+
 ## 0.1.0 (2026-09-22)
 
 ### Added
