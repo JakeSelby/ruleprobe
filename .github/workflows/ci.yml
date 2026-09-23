@@ -74,6 +74,13 @@ jobs:
           python-version: "3.x"
       - run: python -m pip install build==1.6.1
       - run: python -m build
+      - name: The built metadata carries the SPDX licence expression
+        run: |
+          unzip -p dist/*.whl '*.dist-info/METADATA' > "$RUNNER_TEMP/METADATA"
+          grep -qx 'License-Expression: MIT' "$RUNNER_TEMP/METADATA"
+          grep -qx 'License-File: LICENSE' "$RUNNER_TEMP/METADATA"
+          tar -xzOf dist/*.tar.gz --wildcards '*/PKG-INFO' > "$RUNNER_TEMP/PKG-INFO"
+          grep -qx 'License-Expression: MIT' "$RUNNER_TEMP/PKG-INFO"
       - name: Install the wheel outside the checkout and run it
         run: |
           python -m venv "$RUNNER_TEMP/venv"
