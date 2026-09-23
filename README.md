@@ -128,6 +128,29 @@ An entry is `id`, `rule`, `event`, `when`, and an optional `gate`. `event` is on
 `tool_use`, `assistant_text` and `session`, and it says what a hit is counted against. `when`
 is a matcher: a mapping in which every key must hold, composed with `any`, `all` and `not`.
 
+An entry may also carry `schema_version`, the integer schema it was written under; this
+release reads 1 and 2. An entry without one takes its detectors file's top-level `version`,
+and a file without one is schema 1. Only a detectors file has a top-level `version`; a
+`detector:` entry in rule-file front matter has no file-level default, so without its own key
+it is schema 1. In a detectors file the file-level key is `version`: a top-level
+`schema_version` is a finding, as a bad `version` is. An entry's own key wins over the file's.
+A value this release does not know - newer than 2, below 1, or not an integer (`"2"`, `2.0`
+and `true` included) - is a finding with its file and line, and only the entries that would be
+read under it are skipped, so an entry written for a later schema is refused rather than
+counted wrong.
+
+```yaml
+version: 2
+detectors:
+  - id: house-style/sudo-install
+    when:
+      command: {starts_with: [sudo, pip]}
+  - id: house-style/old-entry
+    schema_version: 1
+    when:
+      command: {name: npm}
+```
+
 **A tool use.** The shape is a command, a tool name, or an argument:
 
 ```yaml
