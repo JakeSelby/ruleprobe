@@ -176,8 +176,8 @@ neighbours already do it (refs 1, 2). It is the price of being credible.
 - **Opportunity**: a point in a session where a rule applies. Defined by the detector.
 - **Followed**: an opportunity where the action the rule asks for happened inside the opportunity's
   window. For an `order` detector, a `then` match inside `within` of the `first` match that opened the
-  opportunity. For an `absent` detector with `scope: turn`, a turn where the trigger matched and the
-  forbidden match did not.
+  opportunity. For an `absent` detector with `scope: turn`, a turn in which the `of` matcher, the
+  action the rule asks for, matched; a turn in which it did not is a hit.
 - **Compliance per opportunity**: opportunities, and how many were followed, for one rule.
 - **Corpus**: the labelled sessions that ship in the package.
 - **Floor**: the minimum precision and recall a detector must score on the corpus. Default 0.9.
@@ -656,7 +656,8 @@ These bind every feature. Each is tested.
   `--json` output (implemented, 0.1.0). Bound: no clock, randomness, locale or dict-order effect in any
   count. `[ASSUMPTION: --since is the one input read against the clock, and a fixed date removes it]`
 - **NFR-4 Under-count rather than over-count.** When a detector or the shell parse cannot decide, it
-  produces no hit (implemented, 0.1.0). Bound: every documented miss is a miss, not a guess; a catalog
+  produces no hit (partial: implemented (0.1.0) for positive matchers; negation over skipped commands
+  over-counts (#19, planned v0.2.0)). Bound: every documented miss is a miss, not a guess; a catalog
   binding that is unsure leaves the rule unmeasured (FR-16).
 - **NFR-5 `report` writes and sends nothing.** `ruleprobe report` opens no network connection and writes
   no file (implemented, 0.1.0). Bound: a test runs `report` with network access and file writes denied,
