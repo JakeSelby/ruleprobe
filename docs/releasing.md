@@ -28,6 +28,10 @@ migration. From 1.0 a breaking change is a major.
    python3 scripts/release_notes.py         # the GitHub release body, exactly
    ```
 
+   CI refuses an unfolded release PR too: on a pull request that changes `__version__`, the `test`
+   check runs the preflight as a release of the new version, so an entry left under
+   `## Unreleased` fails it.
+
 3. After that PR merges, tag the merge commit on `main` and push the tag:
 
    ```sh
