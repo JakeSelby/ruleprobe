@@ -349,22 +349,35 @@ class RealCorpusTests(unittest.TestCase):
         refused = [(bmad_id, reason) for bmad_id, status, reason in report if status == "refuse"]
         self.assertEqual(refused, [])
         self.assertEqual(len(report), len(manifest["items"]))
+        # Whatever format each file is in now, its item's legacy stub must still convert.
+        checked = 0
+        for item in manifest["items"]:
+            with self.subTest(item["bmad_id"]):
+                status, converted, reason = sync.upgrade_text(item, sync.render_legacy_stub(item))
+                self.assertEqual((status, reason), ("convert", "converts without loss"))
+                self.assertIsNotNone(sync.artifact_layout(item, converted))
+                self.assertEqual(converted, sync.render_artifact(item))
+                checked += 1
+        self.assertGreater(checked, 0)
 
     def test_each_conversion_carries_the_original_tail_byte_for_byte(self):
-        last_line = re.compile(r"planning context rather than duplicate the issue\.\r?\n")
-        # Vacuous once every stub is upgraded; UpgradeTests covers a carried tail on synthetic stubs.
+        # Built from each real item's legacy stub, so the test holds once every file is typed.
+        checked = 0
         for item in sync.load_manifest()["items"]:
-            original = (REPO / item["artifact_path"]).read_bytes().decode("utf-8")
-            status, converted, _ = sync.upgrade_text(item, original)
-            if status == "current":
-                continue
+            tail = "\n## Amendment \u2014 {} tail\n\nKept \u00e9 verbatim.\n".format(item["bmad_id"])
+            original = sync.render_legacy_stub(item) + tail
             with self.subTest(item["bmad_id"]):
+                status, converted, _ = sync.upgrade_text(item, original)
                 self.assertEqual(status, "convert")
-                tail = original[last_line.search(original).end():]
-                skeleton = sync.render_artifact(item)
-                if tail and not tail.startswith("\n"):
-                    skeleton += "\n"
-                self.assertEqual(converted, skeleton + tail)
+                layout = sync.artifact_layout(item, converted)
+                self.assertIsNotNone(layout)
+                self.assertEqual(converted, sync.render_artifact(item) + tail)
+                self.assertTrue(converted.endswith(tail))
+                for key in ("bmad_id", "type", "title", "lifecycle", "provenance", "github_issue",
+                            "github_issue_url", "parent_bmad_id", "parent_github_issue"):
+                    self.assertEqual(sync.frontmatter_value(converted, key), sync.frontmatter_value(original, key))
+                checked += 1
+        self.assertGreater(checked, 0)
 
 
 class DepthTests(TempRoot):
