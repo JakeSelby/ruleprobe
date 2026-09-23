@@ -2,6 +2,9 @@
 """The command line, over the fixture transcripts."""
 import io
 import json
+import os
+import subprocess
+import sys
 import unittest
 
 from ruleprobe.cli import main
@@ -41,6 +44,30 @@ class ReportCommandTests(unittest.TestCase):
                          ["demo-repo", "other-repo"])
         self.assertEqual(data["measured"], 2)
         self.assertEqual([d["of"] for d in data["detectors"]], [2] * len(data["detectors"]))
+
+    def test_json_carries_the_schema_version_on_the_result_and_every_row(self):
+        _, text = run_cli("report", "--root", FIXTURES, "--no-config", "--json")
+        data = json.loads(text)
+        self.assertEqual(data["schema_version"], 2)
+        self.assertEqual([r["schema_version"] for r in data["rows"]], [2, 2])
+
+    def test_json_is_byte_identical_across_two_runs(self):
+        # Separate processes under different hash seeds, so an order that depends on set or
+        # dict hashing shows up as a difference rather than a repeat. It guards hash order
+        # only: two runs over one directory walk it the same way.
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        outputs = []
+        for seed in ("1", "2"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            done = subprocess.run(
+                [sys.executable, "-m", "ruleprobe", "report", "--root", FIXTURES,
+                 "--no-config", "--json", "--validity"],
+                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertTrue(done.stdout.strip())
+            outputs.append(done.stdout)
+        self.assertEqual(outputs[0], outputs[1])
 
     def test_an_empty_root_says_what_to_do_and_exits_non_zero(self):
         code, text = run_cli("report", "--root", FIXTURES + "/nothing-here")

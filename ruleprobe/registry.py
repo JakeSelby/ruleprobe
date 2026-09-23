@@ -11,6 +11,10 @@ A detector that raises is skipped, so one bad pattern cannot cost a session its 
 from .events import Hit
 from .shell import analyse
 
+#: The schema version this release writes, and every schema version it reads.
+SCHEMA_VERSION = 2
+KNOWN_SCHEMA_VERSIONS = (1, 2)
+
 __all__ = ["Detector", "Registry", "DEFAULT", "run", "register_compiler", "from_spec"]
 
 #: The shapes of transcript a detector reads. A registry entry naming anything else is a
