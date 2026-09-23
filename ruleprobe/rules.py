@@ -65,14 +65,26 @@ class Bundle(object):
             out[entry.state] = out.get(entry.state, 0) + 1
         return out
 
+    def coverage(self):
+        """The counts, plus `share`: measured rules over all rules, dark ones included, or
+        `None` when there are no rules. `summary()` prints this and `report --json` carries
+        it, so the two cannot disagree."""
+        out = self.counts()
+        total = sum(out.values())
+        out["share"] = out["measured"] / float(total) if total else None
+        return out
+
     def summary(self, relative_to=None):
         """The coverage block a report prints under its table, or `""` when nothing was
         loaded and there is nothing to say."""
         lines = []
         if self.rules:
-            counts = self.counts()
-            lines.append("rules: %d measured, %d dark, %d unmeasured"
-                         % (counts["measured"], counts["dark"], counts["unmeasured"]))
+            coverage = self.coverage()
+            # Floored, so a file with one rule unmeasured never prints as 100%.
+            percent = 100 * coverage["measured"] // sum(coverage[s] for s in STATES)
+            lines.append("rules: %d measured, %d dark, %d unmeasured (%d%% measured)"
+                         % (coverage["measured"], coverage["dark"], coverage["unmeasured"],
+                            percent))
             for entry in self.rules:
                 note = ": " + entry.reason if entry.reason else ""
                 lines.append("  %-11s%-28s%s%s"
