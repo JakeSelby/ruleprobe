@@ -1,13 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""The package envelope, enforced: no runtime dependency, no network or subprocess import, and
-a `report` that writes and sends nothing."""
+"""The package envelope, enforced: no runtime dependency; no module importing AD-8's list of
+`socket`, `urllib`, `http`, `subprocess` and model clients; and a `report` that writes and
+sends nothing."""
 import ast
-import builtins
 import contextlib
 import io
+import json
 import os
 import re
 import socket
+import tempfile
 import unittest
 from unittest import mock
 
@@ -21,23 +23,59 @@ CORPUS_SESSIONS = os.path.join(PACKAGE, "corpus", "sessions")
 FORBIDDEN_MODULES = ("socket", "urllib", "http", "subprocess")
 MODEL_CLIENTS = ("anthropic", "openai", "cohere", "mistralai", "litellm", "ollama", "groq",
                  "google.generativeai", "google.genai", "vertexai", "transformers", "llama_cpp")
+IMPORT_FUNCTIONS = ("__import__", "import_module")
 
 
-def project_dependencies(text):
-    """The `dependencies` list of the `[project]` table, as its quoted entries, or None when the
-    key is absent. A reader for this one key, since `tomllib` is 3.11 and newer."""
+# --- AC 1: the dependency list, read without tomllib (3.11 and newer) ------------------------
+
+
+def strip_comments(text):
+    """`text` with every `#` comment removed, leaving a `#` inside a quoted string alone."""
+    out, quote = [], None
+    lines = text.split("\n")
+    for line in lines:
+        kept = []
+        for i, char in enumerate(line):
+            if quote:
+                if char == quote and not (quote == '"' and line[i - 1:i] == "\\"):
+                    quote = None
+            elif char in "\"'":
+                quote = char
+            elif char == "#":
+                break
+            kept.append(char)
+        out.append("".join(kept))
+    return "\n".join(out)
+
+
+def project_array(text, key):
+    """The quoted entries of `key`'s array in the `[project]` table, or None when absent."""
+    text = strip_comments(text)
     table = re.search(r"^\[project\][ \t]*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
     if table is None:
         return None
-    key = re.search(r"^dependencies[ \t]*=[ \t]*\[(.*?)\]", table.group(1), re.M | re.S)
-    if key is None:
+    found = re.search(r"^%s[ \t]*=[ \t]*\[(.*?)\]" % re.escape(key), table.group(1), re.M | re.S)
+    if found is None:
         return None
-    body = "\n".join(line.split("#", 1)[0] for line in key.group(1).split("\n"))
-    entries = re.findall(r"\"([^\"]*)\"|'([^']*)'", body)
-    leftover = re.sub(r"\"[^\"]*\"|'[^']*'|[\s,]", "", body)
-    if leftover:
-        raise ValueError("unreadable dependencies list: %r" % key.group(1))
-    return [double or single for double, single in entries]
+    body = found.group(1)
+    if re.sub(r"\"[^\"]*\"|'[^']*'|[\s,]", "", body):
+        raise ValueError("unreadable %s array: %r" % (key, body))
+    return [double or single for double, single in re.findall(r"\"([^\"]*)\"|'([^']*)'", body)]
+
+
+def dependency_violations(text):
+    """What in a `pyproject.toml` breaks `dependencies = []`; empty when nothing does."""
+    found = []
+    dependencies = project_array(text, "dependencies")
+    if dependencies is None:
+        found.append("no dependencies key")
+    found.extend("dependency %s" % entry for entry in dependencies or [])
+    if "dependencies" in (project_array(text, "dynamic") or []):
+        found.append("dependencies is dynamic")
+    return found
+
+
+# --- AC 2: the import scan -------------------------------------------------------------------
 
 
 def _forbidden(name):
@@ -47,29 +85,38 @@ def _forbidden(name):
     return None
 
 
+def _literal_name(call):
+    for arg in call.args[:1] + [k.value for k in call.keywords if k.arg == "name"]:
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            return arg.value
+    return None
+
+
 def forbidden_imports(source, filename="<source>"):
-    """Every (line, module) in `source` that imports a forbidden module, by statement or by an
-    `__import__` / `import_module` call with a literal name."""
+    """Every (line, module) in `source` that imports a forbidden module: by statement, or by an
+    `__import__` / `import_module` call, under any alias, with a literal name."""
+    tree = ast.parse(source, filename)
+    loaders = set(IMPORT_FUNCTIONS)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "builtins"):
+            loaders.update(a.asname or a.name for a in node.names if a.name in IMPORT_FUNCTIONS)
     found = []
-    for node in ast.walk(ast.parse(source, filename)):
+    for node in ast.walk(tree):
         names = []
         if isinstance(node, ast.Import):
             names = [alias.name for alias in node.names]
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             names = [node.module] + [node.module + "." + a.name for a in node.names]
-        elif isinstance(node, ast.Call) and node.args:
+        elif isinstance(node, ast.Call):
             func = node.func
-            called = getattr(func, "id", None) or getattr(func, "attr", None)
-            first = node.args[0]
-            if called in ("__import__", "import_module") and isinstance(first, ast.Constant) \
-                    and isinstance(first.value, str):
-                names = [first.value]
+            called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if (isinstance(func, ast.Name) and called in loaders) or called in IMPORT_FUNCTIONS:
+                names = [_literal_name(node) or ""]
         for name in names:
-            banned = _forbidden(name)
-            if banned:
+            if _forbidden(name):
                 found.append((node.lineno, name))
                 break
-    return found
+    return sorted(found)
 
 
 def package_modules():
@@ -80,66 +127,108 @@ def package_modules():
                 yield os.path.join(dirpath, filename)
 
 
+# --- AC 3: the guard -------------------------------------------------------------------------
+
+
 _WRITE_MODE = re.compile(r"[wax+]")
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
+_REFUSED_OS = ("mkdir", "makedirs", "rename", "replace", "remove", "unlink", "rmdir")
+_REFUSED_SOCKET = ("socket", "create_connection", "socketpair", "getaddrinfo", "gethostbyname")
 
 
 @contextlib.contextmanager
 def no_network_no_writes():
-    """Make socket creation and every write-mode open raise, and record each attempt, so an
-    attempt the code under test swallows is still seen."""
+    """Make socket creation, name lookup, every write-mode open and every filesystem change
+    raise, and record each attempt, so an attempt the code under test swallows is still seen."""
     attempts = []
-    real_open, real_os_open = builtins.open, os.open
+    real_open, real_os_open, real_file_io = io.open, os.open, io.FileIO
 
     def guarded_open(file, mode="r", *args, **kwargs):
         if _WRITE_MODE.search(mode):
-            attempts.append(("open", file, mode))
-            raise PermissionError("write-mode open during report: %r %r" % (file, mode))
+            attempts.append("open")
+            raise PermissionError("write-mode open: %r %r" % (file, mode))
         return real_open(file, mode, *args, **kwargs)
 
     def guarded_os_open(path, flags, *args, **kwargs):
         if flags & _WRITE_FLAGS:
-            attempts.append(("os.open", path, flags))
-            raise PermissionError("write-mode os.open during report: %r" % (path,))
+            attempts.append("os.open")
+            raise PermissionError("write-mode os.open: %r" % (path,))
         return real_os_open(path, flags, *args, **kwargs)
 
-    def refuse_socket(*args, **kwargs):
-        attempts.append(("socket", args))
-        raise OSError("socket creation during report")
+    class GuardedFileIO(real_file_io):
+        def __init__(self, file, mode="r", *args, **kwargs):
+            if _WRITE_MODE.search(mode):
+                attempts.append("io.FileIO")
+                raise PermissionError("write-mode FileIO: %r %r" % (file, mode))
+            real_file_io.__init__(self, file, mode, *args, **kwargs)
 
-    with mock.patch("builtins.open", guarded_open), mock.patch("io.open", guarded_open), \
-            mock.patch("os.open", guarded_os_open), \
-            mock.patch("socket.socket", refuse_socket), \
-            mock.patch("socket.create_connection", refuse_socket), \
-            mock.patch("socket.socketpair", refuse_socket):
+    def refuse(label, error):
+        def refused(*args, **kwargs):
+            attempts.append(label)
+            raise error("%s refused: %r" % (label, args))
+        return refused
+
+    patches = [mock.patch("builtins.open", guarded_open), mock.patch("io.open", guarded_open),
+               mock.patch("os.open", guarded_os_open), mock.patch("io.FileIO", GuardedFileIO)]
+    patches += [mock.patch("os." + name, refuse("os." + name, PermissionError))
+                for name in _REFUSED_OS]
+    patches += [mock.patch("socket." + name, refuse("socket." + name, OSError))
+                for name in _REFUSED_SOCKET]
+    with contextlib.ExitStack() as stack:
+        for patch in patches:
+            stack.enter_context(patch)
         yield attempts
+
+
+def corpus_transcripts():
+    return len([n for n in os.listdir(CORPUS_SESSIONS) if n.endswith(".jsonl")])
 
 
 class DependencyTests(unittest.TestCase):
     def test_pyproject_declares_no_runtime_dependency(self):
         with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as handle:
             text = handle.read()
-        self.assertEqual(project_dependencies(text), [])
-        dynamic = re.search(r"^dynamic[ \t]*=[ \t]*\[(.*?)\]", text, re.M | re.S)
-        self.assertNotIn("dependencies", dynamic.group(1) if dynamic else "")
+        self.assertEqual(dependency_violations(text), [])
         try:
             import tomllib
         except ImportError:
             return
         self.assertEqual(tomllib.loads(text)["project"]["dependencies"], [])
 
-    def test_the_reader_sees_a_dependency_when_there_is_one(self):
-        text = ('[project]\nname = "x"\ndependencies = [\n    "requests>=2",  # http\n'
+    def test_a_dependency_is_seen_and_other_tables_are_not_read(self):
+        text = ('[project]\nname = "x"\ndependencies = [\n    "requests>=2",\n'
                 "    'pyyaml',\n]\n\n[tool.x]\ndependencies = []\n")
-        self.assertEqual(project_dependencies(text), ["requests>=2", "pyyaml"])
-
-    def test_the_reader_reads_only_the_project_table(self):
+        self.assertEqual(dependency_violations(text),
+                         ["dependency requests>=2", "dependency pyyaml"])
         text = '[tool.x]\ndependencies = ["a"]\n\n[project]\ndependencies = []\n'
-        self.assertEqual(project_dependencies(text), [])
-        self.assertIsNone(project_dependencies('[tool.x]\ndependencies = ["a"]\n'))
+        self.assertEqual(dependency_violations(text), [])
+        self.assertEqual(dependency_violations('[tool.x]\ndependencies = ["a"]\n'),
+                         ["no dependencies key"])
+
+    def test_a_bracket_in_a_comment_does_not_end_the_list(self):
+        text = '[project]\ndependencies = [  # see [docs]\n    "requests",\n]\n'
+        self.assertEqual(dependency_violations(text), ["dependency requests"])
+        text = '[project]\ndependencies = ["a#b"]  # a [comment]\n'
+        self.assertEqual(project_array(text, "dependencies"), ["a#b"])
+
+    def test_an_unreadable_list_is_refused_not_read_as_empty(self):
+        with self.assertRaises(ValueError):
+            project_array("[project]\ndependencies = [requests]\n", "dependencies")
+        self.assertEqual(project_array('[project]\ndependencies = [ "a", ]\n', "dependencies"),
+                         ["a"])
+
+    def test_dynamic_dependencies_are_refused(self):
+        text = '[project]\ndependencies = []\ndynamic = ["version", "dependencies"]\n'
+        self.assertEqual(dependency_violations(text), ["dependencies is dynamic"])
+        text = ('[project]\ndependencies = []\ndynamic = ["optional-dependencies"]\n'
+                '[tool.x]\ndynamic = ["dependencies"]\n')
+        self.assertEqual(dependency_violations(text), [])
 
 
 class ImportTests(unittest.TestCase):
+    def test_the_scanned_package_is_the_source_tree(self):
+        self.assertEqual(PACKAGE, os.path.join(ROOT, "ruleprobe"))
+
     def test_no_module_imports_the_network_a_subprocess_or_a_model_client(self):
         modules = list(package_modules())
         self.assertIn(os.path.join(PACKAGE, "cli.py"), modules)
@@ -158,6 +247,16 @@ class ImportTests(unittest.TestCase):
         self.assertEqual([line for line, _ in forbidden_imports(source)],
                          [1, 2, 3, 4, 5, 6, 8, 9])
 
+    def test_the_scan_catches_a_keyword_name(self):
+        source = "from importlib import import_module\nimport_module(name='socket')\n"
+        self.assertEqual(forbidden_imports(source), [(2, "socket")])
+        self.assertEqual(forbidden_imports("import_module(name='json')\n"), [])
+
+    def test_the_scan_catches_an_aliased_loader(self):
+        source = "from importlib import import_module as load\nload('socket')\n"
+        self.assertEqual(forbidden_imports(source), [(2, "socket")])
+        self.assertEqual(forbidden_imports("load('socket')\n"), [])
+
     def test_the_scan_passes_a_near_miss(self):
         source = ("import shlex\nfrom .http import thing\nimport httpx_like as h\n"
                   "import socketserver_notes\nfrom . import subprocess\n"
@@ -166,36 +265,82 @@ class ImportTests(unittest.TestCase):
 
 
 class ReportWritesAndSendsNothingTests(unittest.TestCase):
-    def test_report_over_the_corpus_runs_with_no_socket_and_no_write(self):
-        out = io.StringIO()
-        with no_network_no_writes() as attempts:
-            code = main(["report", "--root", CORPUS_SESSIONS, "--no-config"], out=out)
+    def temporary_directory(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        return scratch.name
+
+    def run_guarded(self, *argv):
+        out, err = io.StringIO(), io.StringIO()
+        with no_network_no_writes() as attempts, contextlib.redirect_stderr(err):
+            code = main(list(argv), out=out)
         self.assertEqual(attempts, [])
+        return code, out.getvalue(), err.getvalue()
+
+    def test_report_over_the_corpus_runs_with_no_socket_and_no_write(self):
+        code, text, err = self.run_guarded("report", "--root", CORPUS_SESSIONS, "--no-config")
         self.assertEqual(code, 0)
-        lines = out.getvalue().split("\n")
+        self.assertEqual(err, "")
+        lines = text.split("\n")
         self.assertIn("detector", lines[0])
         self.assertIn("hits", lines[0])
         self.assertTrue(lines[1].startswith("---"))
-        self.assertIn("transcript-hygiene/whole-file-cat", out.getvalue())
+        self.assertIn("transcript-hygiene/whole-file-cat", text)
 
-    def test_the_guard_refuses_a_write_and_a_socket(self):
-        scratch = os.path.join(CORPUS_SESSIONS, "never-written.txt")
+    def test_report_with_config_discovery_json_and_validity_writes_nothing(self):
+        home = self.temporary_directory()
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(home)
+        environ = {"HOME": home, "XDG_CONFIG_HOME": home}
+        with mock.patch.dict(os.environ, environ):
+            os.environ.pop("RULEPROBE_CORPUS", None)
+            code, text, err = self.run_guarded("report", "--root", CORPUS_SESSIONS, "--json",
+                                               "--validity")
+        self.assertEqual(code, 0)
+        self.assertNotIn("produced no session", err)
+        data = json.loads(text)
+        self.assertEqual(data["read_errors"], [])
+        self.assertEqual(data["measured"], corpus_transcripts())
+
+    def test_the_guard_refuses_each_write_and_socket_and_allows_a_read(self):
+        scratch = self.temporary_directory()
+        existing = os.path.join(scratch, "existing.txt")
+        with open(existing, "w") as handle:
+            handle.write("x")
+        target = os.path.join(scratch, "never-written")
+        refusals = [
+            ("open", lambda: open(target, "w")),
+            ("open", lambda: io.open(target, "ab")),
+            ("io.FileIO", lambda: io.FileIO(target, "w")),
+            ("os.open", lambda: os.open(target, os.O_WRONLY | os.O_CREAT)),
+            ("os.mkdir", lambda: os.mkdir(target)),
+            ("os.makedirs", lambda: os.makedirs(os.path.join(target, "deep"))),
+            ("os.rename", lambda: os.rename(existing, target)),
+            ("os.replace", lambda: os.replace(existing, target)),
+            ("os.remove", lambda: os.remove(existing)),
+            ("os.unlink", lambda: os.unlink(existing)),
+            ("os.rmdir", lambda: os.rmdir(scratch)),
+            ("socket.socket", lambda: socket.socket()),
+            ("socket.create_connection", lambda: socket.create_connection(("127.0.0.1", 9))),
+            ("socket.socketpair", lambda: socket.socketpair()),
+            ("socket.getaddrinfo", lambda: socket.getaddrinfo("example.invalid", 80)),
+            ("socket.gethostbyname", lambda: socket.gethostbyname("example.invalid")),
+        ]
         with no_network_no_writes() as attempts:
-            with self.assertRaises(PermissionError):
-                open(scratch, "w")
-            with self.assertRaises(PermissionError):
-                io.open(scratch, "ab")
-            with self.assertRaises(PermissionError):
-                os.open(scratch, os.O_WRONLY | os.O_CREAT)
-            with self.assertRaises(OSError):
-                socket.socket()
-            with self.assertRaises(OSError):
-                socket.create_connection(("127.0.0.1", 9))
-            with open(os.path.join(ROOT, "pyproject.toml"), "rb") as handle:
-                self.assertTrue(handle.read(1))
-        self.assertEqual([kind for kind, *_ in attempts],
-                         ["open", "open", "os.open", "socket", "socket"])
-        self.assertFalse(os.path.exists(scratch))
+            for label, attempt in refusals:
+                with self.subTest(label=label), self.assertRaises(OSError):
+                    attempt()
+            with open(existing, "rb") as handle:
+                self.assertEqual(handle.read(), b"x")
+            with io.open(existing, "r") as handle:
+                self.assertEqual(handle.read(), "x")
+            with io.FileIO(existing, "r") as handle:
+                self.assertEqual(handle.read(), b"x")
+            descriptor = os.open(existing, os.O_RDONLY)
+            os.close(descriptor)
+        self.assertEqual(attempts, [label for label, _ in refusals])
+        self.assertEqual(sorted(os.listdir(scratch)), ["existing.txt"])
 
 
 if __name__ == "__main__":

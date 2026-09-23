@@ -232,7 +232,7 @@ flowchart TD
     `ruleprobe/detectors/common.yaml`, and `tests/test_equivalence.py` asserts hit-for-hit equality.
     Catalog detectors are declarative only.
 
-### AD-8: The package envelope: no dependency, no network, no write, no model, deterministic [ADOPTED; enforcing tests PROPOSED]
+### AD-8: The package envelope: no dependency, no network, no write, no model, deterministic [ADOPTED; enforcing tests implemented under #37, ships in v0.2.0]
 
 - **Binds:** NFR-1, NFR-2, NFR-3, NFR-5, NFR-7, NFR-8; all modules.
 - **Prevents:** one feature quietly adding a dependency, a network call, a file write or an
