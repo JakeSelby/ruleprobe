@@ -433,6 +433,8 @@ Verified against the repository files at `ae84ac3`, not the web.
 | Runtime dependencies | none |
 | Licence | MIT |
 
+Amended 2026-09-23: the build backend floor is `setuptools>=77`, for the SPDX licence expression (#6)
+
 ## Structural Seed
 
 ```text

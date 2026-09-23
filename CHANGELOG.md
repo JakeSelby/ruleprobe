@@ -19,6 +19,13 @@ All notable changes to this project are documented here. The format follows
   predicate itself reads it as false and can over-count, and should compose through the
   declarative `not`, `any` and `all` instead.
 
+### Changed
+
+- The package declares its licence as the SPDX expression `MIT`, with `LICENSE` as its licence
+  file, in place of the deprecated table form and classifier
+  ([#6](https://github.com/JakeSelby/ruleprobe/issues/6)). Building ruleprobe from source now
+  needs setuptools 77 or newer.
+
 ## 0.1.0 (2026-09-22)
 
 ### Added
