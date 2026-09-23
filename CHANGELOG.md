@@ -11,11 +11,14 @@ All notable changes to this project are documented here. The format follows
 - A declarative matcher no longer counts a Bash command the shell parse skipped - empty, over
   16 KiB, or one that does not tokenize - as a match for `not` or `absent`
   ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a command every `command`
-  key but `regex` and `unparsed`, every `git` key and every `env` key is undecided; `not`, `any`
+  key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read of
+  `source: heredocs` is undecided; `not`, `any`
   and `all` pass undecided through, and an undecided `when`, an `order` endpoint or an `absent`
   candidate is no hit. A detector file using `not` or `absent` may count fewer hits; no edit is
   needed, and a rule that wants those commands asks for `command: {unparsed: true}`. A predicate
-  from `compile_matcher` may now return a falsy undecided value; negate one only through `not`.
+  from `compile_matcher` may now return a falsy undecided value: a Python caller who negates a
+  predicate itself reads it as false and can over-count, and should compose through the
+  declarative `not`, `any` and `all` instead.
 
 ## 0.1.0 (2026-09-22)
 

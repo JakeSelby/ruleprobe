@@ -359,11 +359,14 @@ class SpecErrorTests(unittest.TestCase):
 
 # --- a command the shell parse skipped (#19) ----------------------------------------
 
-#: The inputs from #19: over-long, and an unbalanced quote, each as a bare and a `uv` call.
+#: The inputs from #19: over-long, and an unbalanced quote, each as a bare and a `uv` call;
+#: and the empty command, which the parse also skips.
 SKIPPED = ("pytest -q -k " + "x" * MAX_COMMAND,
            "pytest -q -k 'foo",
            "uv run pytest -q -k " + "x" * MAX_COMMAND,
-           "uv run pytest -q -k 'foo")
+           "uv run pytest -q -k 'foo",
+           "")
+UNREAD_HEREDOC = "cat <<EOF\nhello " + "x" * MAX_COMMAND + "\nEOF"
 UNREAD_PUSH = "git push origin 'main"
 UNREAD_ENV = "FOO=1 pytest -k 'foo"
 PYTEST = {"command": {"contains": "pytest"}}
@@ -380,7 +383,7 @@ class UndecidedTests(unittest.TestCase):
     that never fires cannot pass."""
 
     def test_the_inputs_are_ones_the_parse_skipped(self):
-        for command in SKIPPED + (UNREAD_PUSH, UNREAD_ENV):
+        for command in SKIPPED + (UNREAD_PUSH, UNREAD_ENV, UNREAD_HEREDOC):
             with self.subTest(command=command[:30]):
                 self.assertTrue(Parsed(bash(command)).skipped)
 
@@ -437,6 +440,14 @@ class UndecidedTests(unittest.TestCase):
         # A decided `regex` or `unparsed` settles the block before any segment key is read.
         self.assertEqual(count(negated({"command": {"regex": "^ls", "name": "pytest"}}),
                                skipped), 1)
+        # A `regex` that holds leaves the segment key to decide, and it cannot.
+        self.assertEqual(count(negated({"command": {"regex": "^pytest", "name": "pytest"}}),
+                               skipped), 0)
+
+    def test_a_heredocs_text_read_is_undecided_over_a_skipped_command(self):
+        when = negated({"text": {"source": "heredocs", "contains": "hello"}})
+        self.assertEqual(count(when, [bash(UNREAD_HEREDOC)]), 0)
+        self.assertEqual(count(when, [bash("echo hi")]), 1)
 
     def test_not_of_undecided_is_undecided_and_so_is_its_double(self):
         skipped = [bash(SKIPPED[1])]
@@ -470,9 +481,12 @@ class UndecidedTests(unittest.TestCase):
                                [bash(SKIPPED[1])]), 1)
 
     def test_an_undecided_when_is_no_hit(self):
-        for when in (PYTEST, negated(PYTEST), {"any": [PYTEST]}, {"all": [PYTEST]}):
+        for when, fires_on in ((PYTEST, "pytest -q"), (negated(PYTEST), "ls"),
+                               ({"any": [PYTEST]}, "pytest -q"),
+                               ({"all": [PYTEST]}, "pytest -q")):
             with self.subTest(when=when):
                 self.assertEqual(count(when, [bash(SKIPPED[0])]), 0)
+                self.assertEqual(count(when, [bash(fires_on)]), 1)
 
     def test_order_needs_first_and_then_both_true(self):
         unread = bash(SKIPPED[1], id="tu1")
@@ -480,6 +494,9 @@ class UndecidedTests(unittest.TestCase):
                                      "then": {"git": {"subcommand": "push"}}}}
         self.assertEqual(count(first_undecided, [unread, bash("git push", id="tu2")],
                                event="session"), 0)
+        self.assertEqual(count(first_undecided,
+                               [bash("ls", id="tu1"), bash("git push", id="tu2")],
+                               event="session"), 1)
         then_undecided = {"order": {"first": {"git": {"subcommand": "add"}},
                                     "then": {"not": {"command": {"name": "echo"}}}}}
         self.assertEqual(count(then_undecided, [bash("git add a", id="tu0"), unread],
@@ -491,7 +508,7 @@ class UndecidedTests(unittest.TestCase):
     def test_an_absent_scope_with_an_undecided_candidate_is_no_hit(self):
         events = [bash(SKIPPED[1], turn=1, id="tu1"), bash("ls", turn=2, id="tu2")]
         when = {"absent": {"of": PYTEST, "scope": "turn"}}
-        self.assertEqual([h[1] for h in hits(when, events, event="session")], [2])
+        self.assertEqual([h.turn for h in hits(when, events, event="session")], [2])
         when = {"absent": {"of": PYTEST, "scope": "session"}}
         self.assertEqual(count(when, events, event="session"), 0)
 

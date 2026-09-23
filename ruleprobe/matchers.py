@@ -59,12 +59,15 @@ them at report time; `ruleprobe corpus` scores them.
 
 A matcher that cannot decide says so rather than guessing. Over a Bash command the shared
 parse skipped - empty, longer than `MAX_COMMAND`, or one that does not tokenize - every
-`command` key but `regex` and `unparsed`, every `git` key and every `env` key is undecided,
-not false. `not` of undecided is undecided; `any` is true on any true child, else undecided
-on any undecided one; `all` is false on any false child, else undecided on any undecided
-one. An undecided `when` is no hit, an `order` hit needs `first` and `then` both true, and
-an `absent` scope holding an undecided candidate is no hit - so a negation never turns a
-command nobody could read into a count.
+`command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read
+of `source: heredocs` is undecided, not false. `not` of undecided is undecided; `any` is
+true on any true child, else undecided on any undecided one; `all` is false on any false
+child, else undecided on any undecided one. An undecided `when` is no hit, an `order` hit
+needs `first` and `then` both true, and an `absent` scope holding an undecided candidate is
+no hit - so a negation never turns a command nobody could read into a count. A predicate
+from `compile_matcher` returns that undecided value, which is falsy: a Python caller who
+negates a predicate itself reads it as false and can over-count, so compose through the
+declarative `not`, `any` and `all` instead.
 
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
@@ -95,7 +98,6 @@ SNIPPET_KEYS = ("kind", "turn", "id", "name", "input", "text", "final", "model",
 
 #: The `kind` a declarative spec carries when it arrives through `registry.from_spec`.
 SPEC_KIND = "declarative"
-
 
 
 class _Undecided(object):
@@ -543,13 +545,17 @@ def _m_text(value, where, owner, key):
         if source == "command":
             return [parsed.command]
         if source == "heredocs":
-            return list(parsed.heredocs)
+            # A skipped parse never looked for the bodies, so none found is not none there.
+            return None if parsed.skipped else list(parsed.heredocs)
         # `payload`: what the command carried - its heredoc bodies, or the whole command
         # when it was too long to parse and the bodies were never found.
         return [parsed.command] if parsed.skipped else list(parsed.heredocs)
 
     def match(event, env):
-        for text in texts(event, env):
+        found = texts(event, env)
+        if found is None:
+            return _UNDECIDED
+        for text in found:
             if not text:
                 continue
             if any(rx.search(text) for rx in regexes):
@@ -724,7 +730,9 @@ def compile_matcher(spec, where, allow_aggregate=False):
     whole session and `allow_aggregate` says that is where it sits.
 
     The predicate returns true, false, or a falsy undecided value, so its truth is "matched"
-    and its falsehood is "not known to match"; negate it only through `not`."""
+    and its falsehood is "not known to match". A Python caller who negates it with its own
+    `not` reads undecided as false and can over-count; compose with the declarative `not`,
+    `any` and `all` instead."""
     if not isinstance(spec, dict):
         where.fail("a matcher is a mapping, not %s" % type(spec).__name__)
     if not spec:
