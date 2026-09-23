@@ -56,6 +56,9 @@ uvx ruleprobe report --json                    # the same numbers as data, rows 
 
 Each row and the `--json` result carry `schema_version`, and a row with a version this release
 does not know is left out of every count and tallied in `unknown_schema`.
+The result also carries `coverage`, on every run: `measured`, `dark` and `unmeasured` count
+rule files, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
+measured share of them. With no rule files read, the counts are zero and `share` is `null`.
 
 A transcript does not record the configuration it ran under, so `--stance dimension=variant`
 is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
@@ -103,7 +106,7 @@ transcript-hygiene/whole-file-cat           0         0     1       0%
 verification/no-test-run                    1         1     1     100%
 verification/no-verify                      0         0     1       0%
 
-rules: 2 measured, 1 dark, 1 unmeasured
+rules: 2 measured, 1 dark, 1 unmeasured (50% measured)
   measured   house-style                 docs/rules/house-style.md
   dark       secrets                     docs/rules/secrets.md: a credential that never reaches a file leaves no shape in a transcript
   measured   verification                docs/rules/verification.md
