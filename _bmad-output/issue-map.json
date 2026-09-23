@@ -5,7 +5,7 @@
   "generated_at": "2026-09-23",
   "next_ids": {
     "epic": 1,
-    "story": 1,
+    "story": 2,
     "task": 1,
     "bug": 1,
     "chore": 4,
@@ -47,6 +47,19 @@
       "type": "chore",
       "native_type": "Task",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-C002.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-S001",
+      "github_number": 8,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/8",
+      "title": "Rich story files and the BMad routing rule, ported from agent-harness",
+      "type": "story",
+      "native_type": "Feature",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-S001.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",

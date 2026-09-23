@@ -55,6 +55,10 @@ local and ignored. The pinned install command and the version-control boundary a
 `docs/bmad.md`; the policy every BMad workflow loads is `docs/bmad-governance.md`. Run planning
 workflows from the shared checkout and implementation from a worktree.
 
+Every SDLC step routes to its BMad skill, and every PR keeps the corpus current: the issue keeps a
+summary, its story file carries the design. The routing map, the currency rule and the story-file
+contract are in `docs/bmad-governance.md`, which every BMad workflow loads.
+
 ## How work lands
 
 - **Every change lands through a pull request.** The `main` ruleset requires the checks above
@@ -85,7 +89,7 @@ workflows from the shared checkout and implementation from a worktree.
 
 - `ruleprobe/` — the package: readers, the shell parse, the registry, the declarative format,
   matchers, rules binding, report, and the shipped detectors and corpus as package data.
-- `tests/` — the suite. The three `test_*` files for `scripts/` stay out of the sdist.
+- `tests/` — the suite. The four `test_*` files for `scripts/` stay out of the sdist.
 - `docs/` — the worked example and the repository's process docs.
 - `scripts/` — repository tooling: the BMad issue map, the release preflight and notes, and the
   `stable` branch. Never imported by the package.
