@@ -643,6 +643,22 @@ A user can run a separate, opt-in command that drafts a declarative detector fro
 **Non-goals of FR-34:** it does not bind rules at report time; it does not score detectors; it does not
 make a drafted detector count before a person commits it; it does not ship with the core install.
 
+### 4.11 Verdict-source seam (proposed, 0.3)
+
+**Description:** Some rules no transcript shape can decide, such as voice or conciseness; the report
+shows them as dark. A judge outside ruleprobe could give a verdict on them. ruleprobe would own only a
+model-free seam: the shape of a judged verdict, and scoring a judge on the corpus like a detector
+(maintainer decision, 2026-09-23; [#21](https://github.com/JakeSelby/ruleprobe/issues/21), RP-E002).
+
+#### FR-35: Verdict-source seam
+A judge installed beside ruleprobe can emit verdicts into the row shape and be scored on the labelled
+corpus. **Status:** proposed (0.3, #21).
+
+**Consequences (testable):**
+- A judged verdict is marked as judged and carries its provider, model id and pack version.
+- `ruleprobe corpus` scores a judge with the same precision, recall and floor as a detector.
+- `ruleprobe report` calls no model, with or without a judge installed (NFR-7).
+
 ## 5. The package contract (cross-cutting NFRs)
 
 These bind every feature. Each is tested.
@@ -714,6 +730,13 @@ the contract work versions them.
 
 **Out:** §7, and compliance by position in the session (research recommendation 4), which stays an open
 question (§11, Q5).
+
+**Beyond 0.2:** FR-35's seam is proposed for 0.3 (#21). A separate, provider-neutral judge library is
+future and unscheduled. It would own judging and depend on ruleprobe's seam, never the reverse. It is
+carved out of agent-harness's decision layer when three signals hold: developers outside the project ask
+to measure dark rules with their own model; the judge needs nothing from the harness except ruleprobe's
+seam; and the judge has a validity figure on the corpus that the provider's terms allow to be published.
+Non-goal: no model client, credential or vendor adapter enters ruleprobe.
 
 ## 9. Success metrics
 
