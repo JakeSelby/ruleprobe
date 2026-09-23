@@ -46,8 +46,8 @@ detector's `when`, because a hit they produce is not a hit on the event in hand:
 
 An entry may carry `schema_version`, the integer schema it was written under. Absent, it is
 the file's top-level `version`, and absent there too it is 1. A value that is not a schema
-this package knows - above `SCHEMA_VERSION`, below 1, or not an integer - is an error, so an
-entry written for a later schema is refused rather than read under the wrong one.
+this package knows - not in `registry.KNOWN_SCHEMA_VERSIONS`, or not an integer - is an
+error, so an entry written for a later schema is refused rather than read under the wrong one.
 
 An entry may also carry `examples`, which is how a detector states its own precision and
 recall rather than being taken on trust. `fire` is a list of minimal cases it should fire
@@ -84,7 +84,7 @@ from collections import namedtuple
 
 from .declarative import DeclarativeError
 from .events import hit, input_of, text_of
-from .registry import Detector, register_compiler
+from .registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, Detector, register_compiler
 from .shell import git_calls, has_redirect, operands, split_assignments
 
 __all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
@@ -154,8 +154,6 @@ def _all3(values):
 
 ENTRY_KEYS = ("id", "rule", "event", "when", "gate", "kind", "description", "examples",
               "schema_version")
-#: The highest detector schema this package reads; every integer from 1 up to it is known.
-SCHEMA_VERSION = 2
 EVENTS = ("tool_use", "assistant_text", "session")
 _TEXT_SOURCES = ("command", "heredocs", "payload", "assistant")
 
@@ -250,12 +248,13 @@ def schema_version_error(value, key="schema_version"):
     refused although Python counts it as an integer, as `arg_count` refuses one."""
     if not isinstance(value, int) or isinstance(value, bool):
         return "%s must be an integer, not %r" % (key, value)
-    if value < 1:
-        return "%s %d is not a schema version; they start at 1" % (key, value)
+    if value in KNOWN_SCHEMA_VERSIONS:
+        return None
     if value > SCHEMA_VERSION:
         return ("%s %d is newer than this ruleprobe reads (%d); upgrade ruleprobe"
                 % (key, value, SCHEMA_VERSION))
-    return None
+    return ("%s %d is not a schema version; they start at %d"
+            % (key, value, min(KNOWN_SCHEMA_VERSIONS)))
 
 
 def _count(value, where, container, key):

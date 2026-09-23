@@ -14,7 +14,9 @@ import tempfile
 import unittest
 
 from ruleprobe.declarative import DeclarativeError, parse_with_lines
-from ruleprobe.matchers import ENTRY_KEYS, SCHEMA_VERSION, compile_detector
+from ruleprobe import matchers
+from ruleprobe.matchers import ENTRY_KEYS, compile_detector
+from ruleprobe.registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION
 from ruleprobe.rules import load_bundle, load_file
 
 WHEN = {"tool": "Write"}
@@ -38,7 +40,10 @@ def _value(text):
 class EntryTests(unittest.TestCase):
     def test_the_key_is_part_of_the_format(self):
         self.assertIn("schema_version", ENTRY_KEYS)
-        self.assertEqual(SCHEMA_VERSION, 2)
+        self.assertEqual((SCHEMA_VERSION, KNOWN_SCHEMA_VERSIONS), (2, (1, 2)))
+
+    def test_entry_validation_reads_the_one_registry_constant(self):
+        self.assertIs(matchers.KNOWN_SCHEMA_VERSIONS, KNOWN_SCHEMA_VERSIONS)
 
     def test_an_entry_with_no_key_loads_as_schema_one(self):
         detector = compile_detector({"id": "t/x", "when": WHEN}, "<test>")
