@@ -454,6 +454,8 @@ class UndecidedTests(unittest.TestCase):
         self.assertEqual(count(negated(PYTEST), skipped), 0)
         self.assertEqual(count(negated({"not": PYTEST}), skipped), 0)
         self.assertEqual(count(negated([{"tool": "Write"}, PYTEST]), skipped), 0)
+        self.assertEqual(count(negated({"not": PYTEST}), [bash("pytest -q")]), 1)
+        self.assertEqual(count(negated([{"tool": "Write"}, PYTEST]), [bash("ls")]), 1)
 
     def test_any_is_true_on_a_true_child(self):
         self.assertEqual(count({"any": [PYTEST, {"tool": "Bash"}]}, [bash(SKIPPED[1])]), 1)
@@ -461,6 +463,8 @@ class UndecidedTests(unittest.TestCase):
     def test_any_is_undecided_on_an_undecided_child_and_no_true_one(self):
         self.assertEqual(count(negated({"any": [{"tool": "Write"}, PYTEST]}),
                                [bash(SKIPPED[1])]), 0)
+        self.assertEqual(count(negated({"any": [{"tool": "Write"}, PYTEST]}),
+                               [bash("ls")]), 1)
 
     def test_any_is_false_when_every_child_is_false(self):
         self.assertEqual(count(negated({"any": [{"tool": "Write"}, {"tool": "Edit"}]}),
@@ -475,6 +479,16 @@ class UndecidedTests(unittest.TestCase):
                                [bash(SKIPPED[1])]), 0)
         self.assertEqual(count(negated({"tool": "Bash", "command": PYTEST["command"]}),
                                [bash(SKIPPED[1])]), 0)
+        self.assertEqual(count(negated({"all": [{"tool": "Bash"}, PYTEST]}),
+                               [bash("ls")]), 1)
+        self.assertEqual(count(negated({"tool": "Bash", "command": PYTEST["command"]}),
+                               [bash("ls")]), 1)
+
+    def test_payload_and_command_text_reads_stay_decided_over_a_skipped_command(self):
+        for source in ("payload", "command"):
+            with self.subTest(source=source):
+                when = negated({"text": {"source": source, "contains": "zzz"}})
+                self.assertEqual(count(when, [bash(SKIPPED[1])]), 1)
 
     def test_all_is_true_when_every_child_is_true(self):
         self.assertEqual(count({"all": [{"tool": "Bash"}, {"command": {"unparsed": True}}]},
@@ -486,6 +500,11 @@ class UndecidedTests(unittest.TestCase):
                                ({"all": [PYTEST]}, "pytest -q")):
             with self.subTest(when=when):
                 self.assertEqual(count(when, [bash(SKIPPED[0])]), 0)
+                self.assertEqual(count(when, [bash(fires_on)]), 1)
+        for when, unread, fires_on in (({"git": {"subcommand": "push"}}, UNREAD_PUSH, "git push"),
+                                       ({"env": {"name": "FOO"}}, UNREAD_ENV, "FOO=1 echo")):
+            with self.subTest(when=when):
+                self.assertEqual(count(when, [bash(unread)]), 0)
                 self.assertEqual(count(when, [bash(fires_on)]), 1)
 
     def test_order_needs_first_and_then_both_true(self):

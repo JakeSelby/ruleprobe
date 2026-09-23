@@ -58,8 +58,8 @@ them at report time; `ruleprobe corpus` scores them.
           note: the tool the rule asks for
 
 A matcher that cannot decide says so rather than guessing. Over a Bash command the shared
-parse skipped - empty, longer than `MAX_COMMAND`, or one that does not tokenize - every
-`command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read
+parse skipped - empty or missing, longer than `MAX_COMMAND`, or one that does not tokenize
+or parse - every `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read
 of `source: heredocs` is undecided, not false. `not` of undecided is undecided; `any` is
 true on any true child, else undecided on any undecided one; `all` is false on any false
 child, else undecided on any undecided one. An undecided `when` is no hit, an `order` hit
