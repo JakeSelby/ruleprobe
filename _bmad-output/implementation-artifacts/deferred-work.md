@@ -48,3 +48,10 @@ the story's review findings hold the full reasoning.
 - No CI job builds at the declared `setuptools>=77` floor; CI and the release build resolve the newest
   setuptools in isolation, so a wrong floor shows only on a pinned or `--no-isolation` build. A job
   that builds with `setuptools==77.0.1` would pin it.
+
+## Deferred from: build review of RP-S008.md (2026-09-23)
+
+- A report over rows from both sides of the 0.2 break sums schema-1 rows (0.1 counting, before the
+  undecided rule) with schema-2 rows and says nothing about the mix. AC 2 keeps schema-1 rows counted
+  as today; a note such as "N session(s) at schema 1" would be a new output, so it is the maintainer's
+  call.
