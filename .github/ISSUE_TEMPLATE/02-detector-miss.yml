@@ -1,0 +1,33 @@
+name: Detector miss
+description: A detector fired where it should not have, or stayed quiet where it should have fired.
+labels: ["detector", "type::bug"]
+body:
+  - type: input
+    id: detector
+    attributes:
+      label: Detector id
+      placeholder: transcript-hygiene/whole-file-cat
+    validations:
+      required: true
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Which way was it wrong?
+      options:
+        - It fired, and should not have (false positive)
+        - It stayed quiet, and should have fired (missed hit)
+    validations:
+      required: true
+  - type: textarea
+    id: case
+    attributes:
+      label: The smallest case that shows it
+      description: One command, or one event cut down from a transcript, with paths and names replaced. This becomes a labelled corpus case.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why it is wrong
+      description: What the rule behind the detector is about, and why this case is or is not an instance of it.

@@ -1,6 +1,7 @@
-# The gate. Three things, in the order a failure is cheapest to read: the package imports
-# and compiles, the tests pass on the floor the package claims and on the newest Python,
-# and every detector is still over the corpus floor.
+# The gate. Each job name is a required check on `main`, so renaming one is a ruleset change.
+# In the order a failure is cheapest to read: the package compiles and its tests pass on the
+# newest Python, the same suite passes on the 3.9 floor the package claims, every detector is
+# still over the corpus floor, and the wheel builds and runs from an install.
 name: ci
 
 on:
@@ -13,31 +14,61 @@ permissions:
 
 jobs:
   test:
+    name: test
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # 3.9 is the floor `requires-python` claims; 3.x is whatever is newest, so a
-        # deprecation lands here before it lands on a user.
-        python-version: ["3.9", "3.x"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.x"
       - name: compileall
-        run: python -m compileall -q ruleprobe tests
+        run: python -m compileall -q ruleprobe tests scripts
       - name: tests
         run: python -m unittest discover -s tests -v
+      - name: Audit BMad issue mapping
+        run: python scripts/bmad_issue_sync.py audit
+      - name: Version and changelog agree
+        run: python scripts/release_preflight.py
+
+  floor:
+    # 3.9 is the floor `requires-python` claims; a newer syntax lands here before it lands on a user.
+    name: floor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.9"
+      - run: python -m unittest discover -s tests
 
   corpus:
     # The detector-validity gate: a detector under the floor fails the build, which is what
     # stops a hit rate from quietly becoming a rate of the detector. It is a gate on this
     # repository only; nothing in `ruleprobe report` reads the floor.
+    name: corpus
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.x"
       - run: python -m ruleprobe corpus --no-config --floor 0.9
+
+  package:
+    # What a user installs, installed: the wheel carries its package data and the entry point runs.
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.x"
+      - run: python -m pip install build==1.6.1
+      - run: python -m build
+      - name: Install the wheel outside the checkout and run it
+        run: |
+          python -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/venv/bin/ruleprobe" detectors
+          "$RUNNER_TEMP/venv/bin/ruleprobe" corpus --no-config --floor 0.9

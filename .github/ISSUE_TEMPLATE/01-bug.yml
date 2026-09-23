@@ -1,0 +1,25 @@
+name: Bug
+description: ruleprobe crashed, refused valid input, or printed something wrong.
+labels: ["bug", "type::bug"]
+body:
+  - type: input
+    id: command
+    attributes:
+      label: What you ran
+      placeholder: uvx ruleprobe report --since 30 --rules ./docs/rules
+    validations:
+      required: true
+  - type: textarea
+    id: happened
+    attributes:
+      label: What happened, and what you expected instead
+      description: Paste the error or the lines of the report that are wrong. Never paste a real transcript.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Versions
+      placeholder: ruleprobe --version; Python version; OS; Claude Code or Codex and its version
+    validations:
+      required: true
