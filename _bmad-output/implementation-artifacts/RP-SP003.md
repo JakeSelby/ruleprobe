@@ -196,6 +196,24 @@ than switching runtime. The result unblocks RP-S019.
   not committed: corpus sessions belong to RP-T003.
 - **File list:** this story file only.
 
+## Review findings
+
+`bmad-code-review`, four layers (blind hunter, edge-case hunter, verification gap, acceptance
+auditor; the verification gap found none):
+
+- **Patched, medium:** the verdict said every field a shipped detector reads is readable, but
+  `cache-hygiene/compact` reads compaction; it now names that detector as not served on Gemini, and
+  says turns rest on an unverified reading.
+- **Patched, medium:** reader guidance in the evidence was missing (rewind records, duplicated tool
+  results, UI records, a legacy `.json` beside its `.jsonl`, `final` on non-empty text, cancelled
+  calls, user-modified writes, relative paths, router model switches); it is now listed as untested
+  reader rules, and RP-S019 carries a note that it is blocked on the open items.
+- **Patched, low:** the `Bash` mapping is qualified to macOS and Linux pending item 2, with the case
+  of PowerShell that tokenizes as Bash; the agent tool is listed as unverified and native, and
+  opened as item 4; a citation is corrected; the single-turn limit of the synthetic check is stated.
+- **Rejected:** "done but not asked for" on the extra fields, the reader rules and the recommendations:
+  the Experiment's purpose is to unblock RP-S019, and each extra is evidence that story needs.
+
 ## Change log
 
 - 2026-09-23: written from the planning corpus before implementation.
