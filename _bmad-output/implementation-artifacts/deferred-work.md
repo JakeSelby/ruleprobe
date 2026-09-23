@@ -35,3 +35,10 @@ the story's review findings hold the full reasoning.
   `release_preflight.py --base-init` on pull requests. A release branch should also run the preflight
   with `--tag v<version>` locally, as `docs/releasing.md` says. Amend the gate block when `AGENTS.md`
   is next edited.
+
+## Deferred from: code review of RP-T002.md (2026-09-23)
+
+- The envelope's import scan checks AD-8's list (`socket`, `urllib`, `http`, `subprocess`, model
+  clients). `ssl`, `smtplib`, `ftplib`, `asyncio` connections, `multiprocessing` and `pty` pass it,
+  and the run-time guard does not refuse `os.system`, `os.popen` or `os.spawn*`. Widening either
+  amends AD-8's list, so it is the maintainer's call.

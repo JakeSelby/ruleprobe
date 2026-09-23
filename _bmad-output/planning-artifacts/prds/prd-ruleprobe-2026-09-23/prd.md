@@ -687,7 +687,8 @@ corpus. **Status:** proposed (0.3, #21).
 These bind every feature. Each is tested.
 
 - **NFR-1 Standard library only.** `pyproject.toml` declares no runtime dependency (implemented, 0.1.0).
-  Bound: `dependencies = []`. A test that fails the build on any addition: planned (v0.2.0).
+  Bound: `dependencies = []`. A test that fails the build on any addition: implemented under #37,
+  unreleased, shipping in v0.2.0.
 - **NFR-2 Python 3.9 floor.** The package runs on CPython 3.9 and every later release CI tests
   (implemented, 0.1.0). Bound: `requires-python = ">=3.9"`; no syntax or standard-library call newer
   than 3.9.
