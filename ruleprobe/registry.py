@@ -17,10 +17,6 @@ KNOWN_SCHEMA_VERSIONS = (1, 2)
 
 __all__ = ["Detector", "Registry", "DEFAULT", "run", "register_compiler", "from_spec"]
 
-#: The schema version this release writes, and every schema version it reads.
-SCHEMA_VERSION = 2
-KNOWN_SCHEMA_VERSIONS = (1, 2)
-
 #: The shapes of transcript a detector reads. A registry entry naming anything else is a
 #: typo, not a new kind, so `Registry.add` refuses it.
 EVENT_KINDS = frozenset(("bash", "write", "agent-brief", "assistant-final", "session",

@@ -18,6 +18,13 @@ All notable changes to this project are documented here. The format follows
   from `compile_matcher` may now return a falsy undecided value: a Python caller who negates a
   predicate itself reads it as false and can over-count, and should compose through the
   declarative `not`, `any` and `all` instead.
+- A detector file's top-level `version`, ignored in 0.1, is now read as its entries' schema
+  version, and an entry may carry its own `schema_version`, which wins
+  ([#32](https://github.com/JakeSelby/ruleprobe/issues/32)). A schema version this release does
+  not know - above 2, `0`, negative or not an integer - is a finding, and only the entries that
+  would read it are skipped; a top-level `schema_version` is a finding too, since the file-level
+  key is `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses
+  the entries without a key of their own until it is corrected.
 
 ### Added
 
