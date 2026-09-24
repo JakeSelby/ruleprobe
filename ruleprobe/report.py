@@ -401,11 +401,11 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
 #: The most of one event's text explain prints; the rest is cut and counted.
 MAX_EXPLAINED = 4000
 
-# Every control character but a newline and a tab, and the Unicode marks that reorder or
-# break a line: printed raw, one in a transcript could rewrite the reader's terminal or make
-# a printed line read as something it is not.
-_CONTROL = (r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u200e\u200f\u2028\u2029\u202a-\u202e"
-            r"\u2066-\u2069]")
+# Every control character but a newline and a tab, and the line and paragraph separators:
+# printed raw, one in a transcript could rewrite the reader's terminal. Every Unicode format
+# character (category Cf: zero-width characters, U+061C, the bidi marks) is escaped too, since
+# one can make a printed line read as something it is not.
+_CONTROL = r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u2028\u2029]"
 
 
 def _hit_key(hit):
@@ -418,18 +418,24 @@ def _hit_key(hit):
 
 def _redact(text):
     """`detectors.common.redact`, the one path for text printed from a transcript, with
-    every control character but a newline and a tab, and every bidi or line-separator mark,
-    written as its `\\xNN` or `\\uNNNN` escape."""
+    every control character but a newline and a tab, both line separators and every Unicode
+    format character written as its `\\xNN`, `\\uNNNN` or `\\UNNNNNNNN` escape."""
     import re
+    import unicodedata
 
     from .detectors.common import redact
 
-    return re.sub(_CONTROL, _escape, redact(text))
+    text = re.sub(_CONTROL, lambda found: _escape(found.group(0)), redact(text))
+    if text.isascii():
+        return text
+    return "".join(_escape(c) if unicodedata.category(c) == "Cf" else c for c in text)
 
 
-def _escape(found):
-    code = ord(found.group(0))
-    return "\\x%02x" % code if code <= 0xff else "\\u%04x" % code
+def _escape(char):
+    code = ord(char)
+    if code <= 0xff:
+        return "\\x%02x" % code
+    return "\\u%04x" % code if code <= 0xffff else "\\U%08x" % code
 
 
 def _capped(text):
@@ -479,32 +485,52 @@ def _tool_use_positions(events):
 
 
 def _redacted_strings(mapping):
-    return dict((k, _redact(v) if isinstance(v, str) else v) for k, v in mapping.items())
+    """`mapping` with every value but None and an integer turned to a string and redacted:
+    a transcript field may be any shape, and a list or tuple holds text as well as a string
+    does."""
+    out = {}
+    for name, value in mapping.items():
+        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+            out[name] = value
+        else:
+            out[name] = _redact(value if isinstance(value, str) else str(value))
+    return out
 
 
-def explain(sessions, stances=None, registry=DEFAULT, errors=None):
+def explain(sessions, stances=None, registry=DEFAULT, errors=None, session=None,
+            detector=None, key=None):
     """Every hit `measure()` would count over `sessions`, one dict each, with the event
     behind it.
 
     Each dict carries `session` (the `session_address`), `key` (the hit's
-    `"<turn>:<tool_use_id>"`, or `"<turn>:-"` for a hit that names no tool use),
-    `detector`, `turn`, `tool_use_id`, `tool`, `field` and `value`. Every string among them
-    has been through `_redact`, and `value` is cut at `MAX_EXPLAINED` characters; a hit that
-    names no tool use has no event, so its `tool`, `field` and `value` are None. Sessions
-    keep the order given; within one, hits are by turn, a hit naming no tool use ahead of
-    the tool uses, those in transcript order, then by detector id. `errors`, when a list is
-    passed, collects what `run()` collects, with the session address added and its strings
-    through `_redact`. Nothing is written and no row is built, so no report number can move.
+    `"<turn>:<tool_use_id>"`, or `"<turn>:-"` for a hit that names no tool use), `detector`,
+    `turn`, `tool_use_id`, `tool`, `field` and `value`. Every string among them has been through
+    `_redact`, and `value` is cut at `MAX_EXPLAINED` characters; a hit that names no tool use
+    has no event, so its `tool`, `field` and `value` are None. Sessions keep the order given;
+    within one, hits are by turn, a hit naming no tool use ahead of the tool uses, those in
+    transcript order, then by detector id. `errors`, when a list is passed, collects what
+    `run()` collects, with the session address added and its strings through `_redact`.
+    `session` (an address or a bare id), `detector` and `key` keep only what equals them,
+    compared with the values before redaction, so an id holding a control character or a secret
+    shape can still be picked. Nothing is written and no row is built, so no report number can
+    move.
     """
+    wanted_session = session
     for session in sessions:
         address = session_address(session.runtime, session.id)
+        if wanted_session is not None and wanted_session not in (address, session.id):
+            continue
         events = session.events
         position = _tool_use_positions(events)
         found = []
         session_errors = [] if errors is not None else None
         hits = run(events, stances, registry=registry, errors=session_errors)
         for detector_id in sorted(hits):
+            if detector is not None and detector_id != detector:
+                continue
             for one in hits[detector_id]:
+                if key is not None and _hit_key(one) != key:
+                    continue
                 at = -1
                 if one.tool_use_id:
                     try:

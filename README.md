@@ -332,24 +332,27 @@ tool use  toolu_2 (Bash)
 command   git commit --no-verify -m 'fix: the thing'
 ```
 
-A hit's address is its session, `<runtime>:<session id>`, plus its key, `<turn>:<tool use
-id>`, or `<turn>:-` for a hit that names no tool use - a compaction, a model switch - and
-so has no single event to show, only its turn. A key is unique only within its session, so
-both are printed. What is shown is the Bash command, or any other tool's whole input as JSON,
-because a hit does not record which field of the event matched. `--session` takes the address or the bare session id;
-`--session`, `--detector` and `--key` each narrow the output, and one that matches nothing
-prints nothing and exits 0; `--detector` takes a renamed id too. It takes `report`'s
+A hit's address is its session, `<runtime>:<session id>`, plus its key, `<turn>:<tool use id>`,
+or `<turn>:-` for a hit that names no tool use - a compaction, a model switch - and so has no
+single event to show, only its turn. A key is unique only within its session, so both are
+printed. What is shown is the Bash command, or any other tool's whole input as JSON, because a
+hit does not record which field of the event matched. `--session` takes the address or the bare
+session id; `--session`, `--detector` and `--key` each narrow the output, and one that matches
+nothing prints nothing and exits 0; `--detector` takes a renamed id too. It takes `report`'s
 `--root`, `--runtime`, `--since`, `--stance` and `--plugins`, and `--rules`, `--detectors` and
-`--no-config`, so a gated or plugin detector `report` counts is listed as well; what a
-detector file skipped goes to stderr.
+`--no-config`, so a gated or plugin detector `report` counts is listed as well; what a detector
+file skipped goes to stderr.
 
-Every line it prints, to either stream, passes through `redact` first. A secret's key name,
-such as `client_secret`, quoted or not, is replaced by `[redacted]` with the rest of its line,
-and the next line too after a backslash continuation. A shape in `SECRET_PATTERNS` that is
-itself the secret is replaced with the rest of its token, and a private key to its footer. A
-control character or a bidi mark is printed as its `\xNN` or `\uNNNN` escape, so a
-transcript cannot drive your terminal or reorder a line, and one event's text is cut at
-4,000 characters with a note of how many were cut. Like `report`, it writes nothing and
+Every line it prints, to either stream, passes through `redact` first. It redacts AWS access
+key ids, Bearer tokens, private keys (header to footer), Slack, GitHub, OpenAI and Anthropic
+style tokens, a URL's password, and the value after a key name - `aws_secret_access_key`,
+`client_secret`, and `password`, `passwd`, `pwd`, `token`, `api_key`, `apikey`, `secret` or
+`access_key` followed by `:` or `=` - through the end of its line, its continuations, and the
+indented lines below when the value starts there. Any other credential can still print, so
+read explain's output before you share it. A control character or a Unicode format
+character is printed as its `\xNN` or `\uNNNN` escape, so a transcript cannot drive your
+terminal or reorder a line, and one event's text is cut at 4,000 characters with a note of
+how many were cut. Like `report`, it writes nothing and
 sends nothing, and running it changes no report number. A stored row keeps counts only, not
 the events behind them, so it cannot be explained after the fact; an undeclared helper in
 `ruleprobe.report` says so for a row and names the rerun over its session that would.

@@ -60,6 +60,44 @@ ASSIGNED = [
     ('"client_secret' + '": "' + "quoted" + "Q" * 8 + '"', "quoted" + "Q" * 8),
 ]
 
+#: A private key, split so a scanner reading this file finds no header.
+PEM = ("-----BEGIN RSA " + "PRIVATE KEY-----\n" + "MIIBody" + "B" * 20 + "\n-----END RSA "
+       + "PRIVATE KEY-----")
+PEM_BODY = "MIIBody" + "B" * 20
+
+#: Values on a later line than their key name, the two orderings that once hid a private key,
+#: the redaction-only token shapes, generic key names and a URL password.
+LATER = [
+    (FAKE_KEY + "\n" + PEM, PEM_BODY),
+    ("Bearer " + "b" * 24 + "\n" + PEM, PEM_BODY),
+    ("client_secret" + ": " + PEM, PEM_BODY),
+    ('CLIENT_SECRET="' + PEM + '"', PEM_BODY),
+    ("password" + ": |\n  " + "lit" + "L" * 8 + "\n  more", "lit" + "L" * 8),
+    ("password" + ": |-\n  " + "strip" + "L" * 8, "strip" + "L" * 8),
+    ("token" + ": >\n  " + "fold" + "F" * 8, "fold" + "F" * 8),
+    ("token" + ": >-\n  " + "folds" + "F" * 8, "folds" + "F" * 8),
+    ("secret" + " = <<EOT\n  " + "hcl" + "H" * 8 + "\nEOT", "hcl" + "H" * 8),
+    ("api_key" + " = (\n    " + "paren" + "P" * 8 + "\n)", "paren" + "P" * 8),
+    ("password" + ": # the key\n  " + "comm" + "M" * 8, "comm" + "M" * 8),
+    ("password" + ":\n  # below\n  " + "commb" + "M" * 8, "commb" + "M" * 8),
+    ("password" + ":\n\n  " + "blank" + "K" * 8, "blank" + "K" * 8),
+    ("pwd" + ': "multi\n' + "line" + "W" * 8 + '"', "line" + "W" * 8),
+    ("sk-ant-" + "api03-" + "a" * 20, "api03-" + "a" * 20),
+    ("sk-proj-" + "p" * 20, "sk-proj-" + "p" * 20),
+    ("github_pat_" + "1" * 22, "github_pat_" + "1" * 22),
+    ("gho_" + "o" * 12 + " ghs_" + "s" * 12 + " ghu_" + "u" * 12 + " ghr_" + "r" * 12,
+     "o" * 12),
+    ("xoxa-" + "1-a" + " xoxr-" + "2-r" + " xoxs-" + "3-s", "3-s"),
+    ("DB_PASSWORD" + "=" + "dbpw" + "Z" * 8, "dbpw" + "Z" * 8),
+    ("passwd" + ": " + "pwd2" + "Z" * 8, "pwd2" + "Z" * 8),
+    ("pwd" + "=" + "pwd3" + "Z" * 8, "pwd3" + "Z" * 8),
+    ('{"token' + '": "' + "tok" + "Z" * 8 + '"}', "tok" + "Z" * 8),
+    ("api-key" + ": " + "ak1" + "Z" * 8, "ak1" + "Z" * 8),
+    ("apikey" + "=" + "ak2" + "Z" * 8, "ak2" + "Z" * 8),
+    ("access_key" + " = " + "ak3" + "Z" * 8, "ak3" + "Z" * 8),
+    ("https://user:" + "urlpw" + "U" * 8 + "@example.invalid/x", "urlpw" + "U" * 8),
+]
+
 
 def run_cli(*argv):
     out = io.StringIO()
@@ -119,6 +157,36 @@ class RedactTests(unittest.TestCase):
                 self.assertNotIn(value, redacted)
                 self.assertTrue(redacted.startswith("before\n"))
                 self.assertTrue(redacted.endswith("\nafter"))
+
+    def test_every_later_line_and_new_shape_is_redacted(self):
+        for text, value in LATER:
+            with self.subTest(text=text[:16]):
+                redacted = redact("before\n" + text + "\nafter: 1")
+                self.assertNotIn(value, redacted)
+                self.assertIn(REDACTED, redacted)
+                self.assertTrue(redacted.startswith("before\n"))
+                self.assertTrue(redacted.endswith("\nafter: 1"))
+
+    def test_a_json_dumped_input_hides_the_private_key_body(self):
+        for first in (FAKE_KEY, "Bearer " + "b" * 24, "client_secret" + ": "):
+            with self.subTest(first=first[:8]):
+                dumped = json.dumps({"content": first + "\n" + PEM, "file_path": "k"})
+                self.assertNotIn(PEM_BODY, redact(dumped))
+
+    def test_a_url_keeps_its_host_and_near_misses_pass(self):
+        self.assertEqual(redact("https://u:" + "pw" + "@example.invalid/x"),
+                         "https://u:" + REDACTED + "@example.invalid/x")
+        for text in ("max_tokens: 100", "https://example.invalid/a:b", "passwords are long"):
+            with self.subTest(text=text):
+                self.assertEqual(redact(text), text)
+
+    def test_a_long_continuation_chain_is_linear(self):
+        import time
+
+        chain = "password" + ": a \\\n" * 100000
+        began = time.time()
+        self.assertEqual(redact(chain + "tail"), REDACTED)
+        self.assertLess(time.time() - began, 5.0)
 
     def test_a_key_name_takes_the_rest_of_its_line_and_a_continuation(self):
         self.assertEqual(redact("x client_secret" + "='a b' tail\nnext"),
@@ -285,6 +353,9 @@ class ExplainTests(unittest.TestCase):
                      "\u2066", "\u2069"):
             self.assertNotIn(mark, text)
         self.assertIn("cat no\\u202etes\\u2066.txt\\u2028x", text)
+        text = explain_text(list(explain([Session(
+            "s", "", "codex", [prompt(), bash("cat a\u200bb\u061cc.txt")], "")]))[0])
+        self.assertIn("cat a\\u200bb\\u061cc.txt", text)
         self.assertEqual(explain_text({"session": "a\u200eb\u200f", "key": "1:-",
                                        "detector": "d\u2029\u202a\u2069", "turn": 1,
                                        "tool_use_id": None, "field": None}).split("\n")[0],
@@ -320,6 +391,31 @@ class ExplainTests(unittest.TestCase):
             for name, value in mapping.items():
                 self.assertNotIn(FAKE_KEY, str(value), name)
         self.assertEqual(items[0]["value"], "find .")
+
+    def test_a_field_that_is_not_a_string_is_stringified_and_redacted(self):
+        tool_id = ("a", FAKE_KEY)
+        event = {"kind": "tool_use", "turn": 1, "id": tool_id, "name": ["x", FAKE_KEY],
+                 "input": {}}
+        registry = Registry([Detector("y/odd", "y", "session", lambda e, c: [(1, tool_id)])])
+        items = list(explain([Session("s", "", "codex", [prompt(), event], "")],
+                             registry=registry))
+        self.assertEqual(len(items), 1)
+        for name in ("tool", "tool_use_id", "key"):
+            self.assertIsInstance(items[0][name], str)
+            self.assertNotIn(FAKE_KEY, items[0][name])
+            self.assertIn(REDACTED, items[0][name])
+
+    def test_filters_compare_the_values_before_redaction(self):
+        events = [prompt(), bash("find .", id="tu\x1b" + FAKE_KEY)]
+        sessions = [Session(FAKE_KEY, "", "codex", events, "")]
+        for filters in ({"session": "codex:" + FAKE_KEY}, {"session": FAKE_KEY},
+                        {"key": "1:tu\x1b" + FAKE_KEY},
+                        {"detector": "transcript-hygiene/unfiltered-find"}):
+            with self.subTest(filters=sorted(filters)):
+                items = list(explain(sessions, **filters))
+                self.assertEqual(len(items), 1)
+                self.assertNotIn(FAKE_KEY, explain_text(items[0]))
+        self.assertEqual(list(explain(sessions, key="1:tu\\x1b" + REDACTED)), [])
 
     def test_hits_are_in_numeric_turn_order(self):
         events = []
@@ -438,7 +534,7 @@ class ExplainCommandTests(unittest.TestCase):
                 for n, secret in enumerate(FAKE_SECRETS)]
         uses.append(("toolu_bash", "Bash",
                      {"command": "cat > .env <<EOF\n%s\nEOF" % FAKE_SECRETS[6]}))
-        for n, (assigned, _value) in enumerate(ASSIGNED):
+        for n, (assigned, _value) in enumerate(ASSIGNED + LATER):
             # The key comes first; a token shape after it makes every one a hit.
             body = "%s\ntail %s" % (assigned, FAKE_KEY)
             uses.append(("toolu_a%d" % n, "Write", {"file_path": "/tmp/demo-repo/creds",
@@ -452,8 +548,9 @@ class ExplainCommandTests(unittest.TestCase):
         self.assertEqual(len(blocks(text)), len(uses))
         for secret in FAKE_SECRETS:
             self.assertNotIn(secret, text)
-        for _assigned, value in ASSIGNED:
+        for _assigned, value in ASSIGNED + LATER:
             self.assertNotIn(value, text)
+        self.assertNotIn(PEM_BODY, text)
         self.assertFalse(any(re.search(p, text) for p in SECRET_PATTERNS))
         self.assertIn(REDACTED, text)
 
@@ -539,6 +636,22 @@ class ExplainCommandTests(unittest.TestCase):
         self.assertIn("5 detector error(s): x/boom0 (KeyError) in codex:rollout-1, "
                       "x/boom1 (KeyError) in codex:rollout-1, "
                       "x/boom2 (KeyError) in codex:rollout-1, and 2 more", err)
+
+    def test_a_filter_selects_a_secret_or_control_bearing_id(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        with open(os.path.join(scratch.name, "s.jsonl"), "w") as handle:
+            handle.write(claude_transcript(FAKE_KEY, [
+                ("toolu_\x1b" + FAKE_KEY, "Bash", {"command": "find ."}),
+                ("toolu_2", "Bash", {"command": "find /"})]))
+        for argv in (("--session", "claude-code:" + FAKE_KEY),
+                     ("--key", "1:toolu_\x1b" + FAKE_KEY)):
+            with self.subTest(argv=argv[0]):
+                code, text = run_cli("explain", "--root", scratch.name, "--no-config", *argv)
+                self.assertEqual(code, 0)
+                self.assertEqual(len(blocks(text)), 2 if argv[0] == "--session" else 1)
+                self.assertNotIn(FAKE_KEY, text)
+                self.assertNotIn("\x1b", text)
 
     def test_an_unreadable_transcript_is_named_on_stderr_redacted(self):
         scratch = tempfile.TemporaryDirectory()

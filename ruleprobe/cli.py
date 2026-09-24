@@ -29,7 +29,7 @@ from . import __version__
 from .readers import RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry
 from .report import (BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, _redact, explain,
-                     explain_text, measure, report, report_data, session_address)
+                     explain_text, measure, report, report_data)
 from .rules import load_bundle
 from .validity import (CorpusError, DEFAULT_FLOOR, below_floor, scores_as_dict, validity,
                        validity_table)
@@ -287,22 +287,18 @@ def cmd_explain(args, out):
         detector = registry.renamed.get(detector, detector)
     read_errors, detector_errors, seen = [], [], [0]
 
-    def wanted():
+    def counted():
         # Streamed: a session's events are held only while its hits are printed.
         for session in iter_sessions(root=args.root, runtime=args.runtime,
                                      since=args.since, errors=read_errors):
             seen[0] += 1
-            if args.session is None or args.session in (
-                    session_address(session.runtime, session.id), session.id):
-                yield session
+            yield session
 
     wrote = False
-    for item in explain(wanted(), stances=stances, registry=registry,
-                        errors=detector_errors):
-        if detector is not None and item["detector"] != detector:
-            continue
-        if args.key is not None and item["key"] != args.key:
-            continue
+    # The filters are applied inside `explain`, to the values before redaction.
+    for item in explain(counted(), stances=stances, registry=registry,
+                        errors=detector_errors, session=args.session, detector=detector,
+                        key=args.key):
         out.write(("\n" if wrote else "") + explain_text(item) + "\n")
         wrote = True
     unread = _read_errors_line(read_errors)
