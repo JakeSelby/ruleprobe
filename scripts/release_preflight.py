@@ -83,6 +83,9 @@ def declared_names(source):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "DECLARED"):
             value = ast.literal_eval(node.value)
+            for module, names in value.items():
+                if not isinstance(names, (tuple, list)):
+                    raise ValueError("DECLARED[{!r}] is not a tuple or list of names".format(module))
             return {(module, name) for module, names in value.items() for name in names}
     raise ValueError("{} assigns no DECLARED literal".format(CONTRACT_TEST))
 
@@ -91,14 +94,17 @@ def source_at(root, tag):
     """The contract test's text at `tag` in the git repository at `root`."""
     result = subprocess.run(
         ["git", "-C", str(root), "show", "refs/tags/{}:{}".format(tag, CONTRACT_TEST)],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     if result.returncode:
-        raise ValueError(result.stderr.strip() or "git show exited {}".format(result.returncode))
-    return result.stdout
+        message = result.stderr.decode("utf-8", "replace").strip()
+        raise ValueError(message or "git show exited {}".format(result.returncode))
+    return result.stdout.decode("utf-8")
 
 
 def contract_errors(root, version):
     """A line for each name the series' opening tag declared that the contract test no longer does."""
+    if not SEMVER.fullmatch(version):
+        return ["cannot check the series contract of {}: not a stable semantic version".format(version)]
     base = series_tag(version)
     if base is None or tuple(int(part) for part in version.split(".")[:2]) < FIRST_CONTRACT_SERIES:
         return []
@@ -129,7 +135,7 @@ def errors(root=ROOT, tag=None):
         found.append("CHANGELOG.md still has Unreleased entries; fold them into the version section")
     if tag is not None and tag != "v" + version:
         found.append("tag {} does not match __version__ {}".format(tag, version))
-    if tag is not None and SEMVER.fullmatch(version):
+    if tag is not None and SEMVER.fullmatch(version):  # else reported above
         found.extend(contract_errors(Path(root), version))
     return found
 

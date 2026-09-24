@@ -21,7 +21,8 @@ preflight holds a patch release to it: checking `v<X>.<Y>.<Z>` with `Z` above 0,
 `DECLARED` from `tests/test_contract.py` at the tag `v<X>.<Y>.0` and refuses the release if the
 tree no longer declares any of those names at the same import path. It reads the tag from the
 local repository, so fetch it first (`git fetch origin tag v<X>.<Y>.0`); a tag it cannot read is
-an error, not a pass. A `.0` release is not checked, since a new minor may break with notice, and
+an error, not a pass. CI's release-PR step and the release workflow fetch the version tags
+shallowly before they run the preflight, since their checkouts carry none. A `.0` release is not checked, since a new minor may break with notice, and
 neither is a 0.1 patch, since the contract was first declared in 0.2.0.
 
 ## Cutting it

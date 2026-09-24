@@ -239,6 +239,24 @@ class SeriesContractTests(unittest.TestCase):
             write_contract(root, {"ruleprobe": ("run",)})
             self.assertEqual(release_preflight.errors(root, tag="v1.3.0"), [])
 
+    def test_a_name_written_as_a_bare_string_is_an_error(self):
+        # `("run")` without its comma is a string, which would otherwise read as r, u, n.
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            (root / "tests" / "test_contract.py").write_text(
+                'DECLARED = {"ruleprobe": ("report", "run"), "ruleprobe.shell": ("Parsed")}\n')
+            found = release_preflight.errors(root, tag="v1.2.3")
+        self.assertEqual(len(found), 1)
+        self.assertIn("is not a tuple or list of names", found[0])
+
+    def test_a_prerelease_version_is_reported_not_raised(self):
+        self.assertEqual(release_preflight.contract_errors(Path("."), "1.2.3rc1"),
+                         ["cannot check the series contract of 1.2.3rc1: not a stable semantic version"])
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, version="1.2.3rc1", heading="1.2.3rc1 (2026-01-02)")
+            found = release_preflight.errors(root, tag="v1.2.3rc1")
+        self.assertEqual(found, ["__version__ 1.2.3rc1 is not a stable semantic version"])
+
     def test_a_series_before_the_contract_is_not_checked(self):
         # v0.1.0 carries no contract test, so a 0.1 patch has no declared names to keep.
         with tempfile.TemporaryDirectory() as temp:
@@ -297,7 +315,12 @@ class NotesTests(unittest.TestCase):
 
 
 def git(root, *args):
-    return subprocess.check_output(["git", "-C", str(root), *args], text=True).strip()
+    """git in `root` alone: no signing, no hook's repository variables, no parent repository."""
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("GIT_DIR", "GIT_INDEX_FILE", "GIT_WORK_TREE")}
+    env["GIT_CEILING_DIRECTORIES"] = str(Path(root).resolve().parent)
+    return subprocess.check_output(["git", "-c", "tag.gpgSign=false", "-C", str(root), *args],
+                                   text=True, env=env).strip()
 
 
 class StableTests(unittest.TestCase):

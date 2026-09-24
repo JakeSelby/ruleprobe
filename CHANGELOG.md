@@ -8,12 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Breaking
 
-0.2.0 versions the contract, and takes its break here, in six parts, each with its migration below:
-the undecided rule for `not` and `absent`; schema versions on detector entries and rows; the
-persisted fold map for renamed detector ids; the declared public API; the coverage block's move
-from stderr into `report --json`; and section rules. From 0.2.0, nothing declared breaks within a
-minor series, and a later 0.x minor may break only with a Breaking heading like this one; the
-README's Versioning section states the policy.
+0.2.0 versions the contract and takes its break here, in six parts: the undecided rule for `not`
+and `absent`; schema versions, on detector entries (below) and on rows and the `report_data`
+result (under Added); the persisted fold map for renamed detector ids; the declared public API;
+the coverage block, which now also appears in `report --json` as `coverage`; and section rules.
+Each part has its entry below, the row schema's under Added. From 0.2.0 nothing declared breaks within a minor series, and a later 0.x
+minor may break only under a Breaking heading like this one; the README's Versioning section
+states the policy.
 
 - A declarative matcher no longer counts a Bash command the shell parse skipped - empty or
   missing, longer than 16,384 characters, or one that does not tokenize or parse - as a match
