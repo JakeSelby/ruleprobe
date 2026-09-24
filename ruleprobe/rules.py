@@ -65,14 +65,24 @@ class Bundle(object):
             out[entry.state] = out.get(entry.state, 0) + 1
         return out
 
+    def coverage(self):
+        """The counts, plus `share`: measured rules over all rules, dark ones included, or
+        `None` when there are no rules. `summary()` prints this share floored to a whole
+        percent and `report --json` carries it exact, so the two count the same rules."""
+        out = self.counts()
+        total = sum(out.values())
+        out["share"] = out["measured"] / float(total) if total else None
+        return out
+
     def summary(self, relative_to=None):
         """The coverage block a report prints under its table, or `""` when nothing was
         loaded and there is nothing to say."""
         lines = []
         if self.rules:
-            counts = self.counts()
-            lines.append("rules: %d measured, %d dark, %d unmeasured"
-                         % (counts["measured"], counts["dark"], counts["unmeasured"]))
+            coverage = self.coverage()
+            lines.append("rules: %d measured, %d dark, %d unmeasured%s"
+                         % (coverage["measured"], coverage["dark"], coverage["unmeasured"],
+                            _percent(coverage)))
             for entry in self.rules:
                 note = ": " + entry.reason if entry.reason else ""
                 lines.append("  %-11s%-28s%s%s"
@@ -85,6 +95,18 @@ class Bundle(object):
                 lines.append("  %s:%d  %s" % (_short(finding.path, relative_to),
                                               finding.line, finding.reason))
         return "\n".join(lines)
+
+
+def _percent(coverage):
+    """The share as the `rules:` line prints it. Floored, so a file with one rule unmeasured
+    never reads 100%; `<1%` when the floor would hide a measured rule."""
+    total = sum(v for k, v in coverage.items() if k != "share")
+    if not total:
+        return ""
+    percent = 100 * coverage["measured"] // total
+    if not percent and coverage["measured"]:
+        return " (<1% measured)"
+    return " (%d%% measured)" % percent
 
 
 def _short(path, relative_to=None):

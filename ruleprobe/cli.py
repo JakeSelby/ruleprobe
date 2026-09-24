@@ -190,6 +190,7 @@ def cmd_report(args, out):
                            validity=scores)
         data["rows"] = rows
         data["read_errors"] = read_errors
+        data["coverage"] = bundle.coverage()
         summary = bundle.summary()
         if summary:
             sys.stderr.write(summary + "\n")
