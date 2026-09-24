@@ -63,6 +63,14 @@ The result also carries `coverage`, on every run: `measured`, `dark` and `unmeas
 rules, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
 measured share of them. With no rules read, the counts are zero and `share` is `null`.
 
+A row names each detector that raised in `rules_errors`, and that session leaves the
+detector's hit denominator only. A row also carries `compliance`, detector id to
+`{"opportunities", "followed", "undecided"}`, for each enabled detector that defines
+`opportunities`; an undecided opportunity counts in `undecided` alone. When that callable
+raises, or returns something other than `(turn, tool_use_id, followed)` triples (recorded as
+`MalformedOpportunities`), its `rules_errors` entry carries `"hook": "opportunities"`: the
+detector loses its `compliance` entry, and its hit figures are untouched.
+
 A transcript does not record the configuration it ran under, so `--stance dimension=variant`
 is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
 what a detector's `gate:` block reads: a gated detector with no stance passed never fires,

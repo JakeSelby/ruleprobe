@@ -11,9 +11,15 @@ denominator: counting it as a session with no hit would turn a gap into a clean 
 
 A detector that raised costs its own denominator and nobody else's. The row stays measured,
 and the session is subtracted from the denominator of the detector named in `rules_errors`
-alone - one broken third-party detector may not erase every other detector's evidence. The
-older singular spelling, `rules_error`, names no detector, so a row carrying it is still
-dropped whole: an error nobody attributed cannot be attributed here either.
+alone - one broken third-party detector may not erase every other detector's evidence. An
+entry tagged `"hook": "opportunities"` is the exception: its `fn` ran, so it touches no hit
+figure and costs the detector only its `compliance` entry. The older singular spelling,
+`rules_error`, names no detector, so a row carrying it is still dropped whole: an error
+nobody attributed cannot be attributed here either.
+
+A row may also carry `compliance`, detector id to `{"opportunities", "followed",
+"undecided"}`, for each enabled detector that defines `opportunities`; `measure()` below
+says how it is counted.
 
 Every row and every `report_data` result carries `schema_version`, an integer; a row without
 one was written by 0.1 and is schema 1. A row whose version this package does not know - one
@@ -50,8 +56,10 @@ def _tally(triples):
     """`{"opportunities", "followed", "undecided"}` from one `opportunities` result.
 
     An undecided triple counts in `undecided` alone, never as an opportunity not followed.
-    A malformed result raises `MalformedOpportunities`: it is the detector's error, never a
-    guess at what it meant.
+    A malformed result - a `turn` that is not an integer, a `tool_use_id` neither a string
+    nor `None`, a `followed` not exactly a bool or `None`, or one `(turn, tool_use_id)`
+    point twice - raises `MalformedOpportunities`: it is the detector's error, never a guess
+    at what it meant.
     """
     if triples is None or isinstance(triples, (str, bytes, dict)):
         raise MalformedOpportunities("opportunities returned %s, not a list of triples"
@@ -62,11 +70,21 @@ def _tally(triples):
         raise MalformedOpportunities("opportunities returned %s, not a list of triples"
                                      % type(triples).__name__)
     tally = {"opportunities": 0, "followed": 0, "undecided": 0}
+    points = set()
     for triple in triples:
         if not isinstance(triple, (tuple, list)) or len(triple) != 3:
             raise MalformedOpportunities("not a (turn, tool_use_id, followed) triple: %r"
                                          % (triple,))
-        followed = triple[2]
+        turn, tool_use_id, followed = triple
+        if isinstance(turn, bool) or not isinstance(turn, int):
+            raise MalformedOpportunities("turn is %r, not an integer" % (turn,))
+        if tool_use_id is not None and not isinstance(tool_use_id, str):
+            raise MalformedOpportunities("tool_use_id is %r, not a string or None"
+                                         % (tool_use_id,))
+        if (turn, tool_use_id) in points:
+            raise MalformedOpportunities("the point (%r, %r) is repeated"
+                                         % (turn, tool_use_id))
+        points.add((turn, tool_use_id))
         if followed is None:
             tally["undecided"] += 1
         elif followed is True or followed is False:
@@ -103,7 +121,8 @@ def measure(session, stances=None, registry=DEFAULT):
 
     `compliance` maps each enabled detector that defines `opportunities` to
     `{"opportunities": N, "followed": M, "undecided": U}`, where `N` leaves the undecided
-    out. The key is absent when no enabled detector defines one. `opportunities` is called
+    out. The key is absent when no enabled detector defines one, and when the session could
+    not be analysed at all (`rules_errors` then names `analysis`). `opportunities` is called
     here rather than in `run()`, so `run()` and its return keep their shape.
     """
     errors = []

@@ -438,6 +438,11 @@ class ComplianceTests(unittest.TestCase):
             "an int for followed": [(1, "t1", 1)],
             "a string for followed": [(1, "t1", "yes")],
             "one bad triple among good": [(1, "t1", True), (2, "t2", 0)],
+            "a string turn": [("1", "t1", True)],
+            "a bool turn": [(True, "t1", True)],
+            "an int tool_use_id": [(1, 5, True)],
+            "a repeated point": [(1, "t1", True), (1, "t1", False)],
+            "a repeated point with no id": [(1, None, True), (1, None, None)],
         }
         for label, result in sorted(malformed.items()):
             with self.subTest(label):
@@ -453,6 +458,54 @@ class ComplianceTests(unittest.TestCase):
                 self.assertEqual(measured["compliance"],
                                  {"a/fine": {"opportunities": 0, "followed": 0,
                                              "undecided": 1}})
+
+    def test_fn_and_opportunities_both_raising_are_two_entries(self):
+        def fn_boom(events, ctx):
+            raise ValueError("fn")
+
+        def opp_boom(events, ctx):
+            raise KeyError("opportunities")
+
+        registry = Registry([Detector("a/boom", "a", "session", fn_boom,
+                                      opportunities=opp_boom)])
+        measured = measure(self.session(), registry=registry)
+        self.assertEqual(measured["rules_errors"], [
+            {"detector": "a/boom", "error": "ValueError"},
+            {"detector": "a/boom", "error": "KeyError", "hook": "opportunities"}])
+        self.assertEqual(measured["compliance"], {})
+        # The untagged `fn` failure still takes the session out of the hit denominator.
+        data = report_data([measured, row({"a/boom": 1})], registry=registry)
+        self.assertEqual([(d["detector"], d["hits"], d["of"]) for d in data["detectors"]],
+                         [("a/boom", 1, 1)])
+
+    def test_a_stance_outside_the_gates_allowed_variants_keeps_it_off(self):
+        registry = Registry([Detector("a/gated", "a", "session", lambda e, c: [],
+                                      ("commits", ("conventional",)),
+                                      opportunities=never_called(self))])
+        measured = measure(self.session(), stances={"commits": "freeform"},
+                           registry=registry)
+        self.assertNotIn("compliance", measured)
+
+    def test_an_analysis_failure_leaves_no_hits_and_no_compliance(self):
+        registry = Registry([Detector("a/opp", "a", "session", lambda e, c: [(1, "t1")],
+                                      opportunities=never_called(self))])
+        with mock.patch("ruleprobe.registry.analyse", side_effect=RuntimeError("odd")):
+            errors = []
+            self.assertEqual(run(self.session().events, registry=registry, errors=errors), {})
+            self.assertEqual(errors, [{"detector": "analysis", "error": "RuntimeError"}])
+            measured = measure(self.session(), registry=registry)
+        self.assertEqual(measured["rules"], {})
+        self.assertEqual(measured["rules_errors"],
+                         [{"detector": "analysis", "error": "RuntimeError"}])
+        self.assertNotIn("compliance", measured)
+
+    def test_strict_run_still_raises_a_detectors_error(self):
+        def boom(events, ctx):
+            raise ValueError("no")
+
+        registry = Registry([Detector("a/boom", "a", "session", boom)])
+        with self.assertRaises(ValueError):
+            run(self.session().events, registry=registry, strict=True)
 
     def test_a_typeerror_the_callable_raises_is_not_called_malformed(self):
         def broken(events, ctx):
