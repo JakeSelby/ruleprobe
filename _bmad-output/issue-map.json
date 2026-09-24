@@ -7,7 +7,7 @@
     "epic": 10,
     "story": 21,
     "task": 6,
-    "bug": 7,
+    "bug": 8,
     "chore": 5,
     "spike": 4,
     "decision": 12
@@ -752,6 +752,19 @@
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B007",
+      "github_number": 98,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/98",
+      "title": "fix(shell): an escaped or quoted parenthesis is a word, not a group",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B007.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
       "provenance": "authored"
     }
   ]

@@ -146,6 +146,7 @@ def strip_comment(line):
     sq = dq = False
     i = 0
     n = len(line)
+    escaped = -1  # the index of the last character a backslash made literal
     while i < n:
         c = line[i]
         if sq:
@@ -157,11 +158,12 @@ def strip_comment(line):
                 dq = False
         elif c == "\\":
             i += 1
+            escaped = i
         elif c == "'":
             sq = True
         elif c == '"':
             dq = True
-        elif c == "#" and (i == 0 or line[i - 1] in " \t;|&()"):
+        elif c == "#" and (i == 0 or (line[i - 1] in " \t;|&()" and escaped != i - 1)):
             return line[:i]
         i += 1
     return line
@@ -327,6 +329,86 @@ def _shell_lines(text):
     return out
 
 
+class Literal(str):
+    """A word that was quoted or escaped, in whole or in part: `\\(`, `'|'`, `\\;`, `'done'`.
+
+    `shlex` hands back `(` for both `(` and `\\(`, but only the first opens a subshell;
+    `find . \\( -name x \\)` is one command. The type is how the split tells an operator or
+    a reserved word from a word that only spells one, and a detector comparing words sees an
+    ordinary string.
+    """
+
+    __slots__ = ()
+
+
+# Where the quoting mark is chosen from: the supplementary private-use area, which no shell
+# gives a meaning to.
+_MARK_FIRST, _MARK_LAST = 0xF0000, 0xFFFFD
+
+
+def _free_mark(text):
+    """The first supplementary private-use character absent from `text`, or None.
+
+    Choosing it per command means a transcript cannot forge a `Literal` by holding the
+    mark, and a command that holds some private-use glyphs is still marked.
+    """
+    present = set(text)
+    for point in range(_MARK_FIRST, _MARK_LAST + 1):
+        if chr(point) not in present:
+            return chr(point)
+    return None
+
+
+def _mark_literals(text, mark):
+    """`text` with `mark` added to every quoted span and after every escaped character.
+
+    The quoting rules are the ones `shlex` applies in POSIX mode: a single-quoted span, a
+    double-quoted span in which only `\\"` and `\\\\` are escapes, and the character after an
+    unquoted backslash. `shlex` already reads a quoted or escaped operator as a word; the mark
+    is what survives the quote removal to say so. It joins the word around it only because
+    `tokenize` sets `whitespace_split`, under which every character that is neither
+    whitespace nor punctuation continues a word.
+    """
+    out = []
+    sq = dq = False
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if sq:
+            sq = c != "'"
+        elif dq and c == "\\" and text[i + 1:i + 2] in ('"', "\\"):
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif dq:
+            dq = c != '"'
+        elif c == "\\" and i + 1 < n:
+            out.append(text[i:i + 2] + mark)
+            i += 2
+            continue
+        elif c in "'\"":
+            sq, dq = c == "'", c == '"'
+            out.append(c + mark)
+            i += 1
+            continue
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _unmark(token, mark):
+    """`token` without `mark`; a `Literal` when it held one."""
+    return Literal(token.replace(mark, "")) if mark in token else token
+
+
+def _is_operator(token, operators):
+    return token in operators and not isinstance(token, Literal)
+
+
+def _is_redirect(token):
+    return bool(_REDIRECTS.match(token)) and not isinstance(token, Literal)
+
+
 def tokenize(text, strict=False):
     """Shell tokens for already-heredoc-stripped `text`: substitutions become placeholders,
     comments go, and the newlines that separate commands become `;` — the ones inside a
@@ -346,10 +428,12 @@ def tokenize(text, strict=False):
         text = stripped
     text = " ; ".join(strip_comment(line) for line in _shell_lines(text))
     try:
-        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        mark = _free_mark(text)
+        lex = shlex.shlex(text if mark is None else _mark_literals(text, mark), posix=True,
+                          punctuation_chars=True)
         lex.commenters = ""
-        lex.whitespace_split = True
-        return list(lex)
+        lex.whitespace_split = True  # what lets the mark join a word; see `_mark_literals`
+        return list(lex) if mark is None else [_unmark(token, mark) for token in lex]
     except ValueError:
         return None if strict else []
 
@@ -358,7 +442,7 @@ def _pipelines(tokens):
     """Tokens as a list of pipelines, each a list of segments, each a token list."""
     out, pipe, seg = [], [], []
     for token in tokens:
-        if token in _BREAK:
+        if _is_operator(token, _BREAK):
             if seg:
                 pipe.append(seg)
                 seg = []
@@ -366,12 +450,12 @@ def _pipelines(tokens):
                 out.append(pipe)
                 pipe = []
             continue
-        if token in _PIPE:
+        if _is_operator(token, _PIPE):
             if seg:
                 pipe.append(seg)
                 seg = []
             continue
-        if not seg and token in _DROP:
+        if not seg and _is_operator(token, _DROP):
             continue
         seg.append(token)
     if seg:
@@ -396,7 +480,7 @@ def operands(segment):
         if skip:
             skip = False
             continue
-        if _REDIRECTS.match(token):
+        if _is_redirect(token):
             skip = True
             continue
         if token.startswith("-"):
@@ -406,13 +490,14 @@ def operands(segment):
 
 
 def has_redirect(segment):
-    return any(_REDIRECTS.match(t) for t in segment)
+    return any(_is_redirect(t) for t in segment)
 
 
 def normalise(command):
-    """Whitespace-collapsed command text, without a leading `cd <dir> &&`."""
+    """Whitespace-collapsed command text, without a leading `cd <dir> &&`. An escaped
+    `\\&` belongs to the directory's name, so `cd a\\&& ls` keeps its `cd`."""
     text = " ".join(command.split())
-    return re.sub(r"^cd\s+\S+\s*&&\s*", "", text).strip()
+    return re.sub(r"^cd\s+(?:[^\s\\]|\\.)+\s*&&\s*", "", text).strip()
 
 
 def split_assignments(segment):

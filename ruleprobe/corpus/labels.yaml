@@ -54,7 +54,7 @@ sessions:
         note: a filtered grep, the narrow read
 
   - session: hygiene-find.jsonl
-    note: a Codex rollout - five unfiltered walks and eight narrowed ones
+    note: a Codex rollout - five unfiltered walks and nine narrowed ones
     labels:
       - at: "1:tu-f1"
         fire: [transcript-hygiene/unfiltered-find]
@@ -92,6 +92,9 @@ sessions:
       - at: "5:tu-g8"
         near: [transcript-hygiene/unfiltered-find]
         note: an indented EOF, which closes nothing, so the walk below it is body too
+      - at: "5:tu-g9"
+        near: [transcript-hygiene/unfiltered-find]
+        note: escaped parentheses group the name predicates, and head bounds the output
 
   - session: verification-hooks.jsonl
     note: six hook bypasses, then the gate and a clean push
