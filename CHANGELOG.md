@@ -25,6 +25,11 @@ All notable changes to this project are documented here. The format follows
   would read it are skipped; a top-level `schema_version` is a finding too, since the file-level
   key is `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses
   the entries without a key of their own until it is corrected.
+- `report --rules` prints the measured share in the coverage block, as in
+  `rules: 2 measured, 1 dark, 1 unmeasured (50% measured)`, floored so a file with a rule
+  unmeasured never shows 100% ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and
+  `report --json` now carries the block as a top-level `coverage` key, where it was printed to
+  stderr only. The key counts rule files, not sessions.
 
 ### Added
 
