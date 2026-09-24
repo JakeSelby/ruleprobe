@@ -617,6 +617,8 @@ iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(
                                           # one per runtime and id; errors also holds each copy
                                           # set aside: error == readers.COPY, with kept
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
+                                          # -> {detector_id: [Hit(id, turn, tool_use_id)]},
+                                          # detectors with no hit omitted
 Registry([Detector, ...]); Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, frequent_share=0.30, registry=DEFAULT,
@@ -630,20 +632,26 @@ compile_detector(spec, path="<spec>", lines=None)               # -> Detector
 Writing a detector in Python:
 
 ```python
-Detector(id, rule, event, fn, gate)       # positional; a subclass may add __slots__ = ()
+Detector(id, rule, event, fn, gate)       # positional, gate optional; a subclass may add
+                                          # __slots__ = () and properties named kind, stance
 fn(events, ctx)                           # -> [(turn, tool_use_id), ...]
 Detector(..., opportunities=count)        # keyword only; count(events, ctx) ->
                                           # [(turn, tool_use_id, followed), ...], followed
                                           # True, False or None when undecided
 ctx.events, ctx.bash, ctx.finals          # a Context: every event, each Bash call as a
-                                          # Parsed(.event .command .heredocs), final messages
+                                          # Parsed(.event .command .heredocs .skipped
+                                          # .pipelines), final messages
 hit(event); hit(event, tool_use_id=False) # -> (turn, tool_use_id or None)
 git_calls(parsed, ("commit",))            # yields (segment, subcommand, args)
 MARKER_RE.match(token).group(1)           # an index into parsed.heredocs
 input_of(event); text_of(value); normalise(command)
+pipelines(command)                        # -> [[[token, ...], ...], ...]; [] if unparsed
+operands(segment); has_redirect(segment); strip_heredocs(command)  # -> (text, bodies)
 ```
 
-A `gate` is `None` or a `(dimension, variants_or_None)` pair. A detector reads the event
+A `gate` is `None` or a `(dimension, variants_or_None)` pair. A detector's `event` is one of
+`bash`, `write`, `agent-brief`, `assistant-final` or `session`; a command longer than
+`MAX_COMMAND` is `skipped` and never tokenized. A detector reads the event
 fields `kind`, `turn`, `id`, `name`, `input`, `text`, `final`, `tool_use_id` and `tool_name`,
 each on the kinds `ruleprobe/events.py` documents it for.
 
@@ -663,14 +671,22 @@ with `is_undecided(value)` before negating it. `compile_matcher` itself is not d
 needs arguments the package does not declare, so it is not yet a declared way to build a
 predicate, and `is_undecided` is declared ahead of it.
 
-Four promises are not names:
+These promises are not names:
 
 - `SECRET_PATTERNS` stays a plain module-level assignment of a literal list in
-  `ruleprobe/detectors/common.py`, so it can be read by syntax tree without importing.
+  `ruleprobe/detectors/common.py`, so it can be read by syntax tree without importing, from
+  the source tree or from that member of the wheel. Every pattern compiles with `re`.
+- `DETECTORS` in `ruleprobe.detectors.common` is exactly the six generic detectors:
+  `cache-hygiene/compact`, `cache-hygiene/model-switch`, `secrets/secret-in-write`,
+  `transcript-hygiene/unfiltered-find`, `transcript-hygiene/whole-file-cat` and
+  `verification/no-verify`.
 - The wheel is pure Python and named `ruleprobe-<version>-py3-none-any.whl`.
 - The package imports and runs from that wheel placed on `sys.path` as a zip, uninstalled.
 - The wheel carries the corpus at `ruleprobe/corpus/`, beside `ruleprobe.__file__`. A caller
   importing from a zip unpacks it, or points `RULEPROBE_CORPUS` at a copy.
+- Its `labels.yaml` writes every `fire` and `near` as a flow list, so a caller can read the
+  labelled ids by pattern. `score_corpus(directory=)` scores a caller's own corpus in the
+  same layout, ignoring a top-level key it does not read.
 
 ## Versioning
 
