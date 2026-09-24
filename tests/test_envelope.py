@@ -183,7 +183,9 @@ def no_network_no_writes():
 
 
 def corpus_transcripts():
-    return len([n for n in os.listdir(CORPUS_SESSIONS) if n.endswith(".jsonl")])
+    # A Gemini session sits in a project directory under `sessions/`, beside its root file.
+    return len([n for _d, _s, files in os.walk(CORPUS_SESSIONS) for n in files
+                if n.endswith(".jsonl")])
 
 
 class DependencyTests(unittest.TestCase):
