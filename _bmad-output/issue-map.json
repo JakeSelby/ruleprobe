@@ -6,11 +6,11 @@
   "next_ids": {
     "epic": 10,
     "story": 21,
-    "task": 6,
-    "bug": 9,
+    "task": 8,
+    "bug": 13,
     "chore": 6,
     "spike": 4,
-    "decision": 12
+    "decision": 13
   },
   "items": [
     {
@@ -742,19 +742,6 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-B006",
-      "github_number": 91,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
-      "title": "fix(report): an order detector opening on events with no tool-use id keeps its compliance",
-      "type": "bug",
-      "native_type": "Bug",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
-      "parent_bmad_id": null,
-      "parent_github_number": null,
-      "lifecycle": "completed",
-      "provenance": "authored"
-    },
-    {
       "bmad_id": "RP-B004",
       "github_number": 87,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
@@ -762,6 +749,32 @@
       "type": "bug",
       "native_type": "Bug",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B005",
+      "github_number": 88,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/88",
+      "title": "fix(detectors): no-verify counts a hooksPath override only when it disables hooks",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B005.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B006",
+      "github_number": 91,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
+      "title": "fix(report): an order detector opening on events with no tool-use id keeps its compliance",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
@@ -794,16 +807,94 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-B005",
-      "github_number": 88,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/88",
-      "title": "fix(detectors): no-verify counts a hooksPath override only when it disables hooks",
-      "type": "bug",
-      "native_type": "Bug",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-B005.md",
+      "bmad_id": "RP-T006",
+      "github_number": 109,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/109",
+      "title": "chore(bmad): close out 0.2.0's records and file its follow-ups",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T006.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "completed",
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B009",
+      "github_number": 110,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/110",
+      "title": "fix(detectors): secret-in-write stops counting text about secrets",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B009.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B010",
+      "github_number": 111,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/111",
+      "title": "fix(detectors): whole-file-cat skips a cat inside a redirected group",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B010.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B011",
+      "github_number": 112,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/112",
+      "title": "fix(explain): show the deciding event for session-level and compliance hits",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B011.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B012",
+      "github_number": 113,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/113",
+      "title": "fix(readers): --runtime gemini and auto read the same Gemini files under a root",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B012.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-D012",
+      "github_number": 114,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/114",
+      "title": "decision(readers): whether a cancelled or errored tool call counts as a tool use",
+      "type": "decision",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-D012.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-T007",
+      "github_number": 115,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/115",
+      "title": "docs(planning): record the judge as a separate package with a local backend",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T007.md",
+      "parent_bmad_id": "RP-E002",
+      "parent_github_number": 21,
+      "lifecycle": "active",
       "provenance": "authored"
     }
   ]
