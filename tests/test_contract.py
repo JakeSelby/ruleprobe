@@ -334,6 +334,32 @@ class EventTests(unittest.TestCase):
                             self.assertIsNotNone(event.get(field))
                             self.check_type(field, event.get(field))
 
+    def test_a_gemini_session_carries_the_documented_fields(self):
+        # Built in a temporary tree: a Gemini file under `FIXTURES` would change the
+        # mixed-root counts other suites read there.
+        from test_reader_gemini import Tree, call, gemini_record, meta, response, user
+        tree = Tree()
+        self.addCleanup(tree.close)
+        path = tree.write("session-2026-09-20T10-00-contract.jsonl", [
+            meta(), user("u1", "go"),
+            gemini_record("g1", "Working.", [
+                call("c1", "run_shell_command", {"command": "ls"}),
+                dict(call("c2", "read_file", {}), args="not an object")]),
+            response("r1", "c1", "run_shell_command", "ok")])
+        events = [e for s in iter_sessions(root=tree.base, runtime="gemini")
+                  for e in s.events]
+        self.assertEqual(set(e.get("kind") for e in events),
+                         {"user_prompt", "assistant_text", "tool_use", "tool_result"})
+        self.assertTrue(os.path.exists(path))
+        for index, event in enumerate(events):
+            fields = self.FIELDS[event.get("kind")]
+            if event.get("kind") == "assistant_text":
+                fields = fields + ("model",)
+            for field in fields:
+                with self.subTest(event=index, field=field):
+                    self.assertIsNotNone(event.get(field))
+                    self.check_type(field, event.get(field))
+
     # Covers: `hit(event)` and `hit(event, tool_use_id=False)`, returning `(turn, id or None)`.
     def test_hit_shapes(self):
         event = tool_use("Bash", {"command": "ls"}, turn=3, id="tu9")

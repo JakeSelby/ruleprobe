@@ -13,8 +13,9 @@ that happened in them.
 uvx ruleprobe report
 ```
 
-That reads `~/.claude/projects/**/*.jsonl` (and `~/.codex/sessions/**/*.jsonl`, if Codex
-wrote any), runs the detectors over them, and prints:
+That reads `~/.claude/projects/**/*.jsonl` (and `~/.codex/sessions/**/*.jsonl` and
+`~/.gemini/tmp/*/chats/`, if Codex or Gemini CLI wrote any), runs the detectors over them, and
+prints:
 
 ```
 detector                                 hits  sessions    of    share  note
@@ -367,9 +368,29 @@ and list items are never split.
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see
 [How good are the detectors?](#how-good-are-the-detectors) below - but that corpus is
-synthetic and it is six sessions, so it catches a detector that is wrong about a shape it
+synthetic and it is seven sessions, so it catches a detector that is wrong about a shape it
 was shown and says nothing about a shape nobody thought of. The detectors deliberately
 under-count: a missed hit is a quieter report, a false hit is a wrong one.
+
+**Gemini CLI records less, so it is measured less.** Its sessions are read into the same
+events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_command` as
+`Bash`, and five gaps under-count on it rather than guess:
+
+- A context compaction is not told apart from truncation, tool-output masking and rollback,
+  which rewrite the history the same way, so `cache-hygiene/compact` never fires on Gemini.
+- The platform is not recorded. A shell call is `Bash` only when `.project_root`, in the
+  project directory above `chats/`, holds a POSIX path. Every other root keeps the native
+  name, so no `Bash` detector reads it: a drive letter or a UNC path, where the command is
+  PowerShell, and a missing root, where the platform is unknown.
+- The model changes by Gemini's router and quota fallback as well as by choice, and the
+  transcript does not say which, so a Gemini event's model is left empty and
+  `cache-hygiene/model-switch` never fires on Gemini.
+- `invoke_agent` keeps its native name, so a detector on `Agent` does not see Gemini's
+  subagent calls; each subagent's own session is read as a session of its own, with the id
+  `<parent session id>/<its own id>`.
+- Turns are not recorded. One starts at each user record that is not only tool responses.
+
+Gemini deletes sessions older than 30 days by default, so a longer `--since` finds fewer.
 
 **What a count is not.** A detector fires on a shape in a transcript, not on an intention.
 `whole-file-cat` firing 89 times above does not prove the agent wasted context; it proves it
@@ -424,8 +445,8 @@ the events behind them, so it cannot be explained after the fact; an undeclared 
 ## How good are the detectors?
 
 A hit rate is a rate of the detector until somebody says what the detector *should* have
-found. So a labelled corpus ships inside the package, at `ruleprobe/corpus/`: six synthetic
-sessions in both transcript shapes, every interesting event labelled by hand with the
+found. So a labelled corpus ships inside the package, at `ruleprobe/corpus/`: seven synthetic
+sessions in all three transcript shapes, every interesting event labelled by hand with the
 detectors that ought to fire on it, and a deliberate near-miss beside each one - a `cat` of
 a line range, a `find` narrowed by `-name`, a `git push` after the gate ran, a heredoc with
 `rm -rf` in its body as text rather than as a command.
@@ -438,18 +459,18 @@ ruleprobe corpus
 detector                                pos  neg   tp   fp   fn   prec  recall     f1  note
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
-cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
+cache-hygiene/model-switch                5   15    5    0    0   1.00    1.00   1.00
 commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
 git-safety/force-push-default             7    7    7    0    0   1.00    1.00   1.00
 package-manager/pip-install               4    4    4    0    0   1.00    1.00   1.00
 secrets/secret-file-add                   4    8    4    0    0   1.00    1.00   1.00
-secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
+secrets/secret-in-write                   9    8    9    0    0   1.00    1.00   1.00
 testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat         5    7    5    0    0   1.00    1.00   1.00
 verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    56   72   56    0    0   1.00    1.00   1.00  floor 0.90
+total                                    59   80   59    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors are scored over the corpus, and each catalog entry by its own
@@ -542,7 +563,7 @@ over it: an unmeasured detector is a gap to see, not a failure to fix.
 - `ruleprobe/events.py` - the event schema every reader emits: `assistant_text`, `tool_use`,
   `tool_result`, `user_prompt`, `compact`.
 - `ruleprobe/readers/` - one module per runtime, turning a transcript into that schema.
-  Claude Code and Codex today; a reader is `ROOT`, `transcripts()` and `read()`.
+  Claude Code, Codex and Gemini CLI today; a reader is `ROOT`, `transcripts()` and `read()`.
 - `ruleprobe/shell.py` - the Bash decomposition every shell detector shares. Compounds,
   pipelines, heredocs, substitutions and continuations, parsed once per command.
 - `ruleprobe/registry.py` - `Detector`, `Registry`, `run()`. Third-party detectors arrive

@@ -10,11 +10,11 @@ import datetime
 import json
 import os
 
-from . import claude_code, codex
+from . import claude_code, codex, gemini
 
-RUNTIMES = {"claude-code": claude_code, "codex": codex}
+RUNTIMES = {"claude-code": claude_code, "codex": codex, "gemini": gemini}
 
-__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex"]
+__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex", "gemini"]
 
 
 def _since_stamp(since):
@@ -37,10 +37,12 @@ def _since_stamp(since):
 def _detect(path):
     """The reader for `path`, from its first line.
 
-    A Codex rollout opens with a line whose `type` is `session_meta`; a Claude Code
-    transcript does not. The line is parsed rather than searched, because a user prompt that
-    quotes `"session_meta"` - a transcript of somebody working on this package, say - would
-    otherwise be handed to the Codex reader and silently read as nothing.
+    A Codex rollout opens with a line whose `type` is `session_meta`, and a Gemini CLI
+    session with a line `gemini.recognises`, which no Claude Code line matches; anything else
+    is Claude Code. The line is parsed rather than searched,
+    because a user prompt that quotes `"session_meta"` - a transcript of somebody working on
+    this package, say - would otherwise be handed to the Codex reader and silently read as
+    nothing.
     """
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
@@ -53,6 +55,8 @@ def _detect(path):
         entry = None
     if isinstance(entry, dict) and entry.get("type") == "session_meta":
         return codex
+    if gemini.recognises(entry):
+        return gemini
     return claude_code
 
 
@@ -60,10 +64,10 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
     """Every session under `root`, in path order.
 
     - `root` - a directory to walk. `None` reads each selected runtime's own default
-      location: `~/.claude/projects` and `~/.codex/sessions`.
-    - `runtime` - `"auto"`, `"claude-code"` or `"codex"`. `"auto"` reads both default
-      locations and decides each file by its first line, so a directory holding both kinds
-      is read correctly.
+      location: `~/.claude/projects`, `~/.codex/sessions` and `~/.gemini/tmp`.
+    - `runtime` - `"auto"`, `"claude-code"`, `"codex"` or `"gemini"`. `"auto"` reads every
+      default location and decides each file by its first line, so a directory holding
+      several kinds is read correctly.
     - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.
@@ -117,11 +121,18 @@ def _paths(root, runtime):
     out = []
     if root is not None:
         base = os.path.expanduser(root)
+        if runtime == "gemini":
+            return [(path, gemini) for path in gemini.transcripts(base)]
         for path in _walk(base):
             reader = _detect(path) if runtime == "auto" else RUNTIMES[runtime]
             if reader is not None and path not in seen:
                 seen.add(path)
                 out.append((path, reader))
+        if runtime == "auto":
+            # A legacy Gemini `session-*.json` ends in no `.jsonl`, so `_walk` never sees it.
+            out.extend((path, gemini) for path in gemini.transcripts(base)
+                       if path.endswith(".json"))
+            out.sort(key=lambda pair: pair[0])
         return out
     names = [runtime] if runtime != "auto" else sorted(RUNTIMES)
     for name in names:
