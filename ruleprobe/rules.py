@@ -11,11 +11,16 @@ Three places hold a declarative detector, and all three are read into one bundle
 
 The third is the one that makes a report readable, because it also says what is *not*
 measured. A rule file carrying a `detector:` block is measured; one carrying
-`opt_out: <reason>` is dark on purpose; one carrying neither is unmeasured, and is listed as
-such so the gap is visible rather than assumed. Nothing here fails a build: a bad entry is a
-finding with a file, a line and a reason, and the rest of the file still loads.
+`opt_out: <reason>` is dark on purpose, and either way the file is one rule. A file giving
+neither a value is split at its ATX headings, one rule per section, each unmeasured and
+listed as such so the gap is visible rather than assumed; one with no heading, or with no
+section that is a rule, stays one unmeasured rule, named by its `rule:` key or else its file
+name. Known misses: text above the first heading of a headed file is no rule, and a setext
+heading does not split. Nothing here fails a build: a bad entry is a finding with a file, a
+line and a reason, and the rest of the file still loads.
 """
 import os
+import re
 from collections import namedtuple
 
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
@@ -34,8 +39,9 @@ STATES = ("measured", "dark", "unmeasured")
 
 #: A detector file that could not be read in full: the file, the line, and why.
 Finding = namedtuple("Finding", "path line reason")
-#: One rule file: the rule it states, where it lives, whether anything measures it, the
-#: reason it is dark when it is, and the detector ids bound to it.
+#: One rule: its id, the file it lives in, whether anything measures it, the reason it is
+#: dark when it is, and the detector ids bound to it. A one-rule file is named by its
+#: `rule:` key, else its file name; a section rule's id is `<path>#<heading-slug>`.
 RuleEntry = namedtuple("RuleEntry", "rule path state reason detectors")
 
 
@@ -83,13 +89,15 @@ class Bundle(object):
             lines.append("rules: %d measured, %d dark, %d unmeasured%s"
                          % (coverage["measured"], coverage["dark"], coverage["unmeasured"],
                             _percent(coverage)))
+            # Every id prints whole: a section id cut short names a different rule, or none.
+            width = max([28] + [len(entry.rule) + 1 for entry in self.rules])
             for entry in self.rules:
                 note = ": " + entry.reason if entry.reason else ""
-                lines.append("  %-11s%-28s%s%s"
-                             % (entry.state, entry.rule[:27],
+                lines.append("  %-11s%-*s%s%s"
+                             % (entry.state, width, entry.rule,
                                 _short(entry.path, relative_to), note))
         if self.findings:
-            lines.append("detector findings: %d (each entry skipped, the rest still ran)"
+            lines.append("findings: %d (everything else still loaded)"
                          % len(self.findings))
             for finding in self.findings:
                 lines.append("  %s:%d  %s" % (_short(finding.path, relative_to),
@@ -235,16 +243,17 @@ def _compile_entries(entries, path, lines, rule=None, default_prefix=None, versi
 def load_rules_dir(directory):
     """`(detectors, rule entries, findings)` for a directory of markdown rule files.
 
-    Every `.md` under `directory` is one rule. The walk is sorted, so the report is the same
-    on every machine, and a file that cannot be read is a finding rather than a stack trace.
+    Every `.md` under `directory` is one rule, or one per section when nothing in its front
+    matter binds it. The walk is sorted, so the report is the same on every machine, and a
+    file that cannot be read is a finding rather than a stack trace.
     """
     detectors, rules, findings = [], [], []
     if not os.path.isdir(directory):
         return detectors, rules, [Finding(directory, 0, "not a directory")]
     for path in _markdown(directory):
-        found, entry, problems = read_rule_file(path)
+        found, entries, problems = read_rule_file(path, root=directory)
         detectors.extend(found)
-        rules.append(entry)
+        rules.extend(entries)
         findings.extend(problems)
     return detectors, rules, findings
 
@@ -259,54 +268,246 @@ def _markdown(directory):
     return out
 
 
-def read_rule_file(path):
-    """`(detectors, RuleEntry, findings)` for one markdown rule file.
+def read_rule_file(path, root=None):
+    """`(detectors, [RuleEntry], findings)` for one markdown rule file.
 
     Front matter keys this reads are `rule`, `detector` and `opt_out`; every other key is
     somebody else's, and is left alone rather than rejected, because a rule file's front
-    matter belongs to the rule file.
+    matter belongs to the rule file. A file whose front matter gives `detector:` or `opt_out:`
+    a value, or cannot be read as a mapping, is one rule, and so is a file with no heading or
+    none of whose sections is a rule; a key with no value binds nothing and is a finding.
+    Any other file is split into section rules (`_sections`); `root` is the `--rules`
+    directory their ids are relative to, the file's own directory when not given.
+
+    Known miss: in a file with headings, text above the first heading is no rule.
     """
     rule = os.path.splitext(os.path.basename(path))[0]
     try:
-        with open(path, encoding="utf-8") as handle:
+        with open(path, encoding="utf-8-sig") as handle:
             text = handle.read()
     except (OSError, UnicodeDecodeError) as exc:
-        return [], RuleEntry(rule, path, "unmeasured", "unreadable", []), \
+        return [], [RuleEntry(rule, path, "unmeasured", "unreadable", [])], \
             [Finding(path, 0, "cannot read: %s" % exc)]
-    front, first_line, _body = split_front_matter(text)
+    front, first_line, body = split_front_matter(text)
     if front is None:
-        return [], RuleEntry(rule, path, "unmeasured", "", []), []
+        entries, findings = _section_rules(path, root, text, 1, rule)
+        return [], entries, findings
     try:
         doc, lines = parse_with_lines(front, path, first_line)
     except DeclarativeError as exc:
-        return [], RuleEntry(rule, path, "unmeasured", "front matter did not parse", []), \
+        return [], [RuleEntry(rule, path, "unmeasured", "front matter did not parse", [])], \
             [Finding(exc.path, exc.line, exc.reason)]
+    if doc is None and all(not line.strip() or line.strip().startswith("#")
+                           for line in front.split("\n")):
+        doc = {}
     if not isinstance(doc, dict):
-        return [], RuleEntry(rule, path, "unmeasured", "front matter is not a mapping", []), \
-            [Finding(path, first_line, "front matter is not a mapping")]
+        reason = "front matter is not a mapping"
+        return [], [RuleEntry(rule, path, "unmeasured", reason, [])], \
+            [Finding(path, first_line, reason)]
     named = doc.get("rule")
     findings = []
-    if isinstance(named, str) and named and "/" not in named:
+    opt_out = doc.get("opt_out")
+    spec = doc.get("detector", doc.get("detectors"))
+    for key in ("detector", "detectors", "opt_out"):
+        if key in doc and doc[key] is None:
+            findings.append(Finding(path, lines.line_of(doc, key, first_line),
+                                    "%s: has no value, so it binds nothing" % key))
+    bound = spec is not None or opt_out is not None
+    body_line = text.count("\n") - body.count("\n") + 1
+    if not bound and "rule" in doc and any(unit[2] for unit in _sections(body)):
+        findings.append(Finding(path, lines.line_of(doc, "rule", first_line),
+                                "rule: does not apply to a file split at its headings; its "
+                                "rules are named by path and heading"))
+    elif isinstance(named, str) and named and "/" not in named:
         rule = named
     elif named is not None:
         findings.append(Finding(path, lines.line_of(doc, "rule", first_line),
                                 "a rule name is a slash-free string"))
-    opt_out = doc.get("opt_out")
-    spec = doc.get("detector", doc.get("detectors"))
     if spec is not None:
         entries = spec if isinstance(spec, list) else [spec]
         detectors, problems = _compile_entries(entries, path, lines, rule=rule,
                                                default_prefix=rule)
         findings.extend(problems)
         if detectors:
-            return detectors, RuleEntry(rule, path, "measured", "",
-                                        [d.id for d in detectors]), findings
-        return [], RuleEntry(rule, path, "unmeasured", "its detector did not compile", []), \
+            return detectors, [RuleEntry(rule, path, "measured", "",
+                                         [d.id for d in detectors])], findings
+        return [], [RuleEntry(rule, path, "unmeasured", "its detector did not compile", [])], \
             findings
     if opt_out is not None:
         reason = opt_out if isinstance(opt_out, str) and opt_out else "no reason given"
-        return [], RuleEntry(rule, path, "dark", reason, []), findings
-    return [], RuleEntry(rule, path, "unmeasured", "", []), findings
+        return [], [RuleEntry(rule, path, "dark", reason, [])], findings
+    entries, problems = _section_rules(path, root, body, body_line, rule)
+    return [], entries, findings + problems
+
+
+# --- sections -----------------------------------------------------------------------------
+
+_HEADING = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+_CLOSING = re.compile(r"(?:^|[ \t]+)#+$")
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+_QUOTE = re.compile(r"^ {0,3}>")
+_LIST = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)")
+_DELIMITER = re.compile(r"^ {0,3}\|?[ \t]*:?-+:?[ \t]*(?:\|[ \t]*:?-+:?[ \t]*)*\|?[ \t]*$")
+_TEXT = re.compile(r"[^\W_]", re.UNICODE)
+_IMAGE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_EMPTY_LINK = re.compile(r"\[\s*\]\([^)]*\)")
+_LINK_DEFINITION = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*\S")
+_LINK = re.compile(r"!?\[([^\]]*)\](?:\([^)]*\)|\[[^\]]*\])")
+_EMPHASIS = re.compile(r"(?<![^\W_])_+|_+(?![^\W_])", re.UNICODE)
+
+
+def _sections(body):
+    """`[(heading text, heading line index, is a rule)]` for a markdown body, in order.
+
+    The split unit is the ATX heading, at any level; a `#` line inside a fenced block or an
+    HTML comment is not one, and a setext heading is not split. Text above the first heading
+    belongs to no section. A section is a rule when at least one line under its heading has
+    a letter or digit outside a fenced or indented code block, an HTML comment, a table and
+    a blockquote, and is not only an image or a link reference definition; so a heading with
+    nothing under it, or only an example, is not.
+    """
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    kinds, visible = _line_kinds(lines)
+    out = []
+    for index, kind in enumerate(kinds):
+        if kind == "heading":
+            text = _HEADING.match(visible[index]).group(2) or ""
+            out.append([_CLOSING.sub("", text).strip(), index, False])
+        elif kind == "text" and out:
+            out[-1][2] = True
+    return [tuple(s) for s in out]
+
+
+def _uncomment(line, open_comment):
+    """`(the line outside HTML comments, whether a comment is still open at its end)`."""
+    kept, rest = [], line
+    while rest:
+        if open_comment:
+            end = rest.find("-->")
+            if end < 0:
+                return "".join(kept), True
+            rest, open_comment = rest[end + 3:], False
+        else:
+            start = rest.find("<!--")
+            if start < 0:
+                kept.append(rest)
+                break
+            kept.append(rest[:start])
+            rest, open_comment = rest[start + 4:], True
+    return "".join(kept), open_comment
+
+
+def _line_kinds(lines):
+    """`(kinds, visible lines)`: each line's kind, one of `heading`, `fence`, `comment`,
+    `code`, `table`, `quote`, `blank` or `text`, and the line with HTML comments removed.
+
+    An indented code block starts after a blank line, a heading, a closed fence or a
+    comment, so an indented list continuation after one is read as code too: an
+    under-count, never a false rule."""
+    kinds, visible, fence, comment = [], [], None, False
+    for line in lines:
+        if fence:
+            kinds.append("fence")
+            visible.append(line)
+            closing = _FENCE.match(line)
+            if closing and closing.group(1)[0] == fence[0] and len(closing.group(1)) >= \
+                    len(fence) and not closing.group(2).strip():
+                fence = None
+            continue
+        was_open = comment
+        shown, comment = _uncomment(line, comment)
+        visible.append(shown)
+        opening = _FENCE.match(shown) if not was_open else None
+        if opening and not (opening.group(1)[0] == "`" and "`" in opening.group(2)):
+            fence = opening.group(1)
+            kinds.append("fence")
+        elif shown != line and not _TEXT.search(shown):
+            kinds.append("comment")
+        elif shown.strip() and _indent(shown) >= 4 and \
+                (not kinds or kinds[-1] in ("blank", "heading", "code", "fence", "comment")):
+            kinds.append("code")
+        elif _HEADING.match(shown):
+            kinds.append("heading")
+        elif not shown.strip():
+            kinds.append("blank")
+        elif _QUOTE.match(shown) or \
+                (kinds and kinds[-1] == "quote" and not _LIST.match(shown)):
+            kinds.append("quote")
+        elif shown.lstrip(" ").startswith("|"):
+            kinds.append("table")
+        elif _LINK_DEFINITION.match(shown) or _only_images(shown):
+            kinds.append("blank")
+        elif _TEXT.search(shown):
+            kinds.append("text")
+        else:
+            kinds.append("blank")
+    for index, line in enumerate(visible):
+        # A pipe table without leading pipes: a header row, its delimiter row, and the rows
+        # under it up to the first line without a pipe.
+        if kinds[index] in ("text", "blank") and "|" in line and "-" in line and \
+                _DELIMITER.match(line) and index and kinds[index - 1] == "text" and \
+                "|" in visible[index - 1]:
+            kinds[index - 1] = kinds[index] = "table"
+            below = index + 1
+            while below < len(visible) and kinds[below] == "text" and "|" in visible[below]:
+                kinds[below] = "table"
+                below += 1
+    return kinds, visible
+
+
+def _only_images(line):
+    """True for a line of images and nothing else, a badge row or a linked image included."""
+    if not _IMAGE.search(line):
+        return False
+    return not _EMPTY_LINK.sub("", _IMAGE.sub("", line)).strip()
+
+
+def _indent(line):
+    stripped = line.lstrip(" \t")
+    return len(line[:len(line) - len(stripped)].expandtabs(4))
+
+
+def _slug(heading):
+    """A heading's anchor: a link's text without its target, emphasis markers and other
+    punctuation dropped, lower case, each space a hyphen; `section` when nothing is left,
+    as for a heading of only punctuation or emoji."""
+    text = _EMPHASIS.sub("", _LINK.sub(r"\1", heading))
+    kept = re.sub(r"[^\w\- ]", "", text.strip().lower(), flags=re.UNICODE).strip()
+    return kept.replace(" ", "-") or "section"
+
+
+def _section_rules(path, root, body, first_line, name):
+    """One unmeasured `RuleEntry` per section of `body` that is a rule, with its id; or,
+    when `body` has no heading or none of its sections is a rule, one unmeasured rule called
+    `name`, as the file always was, so that no file drops out of the coverage block.
+
+    A headed file takes section ids even when it has one section, so that an id does not
+    change when a section is added below. A slug repeated in the file takes an ordinal
+    suffix in document order (`testing`, `testing-2`), counted over every heading so that a
+    section's id does not move when a section above it stops or starts being a rule. A rule
+    id that still repeats, as when a later heading's own text is `Testing 2`, is a finding
+    against that heading's line, and both rules are still listed.
+    """
+    relative = os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
+    units = _sections(body)
+    if not units:
+        return [RuleEntry(name, path, "unmeasured", "", [])], []
+    entries, findings, seen, taken = [], [], {}, set()
+    for heading, index, is_rule in units:
+        base = _slug(heading)
+        seen[base] = seen.get(base, 0) + 1
+        anchor = base if seen[base] == 1 else "%s-%d" % (base, seen[base])
+        rule = "%s#%s" % (relative, anchor)
+        if not is_rule:
+            continue
+        if rule in taken:
+            findings.append(Finding(path, first_line + index,
+                                    "the section id %s is already taken in this file" % rule))
+        taken.add(rule)
+        entries.append(RuleEntry(rule, path, "unmeasured", "", []))
+    if not entries:
+        return [RuleEntry(name, path, "unmeasured", "no section is a rule", [])], findings
+    return entries, findings
 
 
 # --- the whole load ------------------------------------------------------------------------

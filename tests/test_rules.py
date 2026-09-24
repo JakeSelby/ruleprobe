@@ -192,7 +192,7 @@ class RuleBindingTests(Temp):
         self.assertIn("no secret that never reached a file", entry.reason)
 
     def test_a_rule_with_neither_is_unmeasured_so_the_gap_is_visible(self):
-        entry = [r for r in self.bundle().rules if r.rule == "working-style"][0]
+        entry = [r for r in self.bundle().rules if r.rule == "working-style.md#working-style"][0]
         self.assertEqual((entry.state, entry.detectors, entry.reason), ("unmeasured", [], ""))
 
     def test_the_counts_are_what_the_summary_prints(self):
@@ -200,17 +200,17 @@ class RuleBindingTests(Temp):
         self.assertEqual(bundle.counts(), {"measured": 1, "dark": 1, "unmeasured": 1})
         summary = bundle.summary(relative_to=self.dir)
         self.assertIn("rules: 1 measured, 1 dark, 1 unmeasured", summary)
-        self.assertIn("unmeasured working-style", summary)
+        self.assertIn("unmeasured working-style.md#working-style ", summary)
         self.assertNotIn(self.dir, summary)
 
     def test_the_rule_name_defaults_to_the_file_name(self):
         path = self.write("rules/cache-hygiene.md", "---\nopt_out: no\n---\n")
-        self.assertEqual(read_rule_file(path)[1].rule, "cache-hygiene")
+        self.assertEqual(read_rule_file(path)[1][0].rule, "cache-hygiene")
 
     def test_an_id_defaults_to_the_rule_and_the_entry_s_place_in_the_file(self):
         path = self.write("rules/x.md", "---\nrule: house-style\ndetector:\n"
                                         "  when: {tool: Write}\n---\n")
-        detectors, entry, findings = read_rule_file(path)
+        detectors, [entry], findings = read_rule_file(path)
         self.assertEqual(([d.id for d in detectors], entry.state, findings),
                          (["house-style/1"], "measured", []))
 
@@ -218,7 +218,7 @@ class RuleBindingTests(Temp):
         path = self.write("rules/x.md", "---\nrule: r\ndetector:\n"
                                         "  - {id: r/a, when: {tool: Write}}\n"
                                         "  - {id: r/b, when: {tool: Edit}}\n---\n")
-        detectors, entry, _ = read_rule_file(path)
+        detectors, [entry], _ = read_rule_file(path)
         self.assertEqual([d.id for d in detectors], ["r/a", "r/b"])
         self.assertEqual(entry.detectors, ["r/a", "r/b"])
 
@@ -236,7 +236,9 @@ class RuleBindingTests(Temp):
         self.write("rules/a.md", UNMEASURED)
         self.write("rules/nested/c.md", UNMEASURED)
         bundle = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
-        self.assertEqual([r.rule for r in bundle.rules], ["a", "b", "c"])
+        self.assertEqual([r.rule for r in bundle.rules],
+                         ["a.md#working-style", "b.md#working-style",
+                          "nested/c.md#working-style"])
 
 
 class MalformedRuleTests(Temp):
@@ -250,7 +252,7 @@ class MalformedRuleTests(Temp):
         self.assertEqual(finding.line, 6)
         self.assertTrue(finding.path.endswith("broken.md"))
         self.assertIn("unknown matcher", finding.reason)
-        self.assertIn("detector findings: 1", bundle.summary(relative_to=self.dir))
+        self.assertIn("findings: 1 (everything else still loaded)", bundle.summary(relative_to=self.dir))
 
     def test_a_rule_whose_detector_did_not_compile_is_unmeasured_not_measured(self):
         self.write("rules/broken.md", MALFORMED)
@@ -282,7 +284,8 @@ class ExampleTests(unittest.TestCase):
         self.assertEqual(bundle.findings, [])
         self.assertEqual([(r.rule, r.state) for r in bundle.rules],
                          [("house-style", "measured"), ("secrets", "dark"),
-                          ("verification", "measured"), ("working-style", "unmeasured")])
+                          ("verification", "measured"),
+                          ("working-style.md#working-style", "unmeasured")])
 
     def test_the_example_transcript_fires_the_example_rule(self):
         bundle = load_bundle(rules_dir=os.path.join(self.DOCS, "rules"), config=False)
@@ -311,7 +314,7 @@ class CliTests(Temp):
         self.assertEqual(code, 0)
         self.assertIn("transcript-hygiene/sed-range", text)
         self.assertIn("rules: 1 measured, 0 dark, 1 unmeasured", text)
-        self.assertIn("unmeasured working-style", text)
+        self.assertIn("unmeasured working-style.md#working-style ", text)
 
     def test_a_detector_file_named_on_the_command_line_is_loaded(self):
         path = self.write("d.json", json.dumps(SUDO))
@@ -324,7 +327,7 @@ class CliTests(Temp):
         code, text = self.run_cli("report", "--root", FIXTURES, "--no-config",
                                   "--detectors", path)
         self.assertEqual(code, 0)
-        self.assertIn("detector findings: 1", text)
+        self.assertIn("findings: 1 (everything else still loaded)", text)
         self.assertIn("unknown matcher", text)
         self.assertIn("transcript-hygiene/whole-file-cat", text)
 
