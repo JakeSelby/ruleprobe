@@ -148,6 +148,23 @@ Point `--rules` at whatever directory your own rules live in, and drop the same 
 `~/.config/ruleprobe/detectors.yaml` for the ones you want everywhere. Both are found
 without a flag; `--no-config` skips them.
 
+**A rule in a common shape needs no detector at all.** A section that no front matter binds is
+matched against a small shipped catalog by what it says, with no model: its heading and each
+sentence of its text are tested against one anchored pattern per entry, and a section that
+matches exactly one entry is measured by that entry's detector. The shapes are: run the tests
+before finishing (`testing/no-test-run`), never skip pre-commit hooks
+(`verification/no-verify`), never force-push the default branch
+(`git-safety/force-push-default`), use uv, not pip (`package-manager/pip-install`), do not
+read a whole file (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
+(`commits/non-conventional-subject`), and never commit a secret-shaped file
+(`secrets/secret-file-add`). A section matching none, or more than one, stays unmeasured, and
+the coverage block names the entries when it matched several. A bound section is listed as
+`measured` with the note `catalog-bound, <detector id>`. A catalog detector joins the report
+only when a rule binds it, a detector of your own with a catalog id replaces it, and
+`ruleprobe corpus` scores every entry. In a clone,
+`ruleprobe report --root docs --rules tests/fixtures/catalog` binds a file holding one
+section in each shape.
+
 ## Writing a detector
 
 An entry is `id`, `rule`, `event`, `when`, and an optional `gate`. `event` is one of
@@ -393,6 +410,9 @@ verification/no-verify                    6    6    6    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    32   42   32    0    0   1.00    1.00   1.00  floor 0.90
 ```
+
+That is the six shipped detectors over the corpus. `ruleprobe corpus` prints a row for each
+catalog entry as well, scored by the entry's own `examples:`, and the total counts them.
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
 `ruleprobe corpus --floor 0.9` exits non-zero when a scored detector falls under the floor,

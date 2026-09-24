@@ -215,15 +215,16 @@ def _gate_note(detector):
     return "gated on --stance %s=%s" % (dimension, "|".join(variants))
 
 
-def _bundle_and_registry(args, plugins=None):
+def _bundle_and_registry(args, plugins=None, whole_catalog=False):
     """The declarative bundle for this invocation, and the registry to run: the shipped
-    detectors, plus plugins when asked, plus everything the bundle loaded."""
+    detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
+    them with `whole_catalog`, plus everything the bundle loaded."""
     bundle = load_bundle(paths=args.detectors, rules_dir=args.rules,
                          config=not args.no_config)
     if plugins is None:
         plugins = getattr(args, "plugins", False)
     base = Registry.from_entry_points() if plugins else DEFAULT
-    return bundle, bundle.registry(base)
+    return bundle, bundle.registry(base, whole_catalog=whole_catalog)
 
 
 def _read_errors_line(errors):
@@ -286,9 +287,9 @@ def cmd_corpus(args, out):
 
     The floor is this repository's CI gate, not a runtime failure for a user: nothing in
     `ruleprobe report` reads it, and a detector nobody labelled is passed over rather than
-    failed.
+    failed. Every catalog entry is scored, whether a rule bound it or not.
     """
-    bundle, registry = _bundle_and_registry(args)
+    bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:
         scores = validity(registry=registry, directory=args.corpus)
     except CorpusError as exc:

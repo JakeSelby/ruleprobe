@@ -87,8 +87,8 @@ Read-only. A local AD that weakens either is a conflict to surface, not an overr
     `report._redact` importing `detectors.common` for `redact` (AD-13). The explain pair is
     implemented under #51 and ships in v0.2.0.
   - A new module takes a place in this graph in the change that adds it, and the spine is updated.
-  - `detectors.catalog` (planned, v0.2.0, story 3.5) is a Python literal module under AD-9's package
-    data rule. `rules` imports it; it imports `matchers` to compile its entries and nothing else.
+  - `detectors.catalog` (v0.2.0, story 3.5) is a Python literal module under AD-9's package data
+    rule, and imports nothing. `rules` imports it and compiles its entries with `matchers`.
 
 ```mermaid
 flowchart TD
@@ -106,7 +106,6 @@ flowchart TD
   rules --> registry
   rules --> declarative
   rules --> detectors_catalog[detectors.catalog]
-  detectors_catalog --> matchers
   matchers --> registry
   matchers --> shell
   matchers --> declarative
@@ -123,6 +122,10 @@ flowchart TD
 
 Amended 2026-09-23: `contract_data` joins the graph as a leaf imported only by `registry`, which
 exposes its fold map to `report` and `validity` through `fold_map` (#34)
+
+Amended 2026-09-23: `detectors.catalog` is a leaf holding only literals, as its literals-only test
+requires; `rules`, which already imports `matchers`, compiles the entries, so the planned
+`detectors.catalog --> matchers` edge is dropped (#49)
 
 ### AD-2: The event schema is the one contract between readers and detectors [ADOPTED]
 

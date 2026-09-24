@@ -21,6 +21,7 @@ from unittest import mock
 
 from ruleprobe import DEFAULT, Registry, contract_data
 from ruleprobe.cli import main
+from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
 from ruleprobe.validity import (CorpusError, DEFAULT_FLOOR, Score, below_floor, corpus_dir,
@@ -507,7 +508,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         data = json.loads(text)
         self.assertEqual(data["floor"], 1.01)
-        self.assertEqual(sorted(data["below_floor"]), sorted(DEFAULT.ids()))
+        catalog = [entry["detector"]["id"] for entry in ENTRIES]
+        self.assertEqual(sorted(data["below_floor"]), sorted(set(DEFAULT.ids() + catalog)))
 
     def test_a_broken_corpus_is_exit_two_and_a_message_on_stderr(self):
         errors = io.StringIO()

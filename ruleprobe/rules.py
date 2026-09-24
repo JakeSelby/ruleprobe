@@ -12,18 +12,27 @@ Three places hold a declarative detector, and all three are read into one bundle
 The third is the one that makes a report readable, because it also says what is *not*
 measured. A rule file carrying a `detector:` block is measured; one carrying
 `opt_out: <reason>` is dark on purpose, and either way the file is one rule. A file giving
-neither a value is split at its ATX headings, one rule per section, each unmeasured and
-listed as such so the gap is visible rather than assumed; one with no heading, or with no
-section that is a rule, stays one unmeasured rule, named by its `rule:` key or else its file
-name. Known misses: text above the first heading of a headed file is no rule, and a setext
-heading does not split. Nothing here fails a build: a bad entry is a finding with a file, a
-line and a reason, and the rest of the file still loads.
+neither a value is split at its ATX headings, one rule per section; one with no heading, or
+with no section that is a rule, stays one unmeasured rule, named by its `rule:` key or else
+its file name. Known misses: text above the first heading of a headed file is no rule, and a
+setext heading does not split. Nothing here fails a build: a bad entry is a finding with a
+file, a line and a reason, and the rest of the file still loads.
+
+A section rule is bound to the shipped catalog (`ruleprobe.detectors.catalog`) by what it
+says, with no model: its heading and each sentence of its prose are matched against every
+entry's anchored pattern, and the rule binds the one entry that matches, as a measured rule
+whose source is `catalog`. None matching, or more than one, leaves it unmeasured and listed,
+so the gap is visible rather than assumed; under-counting is the point, since a loose binding
+would lift the measured share on rules nobody would recognise. A rule bound in its front
+matter is `own`, and so is a catalog-bound one whose detector id a detector file of the
+user's replaced.
 """
 import os
 import re
 from collections import namedtuple
 
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
+from .detectors import catalog as _catalog
 from .matchers import compile_detector, schema_version_error
 from .registry import DEFAULT, Registry
 
@@ -36,13 +45,30 @@ FILENAMES = ("detectors.yaml", "detectors.yml", "detectors.json")
 #: How far up the tree to look for `REPO_DIR` before giving up.
 MAX_PARENTS = 40
 STATES = ("measured", "dark", "unmeasured")
+#: Where a measured rule's detectors came from: its own front matter or detector files, or
+#: the shipped catalog.
+SOURCES = ("own", "catalog")
 
 #: A detector file that could not be read in full: the file, the line, and why.
 Finding = namedtuple("Finding", "path line reason")
 #: One rule: its id, the file it lives in, whether anything measures it, the reason it is
-#: dark when it is, and the detector ids bound to it. A one-rule file is named by its
+#: dark or unmeasured when there is one, the detector ids bound to it, and where those came
+#: from, one of `SOURCES`, or `None` when nothing is bound. A one-rule file is named by its
 #: `rule:` key, else its file name; a section rule's id is `<path>#<heading-slug>`.
-RuleEntry = namedtuple("RuleEntry", "rule path state reason detectors")
+RuleEntry = namedtuple("RuleEntry", "rule path state reason detectors source",
+                       defaults=(None,))
+
+
+def _compile_catalog():
+    """`((pattern, detector), ...)` for every catalog entry, in catalog order."""
+    return tuple((re.compile(entry["pattern"], re.IGNORECASE),
+                  compile_detector(entry["detector"], "<catalog>"))
+                 for entry in _catalog.ENTRIES)
+
+
+#: The shipped catalog, compiled once at import. Its detectors are shared by every bundle's
+#: registry and never added to `DEFAULT`.
+_CATALOG = _compile_catalog()
 
 
 class Bundle(object):
@@ -56,11 +82,19 @@ class Bundle(object):
         self.findings = list(findings or [])
         self.sources = list(sources or [])
 
-    def registry(self, base=DEFAULT):
-        """`base` plus everything loaded. A declarative detector whose id is already taken
-        replaces the one that held it, which is how a repository overrides a shipped
-        detector without editing the package."""
+    def registry(self, base=DEFAULT, whole_catalog=False):
+        """`base`, then the catalog detectors a rule bound, then everything loaded. A
+        declarative detector whose id is already taken replaces the one that held it, which
+        is how a repository overrides a shipped or a catalog detector without editing the
+        package. A catalog entry that restates a detector `base` already holds leaves that
+        one in place. `whole_catalog` adds every catalog entry, bound or not, which is how
+        `ruleprobe corpus` scores the whole catalog."""
         registry = base.copy() if base is not None else Registry()
+        bound = set(did for entry in self.rules if entry.source == "catalog"
+                    for did in entry.detectors)
+        for _pattern, detector in _CATALOG:
+            if (whole_catalog or detector.id in bound) and detector.id not in registry:
+                registry.add(detector)
         for detector in self.detectors:
             registry.add(detector)
         return registry
@@ -93,6 +127,8 @@ class Bundle(object):
             width = max([28] + [len(entry.rule) + 1 for entry in self.rules])
             for entry in self.rules:
                 note = ": " + entry.reason if entry.reason else ""
+                if entry.source == "catalog":
+                    note = ": catalog-bound, " + ", ".join(entry.detectors)
                 lines.append("  %-11s%-*s%s%s"
                              % (entry.state, width, entry.rule,
                                 _short(entry.path, relative_to), note))
@@ -330,7 +366,7 @@ def read_rule_file(path, root=None):
         findings.extend(problems)
         if detectors:
             return detectors, [RuleEntry(rule, path, "measured", "",
-                                         [d.id for d in detectors])], findings
+                                         [d.id for d in detectors], "own")], findings
         return [], [RuleEntry(rule, path, "unmeasured", "its detector did not compile", [])], \
             findings
     if opt_out is not None:
@@ -366,16 +402,69 @@ def _sections(body):
     a blockquote, and is not only an image or a link reference definition; so a heading with
     nothing under it, or only an example, is not.
     """
+    return [unit[:3] for unit in _units(body)]
+
+
+def _units(body):
+    """`_sections` with a fourth item: the section's prose, a list of paragraphs, each list
+    item starting one of its own. It is the text lines alone, so nothing a fence, a comment,
+    a table or a quote holds is in it."""
     lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     kinds, visible = _line_kinds(lines)
     out = []
     for index, kind in enumerate(kinds):
         if kind == "heading":
             text = _HEADING.match(visible[index]).group(2) or ""
-            out.append([_CLOSING.sub("", text).strip(), index, False])
+            out.append([_CLOSING.sub("", text).strip(), index, False, []])
         elif kind == "text" and out:
             out[-1][2] = True
+            line = visible[index].strip()
+            if kinds[index - 1] == "text" and not _LIST.match(line) and out[-1][3]:
+                out[-1][3][-1] += " " + line
+            else:
+                out[-1][3].append(line)
     return [tuple(s) for s in out]
+
+
+# --- catalog binding ---------------------------------------------------------------------
+
+_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+_MARKUP = re.compile(r"[`*]+")
+
+
+def _sentences(heading, paragraphs):
+    """The heading and each sentence of `paragraphs`, as a catalog pattern reads them: a
+    link as its text, list markers, code and emphasis markers dropped, a typographic
+    apostrophe made plain, and whitespace collapsed. A sentence ends at `.`, `!` or `?`
+    followed by a space, so an abbreviation such as `e.g.` starts a new one: a pattern that
+    then fails to match under-counts, never over-counts."""
+    out = []
+    for text in [heading] + list(paragraphs):
+        text = _LIST.sub("", text, count=1)
+        text = _EMPHASIS.sub("", _MARKUP.sub("", _LINK.sub(r"\1", text)))
+        text = " ".join(text.replace("\u2019", "'").split())
+        out.extend(part for part in _SENTENCE_END.split(text) if part)
+    return out
+
+
+def _catalog_matches(heading, paragraphs):
+    """The catalog detectors whose pattern matches the start of any sentence of the rule,
+    in catalog order. Binding reads text and nothing else."""
+    sentences = _sentences(heading, paragraphs)
+    return [detector for pattern, detector in _CATALOG
+            if any(pattern.match(sentence) for sentence in sentences)]
+
+
+def _bind(rule, path, heading, paragraphs):
+    """A section rule's entry: measured and catalog-bound when exactly one entry matches,
+    else unmeasured, with the entries named when more than one did."""
+    matched = _catalog_matches(heading, paragraphs)
+    if len(matched) == 1:
+        return RuleEntry(rule, path, "measured", "", [matched[0].id], "catalog")
+    if matched:
+        return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
+                         % (len(matched), ", ".join(d.id for d in matched)), [])
+    return RuleEntry(rule, path, "unmeasured", "", [])
 
 
 def _uncomment(line, open_comment):
@@ -477,7 +566,8 @@ def _slug(heading):
 
 
 def _section_rules(path, root, body, first_line, name):
-    """One unmeasured `RuleEntry` per section of `body` that is a rule, with its id; or,
+    """One `RuleEntry` per section of `body` that is a rule, with its id, bound to the
+    catalog when exactly one entry matches its text and unmeasured otherwise; or,
     when `body` has no heading or none of its sections is a rule, one unmeasured rule called
     `name`, as the file always was, so that no file drops out of the coverage block.
 
@@ -489,11 +579,11 @@ def _section_rules(path, root, body, first_line, name):
     against that heading's line, and both rules are still listed.
     """
     relative = os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
-    units = _sections(body)
+    units = _units(body)
     if not units:
         return [RuleEntry(name, path, "unmeasured", "", [])], []
     entries, findings, seen, taken = [], [], {}, set()
-    for heading, index, is_rule in units:
+    for heading, index, is_rule, paragraphs in units:
         base = _slug(heading)
         seen[base] = seen.get(base, 0) + 1
         anchor = base if seen[base] == 1 else "%s-%d" % (base, seen[base])
@@ -504,7 +594,7 @@ def _section_rules(path, root, body, first_line, name):
             findings.append(Finding(path, first_line + index,
                                     "the section id %s is already taken in this file" % rule))
         taken.add(rule)
-        entries.append(RuleEntry(rule, path, "unmeasured", "", []))
+        entries.append(_bind(rule, path, heading, paragraphs))
     if not entries:
         return [RuleEntry(name, path, "unmeasured", "no section is a rule", [])], findings
     return entries, findings
@@ -529,4 +619,10 @@ def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True):
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)
+    # A detector of the user's that takes a catalog id replaces the catalog one in the
+    # registry (`Bundle.registry`), so a rule bound to that id is the user's own.
+    own = set(d.id for d in bundle.detectors)
+    bundle.rules = [entry._replace(source="own")
+                    if entry.source == "catalog" and own.intersection(entry.detectors)
+                    else entry for entry in bundle.rules]
     return bundle

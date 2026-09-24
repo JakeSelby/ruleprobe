@@ -36,10 +36,12 @@ class SplitTests(unittest.TestCase):
         self.assertEqual([e.rule for e in entries],
                          ["sectioned.md#testing", "sectioned.md#dependencies",
                           "sectioned.md#pinning"])
-        self.assertEqual(set(e.state for e in entries), {"unmeasured"})
+        # "Install with uv, never with sudo pip" is a catalog shape; the other two are not.
+        self.assertEqual([(e.state, e.source) for e in entries],
+                         [("unmeasured", None), ("measured", "catalog"), ("unmeasured", None)])
         bundle = Bundle(rules=entries)
-        self.assertEqual(bundle.counts(), {"measured": 0, "dark": 0, "unmeasured": 3})
-        self.assertIn("rules: 0 measured, 0 dark, 3 unmeasured", bundle.summary())
+        self.assertEqual(bundle.counts(), {"measured": 1, "dark": 0, "unmeasured": 2})
+        self.assertIn("rules: 1 measured, 0 dark, 2 unmeasured", bundle.summary())
 
     def test_a_hash_line_inside_a_fence_does_not_start_a_section(self):
         headings = [h for h, _index, _rule in _sections(text("sectioned.md"))]
@@ -140,8 +142,8 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(code, 0)
         coverage = json.loads(out.getvalue())["coverage"]
         self.assertEqual((coverage["measured"], coverage["dark"], coverage["unmeasured"]),
-                         (0, 0, 3))
-        self.assertIn("rules: 0 measured, 0 dark, 3 unmeasured", err.getvalue())
+                         (1, 0, 2))
+        self.assertIn("rules: 1 measured, 0 dark, 2 unmeasured", err.getvalue())
 
     def test_a_non_rule_unit_is_in_no_state(self):
         bundle = Bundle(rules=read_rule_file(fixture("non-rules.md"), root=RULES)[1])

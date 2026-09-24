@@ -3,8 +3,9 @@
 
 `ruleprobe/contract_data.py` must load the same way from a zip as from a directory, so it
 may hold nothing the import system would have to run: no import, no call, no function. And
-every id any release shipped must still be either registered in `DEFAULT` or a key of the
-fold map, or a ledger written under that release loses the history stored under it.
+every id any release shipped must still be either registered in `DEFAULT` or the catalog, or
+a key of the fold map, or a ledger written under that release loses the history stored under
+it.
 """
 import ast
 import inspect
@@ -13,6 +14,10 @@ from unittest import mock
 
 from ruleprobe import DEFAULT, contract_data
 from ruleprobe.registry import fold_map
+from ruleprobe.rules import Bundle
+
+#: `DEFAULT` and every catalog detector: everything a release ships.
+SHIPPED = Bundle().registry(whole_catalog=True)
 
 
 def non_literal(source):
@@ -76,12 +81,12 @@ class LiteralTests(unittest.TestCase):
 
 class ShippedIdTests(unittest.TestCase):
     def test_every_shipped_id_is_registered_or_folded(self):
-        self.assertEqual(unaccounted(contract_data.SHIPPED_IDS, DEFAULT,
+        self.assertEqual(unaccounted(contract_data.SHIPPED_IDS, SHIPPED,
                                      contract_data.RENAMED), [])
 
     def test_the_check_fails_an_id_that_is_neither(self):
         shipped = contract_data.SHIPPED_IDS + ("never/registered-anywhere",)
-        self.assertEqual(unaccounted(shipped, DEFAULT, contract_data.RENAMED),
+        self.assertEqual(unaccounted(shipped, SHIPPED, contract_data.RENAMED),
                          ["never/registered-anywhere"])
 
     def test_the_check_passes_an_id_the_fold_map_carries(self):
