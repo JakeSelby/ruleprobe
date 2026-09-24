@@ -121,8 +121,8 @@ reader's own, firing. `secrets` is **dark** by choice: its front matter carries
 `opt_out: <reason>`, because the rule is about a credential that never reaches a file and a
 transcript only shows what did. `working-style` is **unmeasured**: it has neither a detector
 nor an opt-out, so it is split at its headings and its one section is listed by its id,
-`working-style.md#working-style`; saying so is the only way an author sees the gap. Nothing fails; a
-report is evidence, not a gate.
+`working-style.md#working-style`; saying so is the only way an author sees the gap. Nothing
+fails; a report is evidence, not a gate.
 
 Point `--rules` at whatever directory your own rules live in, and drop the same entries into
 `.ruleprobe/detectors.yaml` at the root of a repository, or into
@@ -281,14 +281,16 @@ known miss of the shell parse in `ruleprobe/shell.py` - a command inside a subst
 invisible, and so is a variable's value. A rule whose shape needs any of that is a Python
 detector, and the report will not pretend otherwise.
 
-**A rule file is one rule per section.** A file whose front matter carries `detector:` or
-`opt_out:` is one rule, named by its `rule:` key or its file name. Any other file is split at
-its ATX (`#`) headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage block, each
+**Unbound rule files split into one rule per section.** A file whose front matter gives
+`detector:` or `opt_out:` a value is one rule, named by its `rule:` key or its file name; a key
+with no value binds nothing and is a finding. Any other file is split at its ATX (`#`)
+headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage block, each
 with the id `<path>#<heading-slug>` under `--rules`, and a repeated heading takes `-2`. A
-section holding only a code block, an HTML comment, a table or a blockquote is not a rule, and
-a file with no heading stays one rule, named by its `rule:` key or else its file name. Known
-misses: text above the first heading of a headed file is no rule, a setext heading (text
-underlined with `===` or `---`) does not split, and list items are never split.
+section holding only a code block, an HTML comment, a table, a blockquote, an image or a link
+reference is not a rule. A file with no heading, or with no section that is a rule, stays one
+unmeasured rule, named by its `rule:` key or else its file name. Known misses: text above the
+first heading of a headed file is no rule, a setext heading (text underlined with `===` or
+`---`) does not split, and list items are never split.
 
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see

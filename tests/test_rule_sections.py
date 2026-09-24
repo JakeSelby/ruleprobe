@@ -4,13 +4,18 @@ section; a file bound in its front matter stays one rule.
 
 Run: python3 -m unittest discover -s tests
 """
+import io
+import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 
-from ruleprobe.rules import (Bundle, RuleEntry, load_bundle, read_rule_file, sections,
-                             slug)
+from ruleprobe.rules import (Bundle, RuleEntry, load_bundle, read_rule_file, _sections,
+                             _slug)
+from ruleprobe.cli import main
+from test_readers import FIXTURES
 
 RULES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures", "rules")
 
@@ -37,14 +42,14 @@ class SplitTests(unittest.TestCase):
         self.assertIn("rules: 0 measured, 0 dark, 3 unmeasured", bundle.summary())
 
     def test_a_hash_line_inside_a_fence_does_not_start_a_section(self):
-        headings = [h for h, _index, _rule in sections(text("sectioned.md"))]
+        headings = [h for h, _index, _rule in _sections(text("sectioned.md"))]
         self.assertNotIn("Not a heading: this line sits inside a fenced block.", headings)
         self.assertEqual(len(headings), 5)
 
     def test_a_heading_fence_table_or_blockquote_alone_is_not_a_rule(self):
         _detectors, entries, findings = read_rule_file(fixture("non-rules.md"), root=RULES)
         self.assertEqual(([e.rule for e in entries], findings), (["non-rules.md#a-rule"], []))
-        units = sections(text("non-rules.md"))
+        units = _sections(text("non-rules.md"))
         self.assertEqual([(h, rule) for h, _index, rule in units],
                          [("Only a heading", False), ("Only a fence", False),
                           ("Only a table", False), ("Only a table without edge pipes", False),
@@ -53,21 +58,97 @@ class SplitTests(unittest.TestCase):
                           ("A rule", True)])
 
     def test_an_html_comment_is_never_text_and_never_a_heading(self):
-        units = sections("# A\n\n<!-- a note -->\n\n# B\n\n<!--\n# x\nhidden\n-->\n\n"
+        units = _sections("# A\n\n<!-- a note -->\n\n# B\n\n<!--\n# x\nhidden\n-->\n\n"
                          "# B\n\nReal text.\n")
         self.assertEqual(units, [("A", 0, False), ("B", 4, False), ("B", 11, True)])
 
     def test_an_indented_code_block_after_a_blank_line_is_code(self):
-        self.assertEqual(sections("# A\n\n    make test\n\n    make lint\n"),
+        self.assertEqual(_sections("# A\n\n    make test\n\n    make lint\n"),
                          [("A", 0, False)])
-        self.assertEqual(sections("# A\n\nText,\n    continued.\n"), [("A", 0, True)])
+        self.assertEqual(_sections("# A\n\nText,\n    continued.\n"), [("A", 0, True)])
+
+    def test_a_bullet_after_a_quote_is_not_part_of_the_quote(self):
+        self.assertEqual(_sections("# A\n\n> Quoted.\n- Pin tools.\n"), [("A", 0, True)])
+
+    def test_text_after_a_comment_closes_is_text(self):
+        self.assertEqual(_sections("# A\n\n<!--\nnote\n--> Pin tools.\n"), [("A", 0, True)])
+        self.assertEqual(_sections("# A\n\n<!-- note --> Pin tools.\n"), [("A", 0, True)])
+
+    def test_a_comment_opened_mid_line_hides_the_heading_inside_it(self):
+        self.assertEqual(_sections("# A\n\nPin tools. <!--\n# x\n-->\n"), [("A", 0, True)])
+
+    def test_indented_code_right_after_a_fence_or_a_comment_is_code(self):
+        self.assertEqual(_sections("# A\n\n```\nx\n```\n    make\n"), [("A", 0, False)])
+        self.assertEqual(_sections("# A\n\n<!-- x -->\n    make\n"), [("A", 0, False)])
+
+    def test_indented_code_under_a_heading_and_over_several_lines_is_code(self):
+        self.assertEqual(_sections("# A\n    make test\n    make lint\n        nested\n"),
+                         [("A", 0, False)])
+
+    def test_an_image_or_a_link_reference_alone_is_not_text(self):
+        self.assertEqual(_sections("# A\n\n![Build](https://example.test/b.svg) "
+                                   "[![Docs](d.svg)](https://example.test)\n\n"
+                                   "[docs]: https://example.test \"Docs\"\n"),
+                         [("A", 0, False)])
+        self.assertEqual(_sections("# A\n\nSee ![a diagram](d.svg) first.\n"),
+                         [("A", 0, True)])
+
+    def test_the_fence_branches(self):
+        self.assertEqual(_sections("# A\n\n~~~\n```\n# x\n~~~\n"), [("A", 0, False)])
+        self.assertEqual(_sections("# A\n\n````\n```\n# x\n````\n"), [("A", 0, False)])
+        self.assertEqual(_sections("# A\n\n```x``` is inline code.\n"), [("A", 0, True)])
+
+    def test_a_table_without_edge_pipes_takes_every_body_row(self):
+        self.assertEqual(_sections("# A\n\nTool | Use\n--- | ---\nuv | yes\npip | no\n"
+                                   "tox | no\n"), [("A", 0, False)])
+        self.assertEqual(_sections("# A\n\na | b\n--- | ---\nc | d\n\nPin tools.\n"),
+                         [("A", 0, True)])
+
+    def test_crlf_input_finds_its_headings_and_its_collision_lines(self):
+        directory = tempfile.mkdtemp(prefix="ruleprobe-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        path = os.path.join(directory, "x.md")
+        with open(path, "wb") as handle:
+            handle.write(b"# A\r\n\r\nOne.\r\n\r\n# A 2\r\n\r\nTwo.\r\n\r\n"
+                         b"# A\r\n\r\nThree.\r\n")
+        _detectors, entries, findings = read_rule_file(path, root=directory)
+        self.assertEqual([e.rule for e in entries], ["x.md#a", "x.md#a-2", "x.md#a-2"])
+        self.assertEqual([f.line for f in findings], [9])
+
+    def test_an_undecodable_file_is_one_unreadable_rule_and_one_finding(self):
+        directory = tempfile.mkdtemp(prefix="ruleprobe-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        with open(os.path.join(directory, "bad.md"), "wb") as handle:
+            handle.write(b"# A\n\n\xff\xfe not utf-8\n")
+        bundle = load_bundle(rules_dir=directory, config=False)
+        self.assertEqual([(r.rule, r.state, r.reason) for r in bundle.rules],
+                         [("bad", "unmeasured", "unreadable")])
+        self.assertEqual(len(bundle.findings), 1)
+        self.assertIn("unreadable", bundle.summary(relative_to=directory))
+
+    def test_report_counts_the_sectioned_fixture_as_three_rules(self):
+        directory = tempfile.mkdtemp(prefix="ruleprobe-")
+        self.addCleanup(shutil.rmtree, directory, True)
+        shutil.copy(fixture("sectioned.md"), directory)
+        out, err = io.StringIO(), io.StringIO()
+        saved, sys.stderr = sys.stderr, err
+        try:
+            code = main(["report", "--root", FIXTURES, "--no-config", "--rules", directory,
+                         "--json"], out=out)
+        finally:
+            sys.stderr = saved
+        self.assertEqual(code, 0)
+        coverage = json.loads(out.getvalue())["coverage"]
+        self.assertEqual((coverage["measured"], coverage["dark"], coverage["unmeasured"]),
+                         (0, 0, 3))
+        self.assertIn("rules: 0 measured, 0 dark, 3 unmeasured", err.getvalue())
 
     def test_a_non_rule_unit_is_in_no_state(self):
         bundle = Bundle(rules=read_rule_file(fixture("non-rules.md"), root=RULES)[1])
         self.assertEqual(sum(bundle.counts().values()), 1)
 
     def test_text_above_the_first_heading_belongs_to_no_section(self):
-        self.assertEqual(sections("A line with no heading above it.\n"), [])
+        self.assertEqual(_sections("A line with no heading above it.\n"), [])
 
     def test_the_directory_walk_lists_every_section_rule(self):
         bundle = load_bundle(rules_dir=RULES, config=False)
@@ -157,8 +238,13 @@ class IdTests(TempDir):
         self.assertIn("findings: 1 (everything else still loaded)",
                       bundle.summary(relative_to=self.dir))
 
+    def test_a_link_target_and_emphasis_stay_out_of_a_slug(self):
+        self.assertEqual([_slug(h) for h in ("See [the docs](https://x.y)", "*Always* _test_",
+                                             "**Bold** and [ref][1]", "snake_case stays")],
+                         ["see-the-docs", "always-test", "bold-and-ref", "snake_case-stays"])
+
     def test_slug(self):
-        self.assertEqual([slug(h) for h in ("Testing", "  Pull requests ", "C++ & you",
+        self.assertEqual([_slug(h) for h in ("Testing", "  Pull requests ", "C++ & you",
                                             "snake_case-ok")],
                          ["testing", "pull-requests", "c--you", "snake_case-ok"])
 
@@ -206,12 +292,42 @@ class SingleRulePathTests(TempDir):
         self.assertEqual(self.entries("detector:\n  when: {comand: cat}\n"),
                          [("x", "unmeasured", "its detector did not compile")])
 
-    def test_a_bare_detector_key(self):
-        self.assertEqual(self.entries("detector:\n"),
-                         [("x", "unmeasured", "its detector did not compile")])
+    def bare(self, key):
+        path = self.write("x.md", "---\nowner: docs\n%s:\n---\n%s" % (key, self.TWO))
+        _detectors, entries, findings = read_rule_file(path, root=self.dir)
+        return [e.rule for e in entries], [(f.line, f.reason) for f in findings]
 
-    def test_a_bare_opt_out_key(self):
-        self.assertEqual(self.entries("opt_out:\n"), [("x", "dark", "no reason given")])
+    def test_a_bare_opt_out_key_binds_nothing_and_is_a_finding(self):
+        self.assertEqual(self.bare("opt_out"),
+                         (["x.md#one", "x.md#two"],
+                          [(3, "opt_out: has no value, so it binds nothing")]))
+
+    def test_a_bare_detector_key_binds_nothing_and_is_a_finding(self):
+        self.assertEqual(self.bare("detector"),
+                         (["x.md#one", "x.md#two"],
+                          [(3, "detector: has no value, so it binds nothing")]))
+
+    def test_a_bare_detectors_key_binds_nothing_and_is_a_finding(self):
+        self.assertEqual(self.bare("detectors"),
+                         (["x.md#one", "x.md#two"],
+                          [(3, "detectors: has no value, so it binds nothing")]))
+
+    def test_a_bare_opt_out_on_a_heading_less_file_stays_unmeasured(self):
+        path = self.write("x.md", "---\nopt_out:\n---\nOne rule.\n")
+        self.assertEqual([(e.rule, e.state) for e in read_rule_file(path)[1]],
+                         [("x", "unmeasured")])
+
+    def test_comment_only_front_matter_is_an_empty_mapping(self):
+        path = self.write("x.md", "---\n# owned by docs\n---\n%s" % self.TWO)
+        self.assertEqual(read_rule_file(path, root=self.dir)[1:],
+                         ([RuleEntry("x.md#one", path, "unmeasured", "", []),
+                           RuleEntry("x.md#two", path, "unmeasured", "", [])], []))
+
+    def test_a_headed_file_with_no_rule_section_stays_one_rule(self):
+        path = self.write("tools.md", "---\nrule: tools\n---\n# Tools\n\n```sh\nmake\n```\n")
+        self.assertEqual(read_rule_file(path, root=self.dir)[1:],
+                         ([RuleEntry("tools", path, "unmeasured", "no section is a rule", [])],
+                          []))
 
 
 class CoverageBlockTests(unittest.TestCase):
