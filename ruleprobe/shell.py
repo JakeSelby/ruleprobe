@@ -330,32 +330,45 @@ def _shell_lines(text):
 
 
 class Literal(str):
-    """A word holding an operator character that was quoted or escaped: `\\(`, `'|'`, `\\;`.
+    """A word that was quoted or escaped, in whole or in part: `\\(`, `'|'`, `\\;`, `'done'`.
 
     `shlex` hands back `(` for both `(` and `\\(`, but only the first opens a subshell;
-    `find . \\( -name x \\)` is one command. The type is how the split tells them apart,
-    and a detector comparing words sees an ordinary string.
+    `find . \\( -name x \\)` is one command. The type is how the split tells an operator or
+    a reserved word from a word that only spells one, and a detector comparing words sees an
+    ordinary string.
     """
 
     __slots__ = ()
 
 
-# Each shell operator character, as it stands in the text `shlex` reads once it has been
-# quoted or escaped: a private-use character is a word character to `shlex`.
-_OPERATOR_CHARS = "();|&<>"
-_MASK = dict((c, chr(0xE000 + i)) for i, c in enumerate(_OPERATOR_CHARS))
-_UNMASK = dict((ord(m), c) for c, m in _MASK.items())
+# Where the quoting mark is chosen from: the supplementary private-use area, which no shell
+# gives a meaning to.
+_MARK_FIRST, _MARK_LAST = 0xF0000, 0xFFFFD
 
 
-def _mask_literals(text):
-    """`text` with every quoted or escaped operator character replaced by its mask.
+def _free_mark(text):
+    """The first supplementary private-use character absent from `text`, or None.
 
-    The quoting rules are the ones `shlex` applies in POSIX mode, so the masked text
-    tokenizes into the same words, and no quoted or escaped `(` can come back as an
-    operator. None for text that already holds a mask character, which is read unmasked.
+    Choosing it per command means a transcript cannot forge a `Literal` by holding the
+    mark, and a command that holds some private-use glyphs is still marked.
     """
-    if any(m in text for m in _MASK.values()):
-        return None
+    present = set(text)
+    for point in range(_MARK_FIRST, _MARK_LAST + 1):
+        if chr(point) not in present:
+            return chr(point)
+    return None
+
+
+def _mark_literals(text, mark):
+    """`text` with `mark` added to every quoted span and after every escaped character.
+
+    The quoting rules are the ones `shlex` applies in POSIX mode: a single-quoted span, a
+    double-quoted span in which only `\\"` and `\\\\` are escapes, and the character after an
+    unquoted backslash. `shlex` already reads a quoted or escaped operator as a word; the mark
+    is what survives the quote removal to say so. It joins the word around it only because
+    `tokenize` sets `whitespace_split`, under which every character that is neither
+    whitespace nor punctuation continues a word.
+    """
     out = []
     sq = dq = False
     i, n = 0, len(text)
@@ -370,23 +383,22 @@ def _mask_literals(text):
         elif dq:
             dq = c != '"'
         elif c == "\\" and i + 1 < n:
-            out.append(c + _MASK.get(text[i + 1], text[i + 1]))
+            out.append(text[i:i + 2] + mark)
             i += 2
             continue
         elif c in "'\"":
             sq, dq = c == "'", c == '"'
-            out.append(c)
+            out.append(c + mark)
             i += 1
             continue
-        out.append(_MASK.get(c, c) if sq or dq else c)
+        out.append(c)
         i += 1
     return "".join(out)
 
 
-def _unmask(token):
-    """`token` with its masks restored; a `Literal` when it held any."""
-    restored = token.translate(_UNMASK)
-    return token if restored == token else Literal(restored)
+def _unmark(token, mark):
+    """`token` without `mark`; a `Literal` when it held one."""
+    return Literal(token.replace(mark, "")) if mark in token else token
 
 
 def _is_operator(token, operators):
@@ -416,12 +428,12 @@ def tokenize(text, strict=False):
         text = stripped
     text = " ; ".join(strip_comment(line) for line in _shell_lines(text))
     try:
-        masked = _mask_literals(text)
-        lex = shlex.shlex(text if masked is None else masked, posix=True,
+        mark = _free_mark(text)
+        lex = shlex.shlex(text if mark is None else _mark_literals(text, mark), posix=True,
                           punctuation_chars=True)
         lex.commenters = ""
-        lex.whitespace_split = True
-        return list(lex) if masked is None else [_unmask(token) for token in lex]
+        lex.whitespace_split = True  # what lets the mark join a word; see `_mark_literals`
+        return list(lex) if mark is None else [_unmark(token, mark) for token in lex]
     except ValueError:
         return None if strict else []
 
@@ -443,7 +455,7 @@ def _pipelines(tokens):
                 pipe.append(seg)
                 seg = []
             continue
-        if not seg and token in _DROP:
+        if not seg and _is_operator(token, _DROP):
             continue
         seg.append(token)
     if seg:

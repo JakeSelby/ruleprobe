@@ -3,7 +3,8 @@
 
 `find . \\( -name x \\)` is one command whose arguments include `(` and `)`; `(cd a && ls)` is
 a subshell. The tokenizer hands back `(` for both, so the parse has to remember which was
-which, in the segment split and in every helper that reads a segment.
+which, in the segment split and in every helper that reads a segment. The same holds for a
+quoted reserved word: `'done' x` runs a command named `done`.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -12,7 +13,7 @@ import unittest
 from corpus import bash
 from ruleprobe import DEFAULT, analyse, pipelines
 from ruleprobe.rules import catalog_detectors
-from ruleprobe.shell import Literal, has_redirect, normalise, operands, strip_comment, tokenize
+from ruleprobe.shell import Literal, _free_mark, has_redirect, normalise, operands, strip_comment, tokenize
 
 GROUPED = "find App \\( -name '*.bak' \\)"
 GROUPED_PIPED = "find App AppTests \\( -name '*.bak' -o -name '*.tmp' \\) | head"
@@ -36,6 +37,9 @@ EQUIVALENT = [
     ("git commit -m \\) --no-verify", "git commit -m RP --no-verify"),
     ("git push --force origin main \"&\"", "git push --force origin main AMP"),
     ("pip install \"(\" requests", "pip install LP requests"),
+    ("echo '&&' find .", "echo AND find ."),
+    ("echo \\& find .", "echo AMP find ."),
+    ("echo a \\& cat a.txt", "echo a AMP cat a.txt"),
 ]
 
 #: `(command, the detector ids expected to hit)`: real operators still split.
@@ -46,6 +50,8 @@ REAL = [
     ("echo a; cat a.txt", {"transcript-hygiene/whole-file-cat"}),
     ("find . | head", set()),
     ("cat a.txt > b.txt", set()),
+    ('echo "say \\"hi\\"" && find .', {"transcript-hygiene/unfiltered-find"}),
+    ('echo "a\\\\" && cat a.txt', {"transcript-hygiene/whole-file-cat"}),
 ]
 
 
@@ -104,19 +110,78 @@ class LiteralParseTests(unittest.TestCase):
         self.assertEqual(operands(segment), [">", "a.txt"])
         self.assertTrue(has_redirect(pipelines("cat > a.txt")[0][0]))
 
+    def test_every_quoted_or_escaped_operator_is_an_operand(self):
+        for command, word in (("cat '(' a.txt", "("), ('cat "(" a.txt', "("),
+                              ("cat \\< a.txt", "<"), ("cat \\| a.txt", "|")):
+            with self.subTest(command=command):
+                segment = pipelines(command)[0][0]
+                self.assertFalse(has_redirect(segment))
+                self.assertEqual(operands(segment), [word, "a.txt"])
+
+    def test_an_escape_inside_double_quotes_keeps_the_quote_open(self):
+        self.assertEqual(pipelines('echo "\\"" "(" x'), [[["echo", '"', "(", "x"]]])
+        self.assertEqual(pipelines('echo "\\\\" "|" x'), [[["echo", "\\", "|", "x"]]])
+        self.assertEqual(pipelines('echo "say \\"hi\\"" && find .'),
+                         [[["echo", 'say "hi"']], [["find", "."]]])
+
+    def test_a_quoted_or_escaped_reserved_word_is_the_command(self):
+        for command, words in (("'done' x", ["done", "x"]), ("\\! x", ["!", "x"]),
+                               ("'{' a", ["{", "a"]), ('"}" b', ["}", "b"])):
+            with self.subTest(command=command):
+                self.assertEqual(pipelines(command), [[words]])
+        self.assertEqual(pipelines("! done; { ls; }"), [[["ls"]]])
+
+    def test_every_quoted_or_escaped_word_is_marked(self):
+        words = tokenize("a 'b' \\c d\"e\" ''")
+        self.assertEqual(words, ["a", "b", "c", "de", ""])
+        self.assertEqual([isinstance(w, Literal) for w in words],
+                         [False, True, True, True, True])
+
     def test_an_escaped_parenthesis_opens_no_comment(self):
         self.assertEqual(strip_comment("echo \\(#x"), "echo \\(#x")
         self.assertEqual(strip_comment("(#x"), "(")
+        self.assertEqual(strip_comment("echo a\\;#x"), "echo a\\;#x")
+        self.assertEqual(strip_comment("echo a;#x"), "echo a;")
+
+    def test_an_escaped_space_continues_the_word_so_a_hash_opens_no_comment(self):
+        # bash: `echo a\ #b` prints `a #b`.
+        self.assertEqual(strip_comment("echo a\\ #b"), "echo a\\ #b")
+
+    def test_a_space_after_an_escaped_backslash_ends_the_word(self):
+        # bash: `cat a\\ #x b.txt` reads the file `a\`; `#x b.txt` is a comment.
+        self.assertEqual(strip_comment("cat a\\\\ #x b.txt"), "cat a\\\\ ")
+        self.assertEqual(pipelines("cat a\\\\ #x b.txt"), [[["cat", "a\\"]]])
 
     def test_an_escaped_ampersand_keeps_the_cd(self):
         self.assertEqual(normalise("cd a\\&& ls"), "cd a\\&& ls")
         self.assertEqual(normalise("cd my\\ dir && ls"), "ls")
 
-    def test_text_holding_a_mask_character_is_read_as_before(self):
-        self.assertEqual(pipelines("echo \ue000 (ls)"), [[["echo", "\ue000"]], [["ls"]]])
+    def test_a_private_use_glyph_in_the_command_leaves_the_marking_on(self):
+        self.assertEqual(pipelines("echo \ue000 \\( x | head"),
+                         [[["echo", "\ue000", "(", "x"], ["head"]]])
+        self.assertEqual(pipelines("echo \U000F0000 \\( x"),
+                         [[["echo", "\U000F0000", "(", "x"]]])
+
+    def test_a_command_cannot_forge_a_literal_by_holding_the_mark(self):
+        tokens = tokenize("echo \U000F0000 ( x")
+        self.assertEqual(tokens[2], "(")
+        self.assertNotIsInstance(tokens[2], Literal)
+        self.assertEqual(_free_mark("a \U000F0000 \U000F0001"), "\U000F0002")
+
+    def test_a_command_holding_every_mark_is_read_unmarked(self):
+        every = "".join(chr(p) for p in range(0xF0000, 0xFFFFE))
+        self.assertIsNone(_free_mark(every))
 
     def test_an_unterminated_quote_is_still_skipped(self):
         self.assertTrue(analyse([bash("find . \\( -name 'x")]).bash[0].skipped)
+
+    def test_a_command_that_does_not_tokenize_is_skipped_with_an_escaped_operator(self):
+        for command in ("find . \\( -name x \\", "echo \\| $(date", "echo \\; `date"):
+            with self.subTest(command=command):
+                parsed = analyse([bash(command)]).bash[0]
+                self.assertTrue(parsed.skipped)
+                self.assertEqual(parsed.pipelines, [])
+                self.assertIsNone(tokenize(command, strict=True))
 
 
 class DetectorTests(unittest.TestCase):
