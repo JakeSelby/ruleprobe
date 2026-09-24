@@ -729,19 +729,6 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-B004",
-      "github_number": 87,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
-      "title": "fix(readers): count a copied Claude Code session once",
-      "type": "bug",
-      "native_type": "Bug",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
-      "parent_bmad_id": null,
-      "parent_github_number": null,
-      "lifecycle": "active",
-      "provenance": "authored"
-    },
-    {
       "bmad_id": "RP-B006",
       "github_number": 91,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
@@ -749,6 +736,19 @@
       "type": "bug",
       "native_type": "Bug",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B004",
+      "github_number": 87,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
+      "title": "fix(readers): count a copied Claude Code session once",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
@@ -764,7 +764,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B007.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "completed",
+      "lifecycle": "active",
       "provenance": "authored"
     }
   ]

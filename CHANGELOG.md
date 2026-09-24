@@ -173,6 +173,12 @@ the policy.
   from read failures on stderr, and `report --json` lists them under a new `copies` key while
   `read_errors` keeps failures only. `ruleprobe corpus` still reads each labelled file as its own
   session, since labels name files.
+- The shared shell parse reads a quoted or escaped operator as a word, as a shell does: `find . \(
+  -name '*.bak' \) | head` is one `find` piped into `head`, where it split into three segments and
+  counted as an unfiltered find ([#98](https://github.com/JakeSelby/ruleprobe/issues/98)). The same
+  holds for `\;`, `\|`, `\&`, `\<`, `\>` and quoted forms, so `pipelines()` keeps
+  `find . -exec cat {} \;` as one segment; a quoted or escaped reserved word stays a command word,
+  and `normalise` keeps the `cd` in `cd a\&& ls`. An unquoted operator still splits.
 
 ## 0.1.0 (2026-09-22)
 
