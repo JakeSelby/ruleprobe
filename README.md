@@ -391,10 +391,10 @@ events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_co
   subagent calls; each subagent's own session is read as a session of its own, with the id
   `<parent session id>/<its own id>`.
 - Turns are not recorded. One starts at each user record that is not only tool responses.
-- A write or edit the user changed before accepting it is read as the model proposed it,
-  from `ai_proposed_content`, so a detector never counts the user's text as the agent's.
-  When no proposal is recorded the call keeps its native name and no detector reads it; an
-  edit read from its proposal carries no `old_string`, since Gemini records the file there.
+- Edits the user made before accepting a write or an edit are not measured as writes. The
+  call keeps its native name, `write_file` or `replace`, and its input drops `content`,
+  `new_string`, `old_string` and `ai_proposed_content`, which may hold the user's text rather
+  than the agent's. Its `file_path` and `modified_by_user` stay.
 
 Every other shipped and catalog detector is scored on labelled Gemini sessions under a
 POSIX root, near-misses included. A session under a Windows root checks that the shell

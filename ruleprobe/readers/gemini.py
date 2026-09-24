@@ -29,9 +29,9 @@ What is read differently from the transcript, and why:
 - `write_file` is `Write` and `replace` is `Edit`: their keys are Claude Code's. A relative
   `file_path` is resolved against a POSIX `.project_root` unless it climbs out of it. `invoke_agent` stays native until its
   arguments are checked against `Agent`'s, and every other tool keeps its native name.
-- A write or edit the user changed before accepting it, `modified_by_user`, is read as the
-  model proposed it, from `ai_proposed_content`, and keeps its native name when no proposal
-  is recorded: the user's text is never counted as the agent's.
+- A write or edit the user changed before accepting it is not measured as a write. Its args
+  hold the user's version, and `ai_proposed_content` may hold an earlier edit of the user's
+  rather than the model's proposal, so the call keeps its native name and loses its text.
 
 A subagent writes its own file under `chats/<parent session id>/`, read as its own session
 with the id `<parent session id>/<its own session id>`, so it stays unique even when the file
@@ -49,6 +49,8 @@ from ..events import Session, result_text
 ROOT = os.path.join("~", ".gemini", "tmp")
 
 _TOOL_NAMES = {"write_file": "Write", "replace": "Edit"}
+#: The args of a write or edit that may hold text the user typed.
+_TEXT_ARGS = ("content", "new_string", "old_string", "ai_proposed_content")
 _SHELL = "run_shell_command"
 _WINDOWS = re.compile(r"[A-Za-z]:|\\\\")
 _MESSAGE_TYPES = frozenset(("user", "gemini", "info", "error", "warning"))
@@ -236,13 +238,15 @@ def _call(call, turn, posix, project_root):
     use_id = call.get("id") if isinstance(call.get("id"), str) else ""
     arguments = call.get("args")
     arguments = arguments if isinstance(arguments, dict) else {}
+    edited = native in _TOOL_NAMES and _user_edited(arguments)
     if native == _SHELL and posix:
         name = "Bash"
+    elif edited:
+        name = native
+        arguments = dict((k, v) for k, v in arguments.items() if k not in _TEXT_ARGS)
     else:
         name = _TOOL_NAMES.get(native, native)
-    if name in ("Write", "Edit") and arguments.get("modified_by_user"):
-        name, arguments = _proposal(native, name, arguments)
-    if name in ("Write", "Edit") and posix:
+    if (name in ("Write", "Edit") or edited) and posix:
         file_path = arguments.get("file_path")
         if isinstance(file_path, str) and file_path and not file_path.startswith("/"):
             arguments = dict(arguments, file_path=_resolve(project_root, file_path))
@@ -255,21 +259,10 @@ def _call(call, turn, posix, project_root):
     return out
 
 
-def _proposal(native, name, arguments):
-    """The model's own call when the user edited it before accepting: the recorded args are
-    the user's version, and `ai_proposed_content` is what the model proposed - a
-    `write_file`'s whole `content`, a `replace`'s `new_string`. A `replace` the user edited
-    records the file as it stood in `old_string`, not the model's, so that key is dropped.
-    With no proposal recorded the call keeps its native name, so no detector reads the
-    user's text as the agent's."""
-    proposed = arguments.get("ai_proposed_content")
-    if not isinstance(proposed, str):
-        return native, arguments
-    if name == "Write":
-        return name, dict(arguments, content=proposed)
-    edited = dict(arguments, new_string=proposed)
-    edited.pop("old_string", None)
-    return name, edited
+def _user_edited(arguments):
+    """Whether the user changed a write or edit before accepting it: the flag holds any true
+    value, or a proposal was kept beside the user's version."""
+    return bool(arguments.get("modified_by_user")) or "ai_proposed_content" in arguments
 
 
 def _parts(content):
