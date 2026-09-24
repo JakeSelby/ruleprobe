@@ -246,7 +246,7 @@ sessions:
         note: the word compacted in a tool result
 
   - session: gemini-writes.jsonl
-    note: a Gemini CLI session - credentials written through write_file and replace, a model changed per record, and a shell call with no project root to place it
+    note: a Gemini CLI session - credentials written through write_file and replace, a model the router may have changed, and a shell call with no project root to place it
     labels:
       - at: "1:-"
         near: [cache-hygiene/model-switch]
@@ -258,8 +258,8 @@ sessions:
         fire: [secrets/secret-in-write]
         note: the secret half through replace, read as Edit
       - at: "2:-"
-        fire: [cache-hygiene/model-switch]
-        note: down to the lighter model, after a tool response record that is not a turn
+        near: [cache-hygiene/model-switch]
+        note: down to the lighter model, which Gemini's router or fallback may have chosen, so the reader records no model
       - at: "2:tu-w3"
         near: [secrets/secret-in-write]
         note: a settings file with no credential in it, at a relative path
@@ -273,8 +273,8 @@ sessions:
         near: [secrets/secret-in-write]
         note: an edit that raises a timeout
       - at: "4:-"
-        fire: [cache-hygiene/model-switch]
-        note: back up to the bigger model
+        near: [cache-hygiene/model-switch]
+        note: back up to the bigger model, not counted for the same reason
       - at: "4:tu-w5"
         fire: [secrets/secret-in-write]
         note: a private key header, beside a $set rewrite whose write is not read

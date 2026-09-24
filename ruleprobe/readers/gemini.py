@@ -20,14 +20,19 @@ What is read differently from the transcript, and why:
   ran, so they are kept.
 - `$set.messages` is ignored. Compaction writes it, but so do truncation, tool-output masking
   and rollback, with no marker telling them apart, so this reader emits no `compact` event.
-- `run_shell_command` is `Bash` only when the session's `.project_root` is a POSIX path. On
-  Windows its `command` is PowerShell, which can tokenise as Bash, and with no root the
-  platform is not known; both keep the native name and are measured by no `Bash` detector.
+- `run_shell_command` is `Bash` only when `.project_root`, in the project directory above
+  `chats/`, holds a POSIX path. On Windows its `command` is PowerShell, which can tokenise as
+  Bash, and with no root the platform is not known; every root that is not POSIX - a drive
+  letter, a UNC path, none - keeps the native name, measured by no `Bash` detector.
+- No event carries a `model`: Gemini's router and quota fallback change it without anyone
+  choosing to, so `model` is the empty string and `cache-hygiene/model-switch` counts nothing.
 - `write_file` is `Write` and `replace` is `Edit`: their keys are Claude Code's. A relative
-  `file_path` is resolved against a POSIX `.project_root`. `invoke_agent` stays native until its
+  `file_path` is resolved against a POSIX `.project_root` unless it climbs out of it. `invoke_agent` stays native until its
   arguments are checked against `Agent`'s, and every other tool keeps its native name.
 
-A subagent writes its own file under `chats/<parent session id>/`, read as its own session.
+A subagent writes its own file under `chats/<parent session id>/`, read as its own session
+with the id `<parent session id>/<its own session id>`, so it stays unique even when the file
+repeats its parent's id.
 """
 import json
 import ntpath
@@ -43,15 +48,20 @@ ROOT = os.path.join("~", ".gemini", "tmp")
 _TOOL_NAMES = {"write_file": "Write", "replace": "Edit"}
 _SHELL = "run_shell_command"
 _WINDOWS = re.compile(r"[A-Za-z]:|\\\\")
+_MESSAGE_TYPES = frozenset(("user", "gemini", "info", "error", "warning"))
 
 
 def transcripts(root=None):
-    """Every Gemini CLI session under `root`: the files under a `chats` directory, with a
-    legacy `.json` left out when its `.jsonl` is beside it."""
+    """Every Gemini CLI session under `root`: the files below a `chats` directory at or under
+    `root` - one above it does not count - with a legacy `session-*.json` left out when its
+    `.jsonl` is beside it."""
     base = os.path.expanduser(root or ROOT)
+    top = os.path.basename(os.path.normpath(base))
     found = []
     for directory, _dirs, files in os.walk(base, followlinks=True):
-        if "chats" not in directory.replace("\\", "/").split("/"):
+        relative = os.path.relpath(directory, base)
+        parts = [top] + ([] if relative == os.curdir else relative.split(os.sep))
+        if "chats" not in parts:
             continue
         names = set(files)
         for name in files:
@@ -59,6 +69,19 @@ def transcripts(root=None):
                                            and name + "l" not in names):
                 found.append(os.path.join(directory, name))
     return sorted(found)
+
+
+def recognises(entry):
+    """Whether a parsed first line is Gemini's: the metadata line, a message record, or an
+    update or rewind record. No Claude Code or Codex line has any of these shapes."""
+    if not isinstance(entry, dict) or "message" in entry or "payload" in entry:
+        return False
+    if isinstance(entry.get("sessionId"), str) and isinstance(entry.get("projectHash"), str):
+        return True
+    if (isinstance(entry.get("id"), str) and entry.get("type") in _MESSAGE_TYPES
+            and "content" in entry):
+        return True
+    return isinstance(entry.get("$set"), dict) or isinstance(entry.get("$rewindTo"), str)
 
 
 def read(path):
@@ -107,17 +130,19 @@ def read(path):
                 if isinstance(record.get(key), str):
                     stamps.append(record[key])
             # A legacy file is the metadata and every message in one object.
-            for message in record.get("messages") or []:
+            listed = record.get("messages")
+            for message in listed if isinstance(listed, list) else []:
                 if isinstance(message, dict) and isinstance(message.get("id"), str):
                     _keep(messages, message)
-    project_root = _project_root(path)
+    chats, nested = _chats(path)
+    project_root = _project_root(chats)
     events = _events(list(messages.values()), project_root)
     stamps.extend(m["timestamp"] for m in messages.values()
                   if isinstance(m.get("timestamp"), str) and m["timestamp"])
     if not session_id and not events:
         return None
-    name = os.path.basename(path)
-    return Session(id=session_id or name[:name.rindex(".")],
+    own = session_id or os.path.splitext(os.path.basename(path))[0]
+    return Session(id="/".join(nested + [own]),
                    repo=_basename(project_root),
                    runtime="gemini", events=events, path=path,
                    started=min(stamps) if stamps else "",
@@ -145,17 +170,14 @@ def _events(messages, project_root):
             if pending_final is not None:
                 pending_final["final"] = True
                 pending_final = None
-            shown = message.get("displayContent")
-            events.append({"kind": "user_prompt", "turn": turn,
-                           "text": _text(shown if shown is not None
-                                         else message.get("content"))})
+            text = _text(message.get("displayContent")) or _text(message.get("content"))
+            events.append({"kind": "user_prompt", "turn": turn, "text": text})
         elif kind == "gemini":
-            model = message.get("model")
-            model = model if isinstance(model, str) else ""
             text = _text(message.get("content"))
             if text.strip():
+                # The model is left out on purpose: see the module docstring.
                 pending_final = {"kind": "assistant_text", "turn": turn, "text": text,
-                                 "final": False, "model": model}
+                                 "final": False, "model": ""}
                 events.append(pending_final)
             calls = message.get("toolCalls")
             for call in calls if isinstance(calls, list) else []:
@@ -171,19 +193,19 @@ def _call(call, turn, posix, project_root):
     native = call.get("name") if isinstance(call.get("name"), str) else ""
     use_id = call.get("id") if isinstance(call.get("id"), str) else ""
     arguments = call.get("args")
+    arguments = arguments if isinstance(arguments, dict) else {}
     if native == _SHELL and posix:
         name = "Bash"
     else:
         name = _TOOL_NAMES.get(native, native)
-    if name in ("Write", "Edit") and isinstance(arguments, dict) and posix:
+    if name in ("Write", "Edit") and posix:
         file_path = arguments.get("file_path")
         if isinstance(file_path, str) and file_path and not file_path.startswith("/"):
-            arguments = dict(arguments,
-                             file_path=posixpath.normpath(posixpath.join(project_root,
-                                                                         file_path)))
+            arguments = dict(arguments, file_path=_resolve(project_root, file_path))
     out = [{"kind": "tool_use", "turn": turn, "id": use_id, "name": name,
             "input": arguments}]
-    if call.get("result") is not None:
+    # An empty result, `[]` or `{}`, answers nothing, so it makes no event.
+    if call.get("result"):
         out.append({"kind": "tool_result", "turn": turn, "tool_use_id": use_id,
                     "tool_name": name, "text": result_text(_result(call["result"]), name)})
     return out
@@ -227,20 +249,40 @@ def _result(content):
     return "\n".join(out)
 
 
-def _project_root(path):
-    """The absolute project root from `.project_root` in the project directory above the
-    `chats` directory `path` sits under, or the empty string."""
+def _resolve(project_root, file_path):
+    """`file_path` joined to the POSIX `project_root`, or as written when `..` climbs out."""
+    root = project_root.rstrip("/") or "/"
+    joined = posixpath.normpath(posixpath.join(root, file_path))
+    inside = joined == root or joined.startswith(root.rstrip("/") + "/")
+    return joined if inside else file_path
+
+
+def _chats(path):
+    """The `chats` directory `path` sits under, at any depth, and the directory names between
+    it and the file - a subagent's parent session id - or `("", [])` when there is none."""
     directory = os.path.dirname(os.path.abspath(path))
-    for _ in range(2):
+    nested = []
+    while True:
         if os.path.basename(directory) == "chats":
-            try:
-                with open(os.path.join(os.path.dirname(directory), ".project_root"),
-                          encoding="utf-8", errors="replace") as handle:
-                    return handle.read().strip()
-            except OSError:
-                return ""
-        directory = os.path.dirname(directory)
-    return ""
+            return directory, nested
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            return "", []
+        nested.insert(0, os.path.basename(directory))
+        directory = parent
+
+
+def _project_root(chats):
+    """The absolute project root from `.project_root` in the project directory holding
+    `chats`, or the empty string."""
+    if not chats:
+        return ""
+    try:
+        with open(os.path.join(os.path.dirname(chats), ".project_root"),
+                  encoding="utf-8", errors="replace") as handle:
+            return handle.read().strip()
+    except OSError:
+        return ""
 
 
 def _basename(root):

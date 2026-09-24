@@ -374,17 +374,21 @@ under-count: a missed hit is a quieter report, a false hit is a wrong one.
 
 **Gemini CLI records less, so it is measured less.** Its sessions are read into the same
 events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_command` as
-`Bash`, and four gaps under-count on it rather than guess:
+`Bash`, and five gaps under-count on it rather than guess:
 
 - A context compaction is not told apart from truncation, tool-output masking and rollback,
   which rewrite the history the same way, so `cache-hygiene/compact` never fires on Gemini.
-- The platform is not recorded. A shell call is `Bash` only when the project root Gemini
-  keeps beside the session is a POSIX path; on Windows the command is PowerShell, and with no
-  root the platform is unknown, so both keep the native name and no `Bash` detector reads them.
+- The platform is not recorded. A shell call is `Bash` only when `.project_root`, in the
+  project directory above `chats/`, holds a POSIX path. Every other root keeps the native
+  name, so no `Bash` detector reads it: a drive letter or a UNC path, where the command is
+  PowerShell, and a missing root, where the platform is unknown.
+- The model changes by Gemini's router and quota fallback as well as by choice, and the
+  transcript does not say which, so a Gemini event's model is left empty and
+  `cache-hygiene/model-switch` never fires on Gemini.
 - `invoke_agent` keeps its native name, so a detector on `Agent` does not see Gemini's
-  subagent calls; each subagent's own session is read as a session of its own.
-- Turns are not recorded. One starts at each user record that is not only tool responses,
-  and a model change on a record with no text of its own is not seen.
+  subagent calls; each subagent's own session is read as a session of its own, with the id
+  `<parent session id>/<its own id>`.
+- Turns are not recorded. One starts at each user record that is not only tool responses.
 
 Gemini deletes sessions older than 30 days by default, so a longer `--since` finds fewer.
 
@@ -455,7 +459,7 @@ ruleprobe corpus
 detector                                pos  neg   tp   fp   fn   prec  recall     f1  note
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
-cache-hygiene/model-switch                7   13    7    0    0   1.00    1.00   1.00
+cache-hygiene/model-switch                5   15    5    0    0   1.00    1.00   1.00
 commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
 git-safety/force-push-default             7    7    7    0    0   1.00    1.00   1.00
 package-manager/pip-install               4    4    4    0    0   1.00    1.00   1.00
@@ -466,7 +470,7 @@ transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00  
 transcript-hygiene/whole-file-cat         5    7    5    0    0   1.00    1.00   1.00
 verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    61   78   61    0    0   1.00    1.00   1.00  floor 0.90
+total                                    59   80   59    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors are scored over the corpus, and each catalog entry by its own

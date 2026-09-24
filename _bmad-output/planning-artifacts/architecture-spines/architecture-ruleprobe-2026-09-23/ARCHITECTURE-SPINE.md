@@ -7,7 +7,7 @@ paradigm: 'pipes-and-filters, batch per session: readers -> event list -> one sh
 scope: 'The ruleprobe package: readers, event schema, shell parse, registry, matchers, declarative format, rule binding, report, validity and CLI. 0.1.0 as built, and the v0.2.0 PRD.'
 status: final
 created: '2026-09-23'
-updated: '2026-09-23'
+updated: '2026-09-24'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, agent-harness AD-13, agent-harness AD-21]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/prd.md

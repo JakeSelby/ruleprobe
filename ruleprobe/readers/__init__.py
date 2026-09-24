@@ -38,8 +38,8 @@ def _detect(path):
     """The reader for `path`, from its first line.
 
     A Codex rollout opens with a line whose `type` is `session_meta`, and a Gemini CLI
-    session with a metadata line carrying `sessionId` and `projectHash`, which no Claude Code
-    line carries; anything else is Claude Code. The line is parsed rather than searched,
+    session with a line `gemini.recognises`, which no Claude Code line matches; anything else
+    is Claude Code. The line is parsed rather than searched,
     because a user prompt that quotes `"session_meta"` - a transcript of somebody working on
     this package, say - would otherwise be handed to the Codex reader and silently read as
     nothing.
@@ -55,8 +55,7 @@ def _detect(path):
         entry = None
     if isinstance(entry, dict) and entry.get("type") == "session_meta":
         return codex
-    if (isinstance(entry, dict) and isinstance(entry.get("sessionId"), str)
-            and isinstance(entry.get("projectHash"), str)):
+    if gemini.recognises(entry):
         return gemini
     return claude_code
 
@@ -122,11 +121,18 @@ def _paths(root, runtime):
     out = []
     if root is not None:
         base = os.path.expanduser(root)
+        if runtime == "gemini":
+            return [(path, gemini) for path in gemini.transcripts(base)]
         for path in _walk(base):
             reader = _detect(path) if runtime == "auto" else RUNTIMES[runtime]
             if reader is not None and path not in seen:
                 seen.add(path)
                 out.append((path, reader))
+        if runtime == "auto":
+            # A legacy Gemini `session-*.json` ends in no `.jsonl`, so `_walk` never sees it.
+            out.extend((path, gemini) for path in gemini.transcripts(base)
+                       if path.endswith(".json"))
+            out.sort(key=lambda pair: pair[0])
         return out
     names = [runtime] if runtime != "auto" else sorted(RUNTIMES)
     for name in names:
