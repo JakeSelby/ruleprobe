@@ -3,7 +3,7 @@
 
     python3 scripts/reference_volume.py OUT [--sessions 500] [--megabytes 200] [--seed 50]
                                             [--anchor YYYY-MM-DD] [--subagent-share 0.15]
-                                            [--recent-share 0.85]
+                                            [--recent-share 0.85] [--short-outputs]
 
 The volume is `OUT/<project>/<session>.jsonl`, with a share of the transcripts written as
 subagent files, `OUT/<project>/<parent session>/subagents/agent-<id>.jsonl`, the layout newer
@@ -11,12 +11,16 @@ Claude Code writes. `--sessions` counts every transcript file, parents and subag
 because the reader reads each as one session. Lines are Claude Code's native JSONL shape, so the
 real reader reads them: mostly Bash calls, then reads, edits, writes and searches, a few long
 tool outputs, repeated lines for one streamed response, and the odd compaction boundary.
+`--short-outputs` drops the long outputs, so the same bytes hold several times as many lines: the
+dense variant, for timing how the report scales with lines rather than bytes.
 
 Every word is generated. No transcript content, home path or personal name enters the volume.
 
-The output is a function of the arguments alone: the same seed, anchor and sizes write the same
-bytes. `--anchor` is the day the newest session ends, and defaults to today so that `--since 30`
-keeps about `--recent-share` of the sessions; pass it explicitly to reproduce a volume.
+On one Python version the output is a function of the arguments alone: the same seed, anchor and
+options write the same bytes. `random` promises a stable stream only for `random()` itself, so
+another version may write another volume of the same shape. `--anchor` is the day the newest
+session ends, and no timestamp runs past it; it defaults to today so that `--since 30` keeps about
+`--recent-share` of the sessions. Pass it explicitly to reproduce a volume.
 
 Repository tooling, never imported by the package; standard library only.
 """
@@ -56,8 +60,9 @@ MODELS = ("model-large", "model-medium", "model-small")
 class _Gen(object):
     """One volume's random stream and the sentences it builds."""
 
-    def __init__(self, seed):
+    def __init__(self, seed, short_outputs=False):
         self.rng = random.Random(seed)
+        self.short_outputs = short_outputs
 
     def words(self, count):
         return " ".join(self.rng.choice(WORDS) for _ in range(count))
@@ -99,15 +104,19 @@ class _Gen(object):
         return name, {"pattern": "**/*.py"}
 
     def output(self, room):
-        """A tool result's text: mostly short, a few long logs, none much over `room` bytes."""
+        """A tool result's text: mostly short, a few long logs, and with `short_outputs` only
+        short ones. A line is at most about 128 bytes once written as JSON, so the text stays
+        within `room` bytes, bar the one line every output has."""
         roll = self.rng.random()
-        if roll < 0.04:
+        if self.short_outputs:
+            lines = self.rng.randint(1, 20)
+        elif roll < 0.04:
             lines = self.rng.randint(800, 4000)
         elif roll < 0.25:
             lines = self.rng.randint(40, 300)
         else:
             lines = self.rng.randint(1, 20)
-        lines = max(1, min(lines, room // 50))
+        lines = max(1, min(lines, room // 128))
         return "\n".join("%4d  %s" % (n, self.words(self.rng.randint(3, 12)))
                          for n in range(1, lines + 1))
 
@@ -116,8 +125,9 @@ def _stamp(moment):
     return moment.strftime("%Y-%m-%dT%H:%M:%S.") + "%03dZ" % (moment.microsecond // 1000)
 
 
-def _session_lines(gen, budget, session_id, cwd, start, agent_id=""):
-    """Lines of one transcript, until about `budget` bytes are written."""
+def _session_lines(gen, budget, session_id, cwd, start, cap, agent_id=""):
+    """Lines of one transcript, until about `budget` bytes are written, none stamped after
+    `cap`."""
     clock = [start]
     model = gen.rng.choice(MODELS)
     base = {"sessionId": session_id, "cwd": cwd, "gitBranch": "main", "version": "2.0.0"}
@@ -130,7 +140,8 @@ def _session_lines(gen, budget, session_id, cwd, start, agent_id=""):
     lines = []
 
     def emit(kind, message=None, **extra):
-        clock[0] += datetime.timedelta(milliseconds=gen.rng.randint(200, 40000))
+        clock[0] = min(cap, clock[0] + datetime.timedelta(
+            milliseconds=gen.rng.randint(200, 40000)))
         entry = {"parentUuid": parent[0], "type": kind}
         entry.update(base)
         entry["uuid"] = str(uuid.UUID(int=gen.rng.getrandbits(128), version=4))
@@ -173,19 +184,27 @@ def _session_lines(gen, budget, session_id, cwd, start, agent_id=""):
             return lines
 
 
+def _split(sessions, subagent_share):
+    """`(parents, subagents)`, raising ValueError when no parent session would be left."""
+    if not 0 <= subagent_share < 1:
+        raise ValueError("--subagent-share must be at least 0 and below 1")
+    subagents = int(round(sessions * subagent_share))
+    if sessions - subagents < 1:
+        raise ValueError("--sessions and --subagent-share leave no parent session")
+    return sessions - subagents, subagents
+
+
 def generate(out, sessions=500, megabytes=200.0, seed=50, anchor=None, subagent_share=0.15,
-             recent_share=0.85):
+             recent_share=0.85, short_outputs=False):
     """Write the volume under `out` and return `(files, bytes)` written."""
     anchor = anchor or datetime.date.today()
-    gen = _Gen(seed)
-    subagents = int(round(sessions * subagent_share))
-    parents = sessions - subagents
-    if parents < 1:
-        raise ValueError("at least one parent session is needed")
+    parents, _subagents = _split(sessions, subagent_share)
+    gen = _Gen(seed, short_outputs)
     weights = [gen.rng.lognormvariate(0, 0.9) for _ in range(sessions)]
     scale = megabytes * 1024 * 1024 / sum(weights)
     budgets = [max(2000, int(w * scale)) for w in weights]
     end = datetime.datetime(anchor.year, anchor.month, anchor.day, 18, 0, 0)
+    cap = datetime.datetime(anchor.year, anchor.month, anchor.day, 23, 59, 59, 999000)
     records = []
     for index in range(parents):
         if gen.rng.random() < recent_share:
@@ -211,7 +230,7 @@ def generate(out, sessions=500, megabytes=200.0, seed=50, anchor=None, subagent_
                                 "agent-%s.jsonl" % agent_id)
             start += datetime.timedelta(minutes=gen.rng.randint(1, 30))
         lines = _session_lines(gen, budgets[index], session_id, "/work/" + project, start,
-                               agent_id)
+                               cap, agent_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as handle:
             handle.writelines(lines)
@@ -237,11 +256,21 @@ def main(argv=None):
                         help="day the newest session ends (default: today)")
     parser.add_argument("--subagent-share", type=float, default=0.15)
     parser.add_argument("--recent-share", type=float, default=0.85)
+    parser.add_argument("--short-outputs", action="store_true",
+                        help="short tool outputs only: the dense variant")
     args = parser.parse_args(argv)
+    if os.path.exists(args.out) and not os.path.isdir(args.out):
+        parser.error("%s exists and is not a directory" % args.out)
     if os.path.isdir(args.out) and os.listdir(args.out):
         parser.error("%s is not empty" % args.out)
+    if args.sessions < 1 or args.megabytes <= 0:
+        parser.error("--sessions and --megabytes must be positive")
+    try:
+        _split(args.sessions, args.subagent_share)
+    except ValueError as exc:
+        parser.error(str(exc))
     files, total = generate(args.out, args.sessions, args.megabytes, args.seed, args.anchor,
-                            args.subagent_share, args.recent_share)
+                            args.subagent_share, args.recent_share, args.short_outputs)
     print("reference volume: %d transcript(s), %.1f MB at %s"
           % (files, total / 1024.0 / 1024.0, args.out))
     return 0

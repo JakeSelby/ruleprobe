@@ -91,8 +91,9 @@ contract are in `docs/bmad-governance.md`, which every BMad workflow loads.
   matchers, rules binding, report, and the shipped detectors and corpus as package data.
 - `tests/` — the suite. The five `test_*` files for `scripts/` stay out of the sdist.
 - `docs/` — the worked example and the repository's process docs.
-- `scripts/` — repository tooling: the BMad issue map, the release preflight and notes, and the
-  `stable` branch. Never imported by the package.
+- `scripts/` — repository tooling: the BMad issue map, the release preflight and notes, the
+  `stable` branch, and the reference-volume generator for timing `report`. Never imported by the
+  package.
 - `_bmad/custom/`, `_bmad-output/` — BMad configuration and the public planning corpus.
 
 ## `AGENTS.md` and `CLAUDE.md` are one file
