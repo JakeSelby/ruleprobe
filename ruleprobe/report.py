@@ -22,6 +22,7 @@ every count and denominator and counted apart, as a row with no `rules` map is: 
 not mean what this release's hits mean.
 """
 from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, run
+from .shell import analyse
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -40,10 +41,64 @@ def _validity_note(scores, detector_id):
     return validity_note(scores, detector_id)
 
 
+def _tally(triples):
+    """`{"opportunities", "followed", "undecided"}` from one `opportunities` result.
+
+    An undecided triple counts in `undecided` alone, never as an opportunity not followed.
+    Anything but an iterable of `(turn, tool_use_id, followed)` triples with `followed`
+    exactly `True`, `False` or `None` raises `TypeError`: a malformed result is the
+    detector's error, never a guess at what it meant.
+    """
+    if triples is None or isinstance(triples, (str, bytes, dict)):
+        raise TypeError("opportunities returned %s, not a list of triples"
+                        % type(triples).__name__)
+    tally = {"opportunities": 0, "followed": 0, "undecided": 0}
+    for triple in triples:
+        if not isinstance(triple, (tuple, list)) or len(triple) != 3:
+            raise TypeError("not a (turn, tool_use_id, followed) triple: %r" % (triple,))
+        followed = triple[2]
+        if followed is None:
+            tally["undecided"] += 1
+        elif followed is True or followed is False:
+            tally["opportunities"] += 1
+            tally["followed"] += followed
+        else:
+            raise TypeError("followed is %r, not True, False or None" % (followed,))
+    return tally
+
+
+def _compliance(events, stances, registry, errors):
+    """`{detector_id: tally}` for every enabled detector that defines `opportunities`, or
+    `None` when there is no such detector. Isolated as `run()` isolates `fn`: a raise or a
+    malformed result is appended to `errors` against that detector, which gets no entry."""
+    defining = [d for d in sorted(registry, key=lambda d: d.id)
+                if getattr(d, "opportunities", None) is not None and d.enabled(stances)]
+    if not defining:
+        return None
+    try:
+        ctx = analyse(events)
+    except Exception:  # pragma: no cover - run() has recorded it already
+        return None
+    out = {}
+    for detector in defining:
+        try:
+            out[detector.id] = _tally(detector.opportunities(ctx.events, ctx))
+        except Exception as exc:
+            errors.append({"detector": detector.id, "error": type(exc).__name__})
+    return out
+
+
 def measure(session, stances=None, registry=DEFAULT):
-    """One report row from one `Session`: its identity and its hit counts."""
+    """One report row from one `Session`: its identity, its hit counts and its compliance.
+
+    `compliance` maps each enabled detector that defines `opportunities` to
+    `{"opportunities": N, "followed": M, "undecided": U}`, where `N` leaves the undecided
+    out. The key is absent when no enabled detector defines one. `opportunities` is called
+    here rather than in `run()`, so `run()` and its return keep their shape.
+    """
     errors = []
     hits = run(session.events, stances, registry=registry, errors=errors)
+    compliance = _compliance(session.events, stances, registry, errors)
     row = {
         "schema_version": SCHEMA_VERSION,
         "session_id": session.id,
@@ -54,6 +109,8 @@ def measure(session, stances=None, registry=DEFAULT):
         "stances": dict(stances or {}),
         "rules": dict((did, len(found)) for did, found in hits.items()),
     }
+    if compliance is not None:
+        row["compliance"] = compliance
     if errors:
         row["rules_errors"] = errors
     return row
