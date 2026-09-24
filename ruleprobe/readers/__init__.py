@@ -10,11 +10,11 @@ import datetime
 import json
 import os
 
-from . import claude_code, codex
+from . import claude_code, codex, gemini
 
-RUNTIMES = {"claude-code": claude_code, "codex": codex}
+RUNTIMES = {"claude-code": claude_code, "codex": codex, "gemini": gemini}
 
-__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex"]
+__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex", "gemini"]
 
 
 def _since_stamp(since):
@@ -37,10 +37,12 @@ def _since_stamp(since):
 def _detect(path):
     """The reader for `path`, from its first line.
 
-    A Codex rollout opens with a line whose `type` is `session_meta`; a Claude Code
-    transcript does not. The line is parsed rather than searched, because a user prompt that
-    quotes `"session_meta"` - a transcript of somebody working on this package, say - would
-    otherwise be handed to the Codex reader and silently read as nothing.
+    A Codex rollout opens with a line whose `type` is `session_meta`, and a Gemini CLI
+    session with a metadata line carrying `sessionId` and `projectHash`, which no Claude Code
+    line carries; anything else is Claude Code. The line is parsed rather than searched,
+    because a user prompt that quotes `"session_meta"` - a transcript of somebody working on
+    this package, say - would otherwise be handed to the Codex reader and silently read as
+    nothing.
     """
     try:
         with open(path, encoding="utf-8", errors="replace") as handle:
@@ -53,6 +55,9 @@ def _detect(path):
         entry = None
     if isinstance(entry, dict) and entry.get("type") == "session_meta":
         return codex
+    if (isinstance(entry, dict) and isinstance(entry.get("sessionId"), str)
+            and isinstance(entry.get("projectHash"), str)):
+        return gemini
     return claude_code
 
 
@@ -60,10 +65,10 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
     """Every session under `root`, in path order.
 
     - `root` - a directory to walk. `None` reads each selected runtime's own default
-      location: `~/.claude/projects` and `~/.codex/sessions`.
-    - `runtime` - `"auto"`, `"claude-code"` or `"codex"`. `"auto"` reads both default
-      locations and decides each file by its first line, so a directory holding both kinds
-      is read correctly.
+      location: `~/.claude/projects`, `~/.codex/sessions` and `~/.gemini/tmp`.
+    - `runtime` - `"auto"`, `"claude-code"`, `"codex"` or `"gemini"`. `"auto"` reads every
+      default location and decides each file by its first line, so a directory holding
+      several kinds is read correctly.
     - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.

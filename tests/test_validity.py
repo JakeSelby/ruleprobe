@@ -410,9 +410,9 @@ class ShippedCorpusTests(unittest.TestCase):
     def test_every_shipped_detector_is_over_the_floor(self):
         self.assertEqual(below_floor(self.scores, DEFAULT_FLOOR), [])
 
-    def test_both_transcript_shapes_are_in_the_corpus(self):
+    def test_every_transcript_shape_is_in_the_corpus(self):
         runtimes = set(labelled.session.runtime for labelled in self.corpus)
-        self.assertEqual(runtimes, set(["claude-code", "codex"]))
+        self.assertEqual(runtimes, set(["claude-code", "codex", "gemini"]))
 
     def test_the_corpus_carries_no_home_path_and_no_person(self):
         """Synthetic means synthetic: a corpus with a real path in it is a leak, and a

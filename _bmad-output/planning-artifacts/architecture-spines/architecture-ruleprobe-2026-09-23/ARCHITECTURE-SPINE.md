@@ -130,6 +130,9 @@ requires; `rules`, which already imports `matchers`, compiles the entries, so th
 `detectors.catalog --> matchers` edge is dropped; `cli` lists catalog entries through
 `rules.catalog_detectors()`, over its existing `cli --> rules` edge (#49)
 
+Amended 2026-09-24: `readers.gemini` joins as the third module under `readers`, importing
+`events` only, so the `readers --> events` edge covers it and the graph is unchanged (#55)
+
 ### AD-2: The event schema is the one contract between readers and detectors [ADOPTED]
 
 - **Binds:** FR-1, FR-2, FR-3, FR-4, FR-32; every detector and matcher.
@@ -165,6 +168,11 @@ requires; `rules`, which already imports `matchers`, compiles the entries, so th
     its file tools as exact or native before its reader is built; a native one stays native.
   - [ASSUMPTION: the canonical file-tool list above is what `ruleprobe/detectors/common.py` reads
     today; Gemini CLI's file tools are mapped to it or left native, decided in its story]
+
+Amended 2026-09-24: the Gemini CLI reader maps `write_file` to `Write` and `replace` to `Edit`
+exactly, and `run_shell_command` to `Bash` only when the session's `.project_root` is a POSIX
+path; a Windows or unknown root keeps it native. `invoke_agent` and every other Gemini tool stay
+native (#55)
 
 ### AD-4: Detectors under-count rather than over-count [ADOPTED; negation implemented under #19, ships in v0.2.0]
 
