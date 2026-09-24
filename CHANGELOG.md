@@ -29,7 +29,7 @@ All notable changes to this project are documented here. The format follows
   `rules: 2 measured, 1 dark, 1 unmeasured (50% measured)`, floored so a file with a rule
   unmeasured never shows 100% ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and
   `report --json` now carries the block as a top-level `coverage` key, where it was printed to
-  stderr only. The key counts rule files, not sessions.
+  stderr only. The key counts rules, not sessions.
 - The README declares the public API: every name, call shape and non-name promise a downstream
   tool may pin, each held by a contract test that CI also runs against the built wheel imported
   as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name outside that list is
@@ -40,6 +40,13 @@ All notable changes to this project are documented here. The format follows
   cycle raises `ValueError` when a `Registry` is built or a rename would close one. `report_data`
   and `--json` carry the effective map as `renamed`, and corpus labels fold the same way. A test
   fails when a detector id any release shipped is neither registered nor folded.
+- An unbound rule file with headings now splits into one rule per section, with the id
+  `<path>#<heading-slug>` and an ordinal suffix for a repeated slug, so the coverage block counts
+  rules, not files ([#48](https://github.com/JakeSelby/ruleprobe/issues/48)). A section holding only
+  a heading, a fenced or indented code block, a table, a quote or a comment is not a rule. A file
+  with no heading, a file bound in its front matter, and a headed file with no rule section stay
+  one rule with their 0.1.0 id. The findings line now reads `findings: N (everything else still
+  loaded)`.
 
 ### Added
 
