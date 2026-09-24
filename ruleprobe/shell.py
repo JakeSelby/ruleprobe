@@ -146,6 +146,7 @@ def strip_comment(line):
     sq = dq = False
     i = 0
     n = len(line)
+    escaped = -1  # the index of the last character a backslash made literal
     while i < n:
         c = line[i]
         if sq:
@@ -157,11 +158,12 @@ def strip_comment(line):
                 dq = False
         elif c == "\\":
             i += 1
+            escaped = i
         elif c == "'":
             sq = True
         elif c == '"':
             dq = True
-        elif c == "#" and (i == 0 or line[i - 1] in " \t;|&()"):
+        elif c == "#" and (i == 0 or (line[i - 1] in " \t;|&()" and escaped != i - 1)):
             return line[:i]
         i += 1
     return line
@@ -327,6 +329,74 @@ def _shell_lines(text):
     return out
 
 
+class Literal(str):
+    """A word holding an operator character that was quoted or escaped: `\\(`, `'|'`, `\\;`.
+
+    `shlex` hands back `(` for both `(` and `\\(`, but only the first opens a subshell;
+    `find . \\( -name x \\)` is one command. The type is how the split tells them apart,
+    and a detector comparing words sees an ordinary string.
+    """
+
+    __slots__ = ()
+
+
+# Each shell operator character, as it stands in the text `shlex` reads once it has been
+# quoted or escaped: a private-use character is a word character to `shlex`.
+_OPERATOR_CHARS = "();|&<>"
+_MASK = dict((c, chr(0xE000 + i)) for i, c in enumerate(_OPERATOR_CHARS))
+_UNMASK = dict((ord(m), c) for c, m in _MASK.items())
+
+
+def _mask_literals(text):
+    """`text` with every quoted or escaped operator character replaced by its mask.
+
+    The quoting rules are the ones `shlex` applies in POSIX mode, so the masked text
+    tokenizes into the same words, and no quoted or escaped `(` can come back as an
+    operator. None for text that already holds a mask character, which is read unmasked.
+    """
+    if any(m in text for m in _MASK.values()):
+        return None
+    out = []
+    sq = dq = False
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if sq:
+            sq = c != "'"
+        elif dq and c == "\\" and text[i + 1:i + 2] in ('"', "\\"):
+            out.append(text[i:i + 2])
+            i += 2
+            continue
+        elif dq:
+            dq = c != '"'
+        elif c == "\\" and i + 1 < n:
+            out.append(c + _MASK.get(text[i + 1], text[i + 1]))
+            i += 2
+            continue
+        elif c in "'\"":
+            sq, dq = c == "'", c == '"'
+            out.append(c)
+            i += 1
+            continue
+        out.append(_MASK.get(c, c) if sq or dq else c)
+        i += 1
+    return "".join(out)
+
+
+def _unmask(token):
+    """`token` with its masks restored; a `Literal` when it held any."""
+    restored = token.translate(_UNMASK)
+    return token if restored == token else Literal(restored)
+
+
+def _is_operator(token, operators):
+    return token in operators and not isinstance(token, Literal)
+
+
+def _is_redirect(token):
+    return bool(_REDIRECTS.match(token)) and not isinstance(token, Literal)
+
+
 def tokenize(text, strict=False):
     """Shell tokens for already-heredoc-stripped `text`: substitutions become placeholders,
     comments go, and the newlines that separate commands become `;` — the ones inside a
@@ -346,10 +416,12 @@ def tokenize(text, strict=False):
         text = stripped
     text = " ; ".join(strip_comment(line) for line in _shell_lines(text))
     try:
-        lex = shlex.shlex(text, posix=True, punctuation_chars=True)
+        masked = _mask_literals(text)
+        lex = shlex.shlex(text if masked is None else masked, posix=True,
+                          punctuation_chars=True)
         lex.commenters = ""
         lex.whitespace_split = True
-        return list(lex)
+        return list(lex) if masked is None else [_unmask(token) for token in lex]
     except ValueError:
         return None if strict else []
 
@@ -358,7 +430,7 @@ def _pipelines(tokens):
     """Tokens as a list of pipelines, each a list of segments, each a token list."""
     out, pipe, seg = [], [], []
     for token in tokens:
-        if token in _BREAK:
+        if _is_operator(token, _BREAK):
             if seg:
                 pipe.append(seg)
                 seg = []
@@ -366,7 +438,7 @@ def _pipelines(tokens):
                 out.append(pipe)
                 pipe = []
             continue
-        if token in _PIPE:
+        if _is_operator(token, _PIPE):
             if seg:
                 pipe.append(seg)
                 seg = []
@@ -396,7 +468,7 @@ def operands(segment):
         if skip:
             skip = False
             continue
-        if _REDIRECTS.match(token):
+        if _is_redirect(token):
             skip = True
             continue
         if token.startswith("-"):
@@ -406,13 +478,14 @@ def operands(segment):
 
 
 def has_redirect(segment):
-    return any(_REDIRECTS.match(t) for t in segment)
+    return any(_is_redirect(t) for t in segment)
 
 
 def normalise(command):
-    """Whitespace-collapsed command text, without a leading `cd <dir> &&`."""
+    """Whitespace-collapsed command text, without a leading `cd <dir> &&`. An escaped
+    `\\&` belongs to the directory's name, so `cd a\\&& ls` keeps its `cd`."""
     text = " ".join(command.split())
-    return re.sub(r"^cd\s+\S+\s*&&\s*", "", text).strip()
+    return re.sub(r"^cd\s+(?:[^\s\\]|\\.)+\s*&&\s*", "", text).strip()
 
 
 def split_assignments(segment):

@@ -7,7 +7,7 @@
     "epic": 10,
     "story": 21,
     "task": 6,
-    "bug": 7,
+    "bug": 8,
     "chore": 5,
     "spike": 4,
     "decision": 12
@@ -729,6 +729,19 @@
       "provenance": "authored"
     },
     {
+      "bmad_id": "RP-B004",
+      "github_number": 87,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
+      "title": "fix(readers): count a copied Claude Code session once",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
       "bmad_id": "RP-B006",
       "github_number": 91,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
@@ -742,13 +755,13 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-B004",
-      "github_number": 87,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
-      "title": "fix(readers): count a copied Claude Code session once",
+      "bmad_id": "RP-B007",
+      "github_number": 98,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/98",
+      "title": "fix(shell): an escaped or quoted parenthesis is a word, not a group",
       "type": "bug",
       "native_type": "Bug",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B007.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
