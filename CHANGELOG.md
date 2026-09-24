@@ -34,6 +34,12 @@ All notable changes to this project are documented here. The format follows
   tool may pin, each held by a contract test that CI also runs against the built wheel imported
   as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name outside that list is
   importable but may change in any release.
+- A retired detector id folds onto its current id through one fold map: the renames the package
+  ships, with a consumer's own `Registry(renamed=)` laid over them
+  ([#34](https://github.com/JakeSelby/ruleprobe/issues/34)). Chains resolve to their end, and a
+  cycle raises `ValueError` when a `Registry` is built or a rename would close one. `report_data`
+  and `--json` carry the effective map as `renamed`, and corpus labels fold the same way. A test
+  fails when a detector id any release shipped is neither registered nor folded.
 
 ### Added
 
