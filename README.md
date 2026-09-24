@@ -39,8 +39,7 @@ measured sessions, because a share over five sessions is noise.
 
 Nothing is sent anywhere, no model is asked anything, `report` and `explain` write nothing,
 `label` writes only under the directory you name, and the same transcript gives the same
-answer every time. Python 3.9 or newer, standard library
-only.
+answer every time. Python 3.9 or newer, standard library only.
 
 Other groupings, and a window:
 
@@ -434,10 +433,18 @@ outside that directory. It refuses, says why and writes nothing when the hit is 
 hit, because redaction changed what the detector matched or the hit needs the events around
 it, since that negative would pass trivially; when a secret shape would survive into the
 written bytes; and when the session file exists already or `labels.yaml` would not read back
-as before plus one entry. It takes `report`'s source options and the same detector options as
-`explain`; `--name` is a plain file stem. It takes no `--stance`: a detector
-gated on one is refused, since the corpus runs with none. The new negative scores as a false positive until the
-detector stops firing on it, which is the point.
+as before plus one entry. It takes `report`'s `--root`, `--runtime` and `--since`, and
+`--rules`, `--detectors` and `--no-config`; `--name` is a plain file stem. It takes no
+`--stance`, because a detector gated on one is refused, since the corpus runs with none, and
+no `--plugins`, because `ruleprobe corpus` loads none to score the negative with. When a
+subagent's transcript shares its parent's session id, the session with the hit at the key is
+the one taken. It prints the `ruleprobe corpus` command that scores the new negative, with the
+same `--rules`, `--detectors` and `--no-config` it was given. The new negative scores as a
+false positive until the detector stops firing on it, which is the point.
+
+In a corpus's `sessions/`, the suffix `.events.jsonl` is reserved: a file ending in it is read
+as one event per line, never through a runtime reader, so a native transcript must not be
+named that way.
 
 **A detector of your own scores itself.** Rather than a corpus, a declarative detector may
 carry an `examples:` block of minimal cases, and `ruleprobe corpus --rules ./docs/rules`

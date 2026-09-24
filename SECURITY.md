@@ -3,11 +3,14 @@
 ## What counts as a security issue here
 
 ruleprobe reads transcripts that can contain anything an agent saw: file contents, commands,
-credentials. It promises to send nothing, ask no model and write nothing to disk. Report
-privately if you find:
+credentials. It promises to send nothing and ask no model. `ruleprobe label` is the one
+command that writes, and only under the corpus directory it is given; every other command
+writes nothing to disk. Report privately if you find:
 
-- Any path by which `ruleprobe report` or `ruleprobe corpus` sends data over a network, runs a
+- Any path by which `ruleprobe report`, `explain` or `corpus` sends data over a network, runs a
   command from a transcript, or writes a file.
+- Any path by which `ruleprobe label` writes outside the directory it is given, sends data over
+  a network, or writes a secret shape its redaction should have removed.
 - A crafted transcript or detector file that makes the parser execute code, read outside the
   paths it was given, or hang indefinitely.
 - Report or `--json` output that prints a secret a detector matched in full, rather than only

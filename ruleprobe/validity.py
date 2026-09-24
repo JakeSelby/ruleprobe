@@ -26,7 +26,8 @@ it, because an unmeasured detector is a gap to see, not a failure to fix.
 A corpus session is a native transcript read through the real readers, or an event-schema
 file, `<name>.events.jsonl`, holding one event dict per line: the shape `ruleprobe label`
 writes. `load_events` reads one without a runtime reader and takes each event's `turn` and
-`final` as written, so a label keyed to turn 37 still names its event.
+`final` as written, so a label keyed to turn 37 still names its event. The suffix is
+reserved under `sessions/`: a native transcript named that way is never read by a reader.
 """
 import json
 import os

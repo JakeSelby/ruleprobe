@@ -21,6 +21,7 @@ from ruleprobe.detectors.common import REDACTED, SECRET_PATTERNS
 from ruleprobe.validity import (CorpusError, load_corpus, load_events, read_events,
                                 score_corpus)
 from test_explain import claude_transcript
+from test_readers import FIXTURES
 
 NO_VERIFY = "verification/no-verify"
 
@@ -319,7 +320,7 @@ class LabelTests(unittest.TestCase):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         for name in ("", ".hidden", "..", "../elsewhere/x", "a/b", "a\\b", "a..b",
                      os.path.join(self.sibling, "x"), "a\nb", "a\u202eb", "a\u200bb",
-                     " lead", "trail ", "tab\t"):
+                     " lead", "trail ", "tab\t", "c:x", "x:stream"):
             with self.subTest(name=name):
                 self.assertRefused("not a plain file stem", name=name)
 
@@ -329,7 +330,48 @@ class LabelTests(unittest.TestCase):
         self.assertRefused("no session claude-code:other", session="claude-code:other")
         self.assertRefused("no session sess-1", session="sess-1")
         self.transcript(use, name="copy.jsonl")
-        self.assertRefused("2 sessions are at claude-code:sess-1")
+        self.assertRefused("2 sessions at claude-code:sess-1 have a hit at 1:toolu_1; "
+                           "narrow --root or --since to one")
+
+    def test_a_subagent_sharing_the_session_id_is_passed_over(self):
+        # A subagent's transcript carries its parent's session id.
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})])
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})], name="agent-1.jsonl")
+        code, _text, err = self.label()
+        self.assertEqual(code, 0, err)
+        self.assertIn("--no-verify", self.written()[0])
+        os.remove(os.path.join(self.root, "t.jsonl"))
+        self.assertRefused("has no hit at 1:toolu_1 in claude-code:sess-1;", name="other")
+
+    def test_no_hit_in_any_of_several_sessions_says_how_many(self):
+        use = [("toolu_1", "Bash", {"command": "ls"})]
+        self.transcript(use)
+        self.transcript(use, name="agent-1.jsonl")
+        self.assertRefused(r"no hit at 1:toolu_1 in claude-code:sess-1 \(2 sessions at it\)")
+
+    def test_since_narrows_two_copies_to_one(self):
+        use = [("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})]
+        self.transcript(use)
+        with open(os.path.join(self.root, "old.jsonl"), "w") as handle:
+            handle.write(claude_transcript("sess-1", use).replace("2026-09-20", "2026-01-05"))
+        self.assertRefused("2 sessions at claude-code:sess-1 have a hit")
+        code, _text, err = self.label("--since", "2026-09-01")
+        self.assertEqual(code, 0, err)
+
+    def test_a_codex_session_is_labelled_and_runtime_is_forwarded(self):
+        with open(os.path.join(FIXTURES, "codex-rollout.jsonl")) as handle:
+            with open(os.path.join(self.root, "rollout.jsonl"), "w") as copy:
+                copy.write(handle.read())
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})])
+        find = "transcript-hygiene/unfiltered-find"
+        self.assertRefused("no session codex:rollout-1", "--runtime", "claude-code",
+                           session="codex:rollout-1", detector=find, key="1:call_1")
+        code, _text, err = self.label("--runtime", "codex", session="codex:rollout-1",
+                                      detector=find, key="1:call_1")
+        self.assertEqual(code, 0, err)
+        # The Claude Code transcript read as Codex is no session, and says so on success.
+        self.assertIn("1 transcript(s) produced no session: t.jsonl", err)
+        self.assertIn("find .", self.written()[0])
 
     def test_no_hit_at_the_key_is_refused(self):
         self.transcript([("toolu_1", "Bash", {"command": "ls"})])
@@ -349,6 +391,18 @@ class LabelTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             with self.assertRaises(SystemExit):
                 self.label("--stance", "commits=any")
+            with self.assertRaises(SystemExit):
+                self.label("--plugins")
+
+    def test_the_follow_up_command_carries_the_detector_sources(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        detectors = os.path.join(self.sibling, "my detectors.yaml")
+        with open(detectors, "w") as handle:
+            handle.write("detectors: []\n")
+        code, text, err = self.label("--detectors", detectors)
+        self.assertEqual(code, 0, err)
+        self.assertIn("score it with: ruleprobe corpus --corpus %s --detectors '%s' "
+                      "--no-config\n" % (self.corpus, detectors), text)
 
     def test_an_existing_session_file_or_a_missing_corpus_is_refused(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
@@ -456,6 +510,36 @@ class LabelTests(unittest.TestCase):
             handle.write("version: 1\nsessions: [\n")
         self.assertRefused("broken as it stands")
 
+    def test_an_entry_the_subset_cannot_spell_is_refused_before_a_first_write(self):
+        tool_id = "toolu_\x07bell"
+        self.transcript([(tool_id, "Bash", {"command": "git commit --no-verify"})])
+        self.assertRefused("cannot be written in the YAML subset", key="1:" + tool_id)
+
+    def test_the_entry_takes_the_indentation_of_the_entries_above(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})])
+        text = self.HAND_WRITTEN.replace("\n- session", "\n    - session").replace(
+            "\n  labels:\n  - at: \"1:tu-1\"\n    fire", "\n      labels:\n"
+            "      - at: \"1:tu-1\"\n        fire").replace(
+            "sessions:\n", "sessions:\n  # the entries sit four in\n\n")
+        path = self.hand_written(text)
+        self.assertEqual(len(load(path)[0]["sessions"]), 1)
+        code, _text, err = self.label()
+        self.assertEqual(code, 0, err)
+        with open(path) as handle:
+            self.assertIn("\n    - session: wrong-hit.events.jsonl\n", handle.read())
+        self.assertEqual(len(load_corpus(self.corpus)), 2)
+
+    def test_a_crlf_labels_file_is_appended_to(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})])
+        path = self.hand_written(self.HAND_WRITTEN.replace("\n", "\r\n"))
+        code, _text, err = self.label()
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c.name for c in load_corpus(self.corpus)],
+                         ["old.events.jsonl", "wrong-hit.events.jsonl"])
+        with open(path, "rb") as handle:
+            self.assertTrue(handle.read().startswith(
+                self.HAND_WRITTEN.replace("\n", "\r\n").encode()))
+
     def test_labelling_twice_appends_to_the_file_label_wrote(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m a"}),
                          ("toolu_2", "Bash", {"command": "git commit --no-verify -m b"})])
@@ -557,8 +641,25 @@ class LabelTests(unittest.TestCase):
         with mock.patch("ruleprobe.cli.score_corpus", side_effect=ZeroDivisionError()):
             code, _text, err = self.label()
         self.assertEqual(code, 2)
-        self.assertIn("a detector raised ZeroDivisionError while the written corpus was "
+        self.assertIn("scoring raised ZeroDivisionError while the written corpus was "
                       "scored; nothing was kept", err)
+        self.assertEqual(tree(self.scratch), before)
+
+    def test_a_raising_detector_in_the_read_back_is_named(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})])
+        before = tree(self.scratch)
+        registry = Registry([Detector("x/d", "x", "tool_use",
+                                      lambda events, ctx: self.uses(events)),
+                             Detector("x/boom", "x", "session", boom)])
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            code, _text, err = self.label(detector="x/d")
+        self.assertEqual(code, 2)
+        self.assertIn("detector x/boom raised KeyError while the written corpus was scored; "
+                      "nothing was kept", err)
         self.assertEqual(tree(self.scratch), before)
 
     def test_a_failure_removes_a_created_labels_file_and_sessions_directory(self):
@@ -597,6 +698,40 @@ class LabelTests(unittest.TestCase):
         self.assertIn("the rollback left behind %s (PermissionError)" % events, err)
         self.assertIn("sessions, created by label (OSError)", err)
         self.assertFalse(os.path.exists(os.path.join(self.corpus, "labels.yaml")))
+
+    def test_a_labels_file_changed_after_the_append_is_left_and_described(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        path = self.hand_written()
+
+        def score(*_a, **_kw):
+            with open(path, "a") as handle:
+                handle.write("# someone else's line\n")
+            raise CorpusError("broken")
+
+        with mock.patch("ruleprobe.cli.score_corpus", side_effect=score):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertRegex(err, "labels.yaml, left as it is: it holds \\d+ bytes that are not "
+                              "the original with the new entry after it")
+        with open(path) as handle:
+            self.assertTrue(handle.read().endswith("# someone else's line\n"))
+        self.assertFalse(os.path.exists(os.path.join(self.corpus, "sessions",
+                                                     "wrong-hit.events.jsonl")))
+
+    def test_a_failed_restore_leaves_the_file_whole_and_says_so(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        path = self.hand_written()
+        with mock.patch("ruleprobe.cli.score_corpus", side_effect=CorpusError("broken")), \
+                mock.patch("ruleprobe.cli.os.replace", side_effect=OSError("no replace")):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("labels.yaml, not restored: it holds the original followed by some, "
+                      "all or none of the new entry (OSError)", err)
+        with open(path) as handle:
+            after = handle.read()
+        self.assertTrue(after.startswith(self.HAND_WRITTEN))
+        self.assertIn("wrong-hit.events.jsonl", after)
+        self.assertEqual(sorted(os.listdir(self.corpus)), ["labels.yaml", "sessions"])
 
     def test_an_fdopen_failure_closes_the_descriptor_and_rolls_back(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
