@@ -100,6 +100,15 @@ the policy.
   `malformed_compliance` and `unreadable_compliance`, and `report` notes each: a detector whose
   `opportunities` raised, a tally that cannot be read, or a compliance map that names no
   detector. Each costs only compliance figures for those sessions; hits stand.
+- `ruleprobe label --session <runtime>:<id> --detector ID --key KEY --corpus DIR --name NAME`
+  turns a wrong hit into a labelled negative
+  ([#52](https://github.com/JakeSelby/ruleprobe/issues/52)). It reruns the detector over that
+  session, writes the one event behind the hit, redacted, to `DIR/sessions/NAME.events.jsonl`,
+  and appends a `near` label to `DIR/labels.yaml`, creating it when missing, so `ruleprobe corpus`
+  scores the case; the command it prints does that. It is the only command that writes, and only
+  under the directory it is given. It refuses a hit on a whole session, a gated detector, a hit
+  that redaction would change, an existing file and a corpus that does not load, and on any
+  failure it undoes what it wrote. `load_corpus` reads an `.events.jsonl` session as written.
 
 ### Changed
 
@@ -109,6 +118,9 @@ the policy.
   needs setuptools 77 or newer.
 - The `report` table's share header is one column wider, so the note and validity columns start
   under their headers ([#43](https://github.com/JakeSelby/ruleprobe/issues/43)).
+- `load_corpus` refuses two session files of the same name in different subdirectories of
+  `sessions/` with a `CorpusError`, where the later one silently replaced the earlier
+  ([#52](https://github.com/JakeSelby/ruleprobe/issues/52)).
 
 ## 0.1.0 (2026-09-22)
 
