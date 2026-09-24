@@ -100,6 +100,17 @@ LATER = [
     ("apikey" + "=" + "ak2" + "Z" * 8, "ak2" + "Z" * 8),
     ("access_key" + " = " + "ak3" + "Z" * 8, "ak3" + "Z" * 8),
     ("https://user:" + "urlpw" + "U" * 8 + "@example.invalid/x", "urlpw" + "U" * 8),
+    ("-----BEGIN PGP " + "PRIVATE KEY BLOCK-----\n" + "pgpbody" + "G" * 12
+     + "\n-----END PGP " + "PRIVATE KEY BLOCK-----", "pgpbody" + "G" * 12),
+    ("export DB_PASSWORD" + "=$(cat <<END\n" + "heredoc" + "R" * 8 + "\nEND\n)",
+     "heredoc" + "R" * 8),
+    ("password" + ':\n  "first\n  ' + "nextq" + "Q" * 8 + '"', "nextq" + "Q" * 8),
+]
+
+#: Text whose key name a raw control or format character breaks until it is escaped.
+BROKEN_KEYS = [
+    ("\x1client_secret" + "\n  " + "hunter" + "2" * 6, "hunter" + "2" * 6),
+    ("\u202aws_secret" + "_access_key\n  " + "hunter" + "3" * 6, "hunter" + "3" * 6),
 ]
 
 
@@ -192,6 +203,19 @@ class RedactTests(unittest.TestCase):
         for text in ("max_tokens: 100", "https://example.invalid/a:b", "passwords are long"):
             with self.subTest(text=text):
                 self.assertEqual(redact(text), text)
+
+    def test_hostile_inputs_finish_fast(self):
+        import time
+
+        for label, text in (
+                ("comment run", "password" + "=" + "#" * 40 + "\\\nx"),
+                ("scheme run", "0x" + "ab12" * 12500),
+                ("env file", "".join("DB_PASSWORD" + "=v%d\n" % n for n in range(50000))),
+                ("late key", "".join("X%d=1\n" % n for n in range(50000)) + "token" + "=x")):
+            with self.subTest(label=label):
+                began = time.time()
+                redact(text)
+                self.assertLess(time.time() - began, 5.0)
 
     def test_a_long_continuation_chain_is_linear(self):
         import time
@@ -404,6 +428,17 @@ class ExplainTests(unittest.TestCase):
             for name, value in mapping.items():
                 self.assertNotIn(FAKE_KEY, str(value), name)
         self.assertEqual(items[0]["value"], "find .")
+
+    def test_an_escape_cannot_complete_a_key_name_in_a_yielded_field(self):
+        for text, value in BROKEN_KEYS:
+            with self.subTest(value=value):
+                events = [prompt(), bash(text)]
+                registry = Registry([Detector("y/any", "y", "session",
+                                              lambda e, c: [(1, "tu1")])])
+                items = list(explain([Session("s", "", "codex", events, "")],
+                                     registry=registry))
+                self.assertNotIn(value, items[0]["value"])
+                self.assertNotIn(value, explain_text(items[0]))
 
     def test_a_field_that_is_not_a_string_is_stringified_and_redacted(self):
         tool_id = ("a", FAKE_KEY)
@@ -665,6 +700,20 @@ class ExplainCommandTests(unittest.TestCase):
                 self.assertEqual(len(blocks(text)), 2 if argv[0] == "--session" else 1)
                 self.assertNotIn(FAKE_KEY, text)
                 self.assertNotIn("\x1b", text)
+
+    def test_an_escape_cannot_complete_a_key_name_on_stderr(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        registry = Registry([Detector("x/" + text, "x", "session", boom)
+                             for text, _value in BROKEN_KEYS])
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            code, text, err = run_cli_err("explain", "--root", FIXTURES, "--runtime", "codex")
+        self.assertEqual((code, text), (0, ""))
+        self.assertIn("2 detector error(s)", err)
+        for _text, value in BROKEN_KEYS:
+            self.assertNotIn(value, err)
 
     def test_an_unreadable_transcript_is_named_on_stderr_redacted(self):
         scratch = tempfile.TemporaryDirectory()

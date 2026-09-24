@@ -419,16 +419,19 @@ def _hit_key(hit):
 def _redact(text):
     """`detectors.common.redact`, the one path for text printed from a transcript, with
     every control character but a newline and a tab, both line separators and every Unicode
-    format character written as its `\\xNN`, `\\uNNNN` or `\\UNNNNNNNN` escape."""
+    format character written as its `\\xNN`, `\\uNNNN` or `\\UNNNNNNNN` escape.
+
+    It redacts, escapes, then redacts again: an escape's hex digits can complete a key name
+    the raw character broke, as `\\x1c` + `lient_secret` spells `client_secret`."""
     import re
     import unicodedata
 
     from .detectors.common import redact
 
     text = re.sub(_CONTROL, lambda found: _escape(found.group(0)), redact(text))
-    if text.isascii():
-        return text
-    return "".join(_escape(c) if unicodedata.category(c) == "Cf" else c for c in text)
+    if not text.isascii():
+        text = "".join(_escape(c) if unicodedata.category(c) == "Cf" else c for c in text)
+    return redact(text)
 
 
 def _escape(char):
