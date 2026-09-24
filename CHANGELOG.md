@@ -132,6 +132,11 @@ the policy.
   measure is stated in the README: compaction, which leaves no marker; shell commands on a
   Windows or unknown root; model changes, which its router and quota fallback make unasked; and
   subagent calls, whose arguments are unchecked.
+- The shipped corpus holds labelled Gemini CLI sessions: two on a POSIX project root, with
+  positives and near-misses for every detector that applies to Gemini, catalog entries included,
+  and one on a Windows root that checks no shell detector fires there
+  ([#56](https://github.com/JakeSelby/ruleprobe/issues/56)). Every applicable detector scores at or
+  above the 0.9 floor on them.
 
 ### Changed
 

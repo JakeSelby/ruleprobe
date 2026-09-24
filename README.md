@@ -370,7 +370,7 @@ and list items are never split.
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see
 [How good are the detectors?](#how-good-are-the-detectors) below - but that corpus is
-synthetic and it is seven sessions, so it catches a detector that is wrong about a shape it
+synthetic and it is ten sessions, so it catches a detector that is wrong about a shape it
 was shown and says nothing about a shape nobody thought of. The detectors deliberately
 under-count: a missed hit is a quieter report, a false hit is a wrong one.
 
@@ -391,6 +391,10 @@ events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_co
   subagent calls; each subagent's own session is read as a session of its own, with the id
   `<parent session id>/<its own id>`.
 - Turns are not recorded. One starts at each user record that is not only tool responses.
+
+Every other shipped and catalog detector is scored on labelled Gemini sessions under a
+POSIX root, near-misses included. A session under a Windows root checks that the shell
+detectors stay silent there; it does not measure them on PowerShell.
 
 Gemini deletes sessions older than 30 days by default, so a longer `--since` finds fewer.
 
@@ -447,7 +451,7 @@ the events behind them, so it cannot be explained after the fact; an undeclared 
 ## How good are the detectors?
 
 A hit rate is a rate of the detector until somebody says what the detector *should* have
-found. So a labelled corpus ships inside the package, at `ruleprobe/corpus/`: seven synthetic
+found. So a labelled corpus ships inside the package, at `ruleprobe/corpus/`: ten synthetic
 sessions in all three transcript shapes, every interesting event labelled by hand with the
 detectors that ought to fire on it, and a deliberate near-miss beside each one - a `cat` of
 a line range, a `find` narrowed by `-name`, a `git push` after the gate ran, a heredoc with
@@ -462,24 +466,23 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   15    5    0    0   1.00    1.00   1.00
-commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
-git-safety/force-push-default             7    7    7    0    0   1.00    1.00   1.00
-package-manager/pip-install               4    4    4    0    0   1.00    1.00   1.00
-secrets/secret-file-add                   4    8    4    0    0   1.00    1.00   1.00
-secrets/secret-in-write                   9    8    9    0    0   1.00    1.00   1.00
-testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
-transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat         5    7    5    0    0   1.00    1.00   1.00
-verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
+commits/non-conventional-subject          5    9    5    0    0   1.00    1.00   1.00
+git-safety/force-push-default             5    7    5    0    0   1.00    1.00   1.00
+package-manager/pip-install               5    7    5    0    0   1.00    1.00   1.00
+secrets/secret-file-add                   5    6    5    0    0   1.00    1.00   1.00
+secrets/secret-in-write                  15   13   15    0    0   1.00    1.00   1.00
+testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
+transcript-hygiene/unfiltered-find       10   14   10    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
+verification/no-verify                   11   12   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    59   80   59    0    0   1.00    1.00   1.00  floor 0.90
+total                                    87  109   87    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
-The six shipped detectors are scored over the corpus, and each catalog entry by its own
-`examples:`. A detector the corpus labels is scored by those labels alone, so an entry
-restating a shipped detector leaves that detector's row as the corpus scored it; its examples
-score the row only when the corpus labels none of it, and the row's `source` in `--json` then
-says `examples`. The test suite runs every restating entry's examples against the shipped
+The six shipped detectors and every catalog entry are scored over the corpus. A detector
+the corpus labels is scored by those labels alone, so a catalog entry's own `examples:` score
+its row only when the corpus labels none of it, and the row's `source` in `--json` then says
+`examples`. The test suite runs every restating entry's examples against the shipped
 detector, so they stay true of it.
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.

@@ -281,3 +281,283 @@ sessions:
       - at: "5:-"
         near: [cache-hygiene/model-switch]
         note: the same model to the end
+
+  - session: gemini-shell.jsonl
+    note: a Gemini CLI session under a POSIX project root, so its shell reads as Bash - reads, a heredoc secret and changes tested or not, with every tool result also written back as a user record that starts no turn
+    labels:
+      - at: "1:tu-a1"
+        fire: [transcript-hygiene/unfiltered-find]
+        note: one of two calls in one record, answered by one functionResponse record
+      - at: "1:tu-a2"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: the second call in the same record
+      - at: "1:tu-a3"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by -name
+      - at: "1:tu-a4"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a sed range
+      - at: "1:tu-a5"
+        near: [transcript-hygiene/whole-file-cat]
+        note: cat piped into head
+      - at: "1:tu-a6"
+        near: [transcript-hygiene/unfiltered-find]
+        note: bounded by -maxdepth, still turn 1 after two functionResponse records
+      - at: "1:tu-a25"
+        fire: [testing/test-after-change]
+        near: [secrets/secret-in-write]
+        note: an example env file with the value left empty, tested in turn 2
+      - at: "1:tu-a26"
+        fire: [testing/test-after-change]
+        near: [secrets/secret-in-write]
+        note: a setting read from the environment, not a secret written in
+      - at: "2:tu-a7"
+        fire: [testing/test-after-change]
+        note: an edit, then the suite in the same turn
+      - at: "3:tu-a9"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: a prompt straight after a functionResponse record opens turn 3
+      - at: "3:tu-a10"
+        fire: [transcript-hygiene/unfiltered-find]
+        note: find of one directory with no predicate
+      - at: "3:tu-a11"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: a flag before the path is still the whole file
+      - at: "3:tu-a20"
+        fire: [transcript-hygiene/unfiltered-find]
+      - at: "3:tu-a21"
+        fire: [transcript-hygiene/unfiltered-find]
+      - at: "3:tu-a22"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by -type and -name
+      - at: "3:tu-a23"
+        near: [transcript-hygiene/unfiltered-find]
+        note: its output counted, not read
+      - at: "3:tu-a24"
+        fire: [transcript-hygiene/unfiltered-find]
+        note: an absolute start, under the example root
+      - at: "3:tu-a27"
+        near: [transcript-hygiene/whole-file-cat]
+        note: two files, not one
+      - at: "3:tu-a28"
+        near: [transcript-hygiene/whole-file-cat]
+        note: copied through a redirect, not read
+      - at: "3:tu-a29"
+        near: [transcript-hygiene/unfiltered-find]
+        note: narrowed by -mtime
+      - at: "4:tu-a12"
+        fire: [secrets/secret-in-write]
+        near: [transcript-hygiene/whole-file-cat]
+        note: a token in a heredoc body; the cat writes through a redirect, it reads nothing
+      - at: "4:tu-a13"
+        fire: [testing/test-after-change]
+        near: [secrets/secret-in-write]
+        note: a test file with no credential in it, run two records later
+      - at: "4:tu-a14"
+        fire: [testing/test-after-change]
+        note: the second change in the same record, followed by the same run
+      - at: "5:tu-a17"
+        near: [testing/test-after-change]
+        note: the suite ran before this change, not after it
+      - at: "5:tu-a18"
+        fire: [transcript-hygiene/whole-file-cat]
+      - at: "5:tu-a19"
+        fire: [secrets/secret-in-write]
+        near: [testing/test-after-change]
+        note: a client secret through replace, the last change, followed only by a read of pytest.ini
+
+  - session: gemini-git.jsonl
+    note: a Gemini CLI session under a POSIX project root - installs, staging, commits and pushes through run_shell_command, across turns separated by functionResponse records
+    labels:
+      - at: "1:tu-b1"
+        fire: [package-manager/pip-install]
+        note: three installs in one record
+      - at: "1:tu-b2"
+        near: [package-manager/pip-install]
+        note: pip under uv
+      - at: "1:tu-b3"
+        fire: [package-manager/pip-install]
+        note: python3 -m pip
+      - at: "1:tu-b4"
+        near: [package-manager/pip-install]
+        note: uv add, the named manager
+      - at: "1:tu-b5"
+        near: [package-manager/pip-install]
+        note: pip that installs nothing
+      - at: "1:tu-b6"
+        fire: [package-manager/pip-install]
+        note: behind sudo
+      - at: "1:tu-b7"
+        fire: [package-manager/pip-install]
+        note: a pip by path with a version, and a flag before install
+      - at: "1:tu-b8"
+        near: [package-manager/pip-install]
+        note: pip download
+      - at: "1:tu-b52"
+        fire: [secrets/secret-in-write, testing/test-after-change]
+        note: a GitHub token through write_file, tested by make test
+      - at: "1:tu-b53"
+        fire: [secrets/secret-in-write, testing/test-after-change]
+        note: a bearer token through replace
+      - at: "1:tu-b54"
+        fire: [secrets/secret-in-write]
+        near: [transcript-hygiene/whole-file-cat]
+        note: a secret access key appended through a heredoc
+      - at: "1:tu-b55"
+        fire: [testing/test-after-change]
+        near: [secrets/secret-in-write]
+        note: a doc naming the key prefixes, with no key after them
+      - at: "1:tu-b56"
+        fire: [testing/test-after-change]
+        near: [secrets/secret-in-write]
+        note: a password read from the environment
+      - at: "1:tu-b57"
+        near: [package-manager/pip-install]
+        note: pipx, not pip
+      - at: "1:tu-b58"
+        near: [package-manager/pip-install]
+        note: the command as echoed text
+      - at: "1:tu-b9"
+        fire: [testing/test-after-change]
+        note: an edit, then make test after the next functionResponse record
+      - at: "1:tu-b11"
+        fire: [testing/test-after-change]
+        note: a write, then a pnpm test in a compound command
+      - at: "2:tu-b13"
+        fire: [secrets/secret-file-add]
+        note: .env beside a source file
+      - at: "2:tu-b14"
+        near: [secrets/secret-file-add]
+        note: directories only
+      - at: "2:tu-b15"
+        fire: [secrets/secret-file-add]
+        note: a .key file
+      - at: "2:tu-b16"
+        near: [secrets/secret-file-add]
+        note: a public key
+      - at: "2:tu-b17"
+        fire: [commits/non-conventional-subject]
+        note: no type, and the turn ends on its tool result
+      - at: "3:tu-b18"
+        near: [commits/non-conventional-subject, verification/no-verify]
+        note: type and scope, an amend that keeps the hooks, in the turn the next prompt opened
+      - at: "3:tu-b19"
+        fire: [verification/no-verify]
+        near: [commits/non-conventional-subject]
+        note: a conventional subject that skips the hooks
+      - at: "3:tu-b20"
+        fire: [secrets/secret-file-add]
+        note: a private SSH key
+      - at: "3:tu-b21"
+        fire: [secrets/secret-file-add]
+        note: a .pem named for a key
+      - at: "3:tu-b22"
+        fire: [secrets/secret-file-add]
+      - at: "3:tu-b23"
+        near: [secrets/secret-file-add]
+        note: an example env file
+      - at: "3:tu-b24"
+        near: [secrets/secret-file-add]
+        note: a public certificate
+      - at: "3:tu-b59"
+        near: [secrets/secret-file-add]
+        note: .envrc, not an env file
+      - at: "3:tu-b60"
+        near: [verification/no-verify, commits/non-conventional-subject]
+        note: --verify asks for the hooks
+      - at: "3:tu-b25"
+        fire: [commits/non-conventional-subject]
+      - at: "3:tu-b26"
+        fire: [commits/non-conventional-subject]
+      - at: "3:tu-b27"
+        fire: [commits/non-conventional-subject]
+        note: only the first message is the subject
+      - at: "3:tu-b28"
+        near: [commits/non-conventional-subject]
+        note: a merge subject
+      - at: "3:tu-b29"
+        near: [commits/non-conventional-subject]
+        note: a breaking-change marker
+      - at: "3:tu-b49"
+        fire: [verification/no-verify]
+        near: [commits/non-conventional-subject]
+        note: -n on a commit
+      - at: "3:tu-b50"
+        near: [verification/no-verify]
+        note: a plain push
+      - at: "3:tu-b51"
+        near: [verification/no-verify]
+        note: the command as echoed text
+      - at: "4:tu-b30"
+        fire: [git-safety/force-push-default]
+      - at: "4:tu-b31"
+        near: [git-safety/force-push-default]
+        note: a push to main that forces nothing
+      - at: "4:tu-b32"
+        near: [git-safety/force-push-default]
+        note: forced, to a feature branch
+      - at: "4:tu-b61"
+        near: [git-safety/force-push-default]
+        note: forced with a lease, to a feature branch
+      - at: "4:tu-b33"
+        fire: [git-safety/force-push-default]
+      - at: "4:tu-b34"
+        fire: [verification/no-verify]
+        near: [git-safety/force-push-default]
+        note: skips the hooks on a push that forces nothing
+      - at: "4:tu-b35"
+        fire: [git-safety/force-push-default]
+      - at: "4:tu-b36"
+        fire: [git-safety/force-push-default]
+      - at: "4:tu-b37"
+        fire: [git-safety/force-push-default]
+        note: a + refspec
+      - at: "4:tu-b38"
+        near: [git-safety/force-push-default]
+        note: --force-if-includes alone forces nothing
+      - at: "4:tu-b39"
+        near: [git-safety/force-push-default]
+        note: a branch that only starts with main
+      - at: "4:tu-b40"
+        fire: [verification/no-verify, commits/non-conventional-subject]
+        note: a hooksPath override, and a subject with no type
+      - at: "4:tu-b41"
+        near: [verification/no-verify, commits/non-conventional-subject]
+        note: the flag inside a conventional message
+      - at: "4:tu-b42"
+        fire: [verification/no-verify]
+        near: [commits/non-conventional-subject]
+        note: SKIP before a conventional commit
+      - at: "5:tu-b43"
+        near: [testing/test-after-change]
+        note: after the last test run, followed by a read of pytest.ini
+      - at: "5:tu-b44"
+        fire: [transcript-hygiene/whole-file-cat]
+      - at: "5:tu-b45"
+        near: [testing/test-after-change]
+        note: followed by installing the runner, which runs nothing
+      - at: "5:tu-b46"
+        fire: [package-manager/pip-install]
+      - at: "5:tu-b47"
+        near: [testing/test-after-change]
+        note: followed by the runner's name as text
+
+  - session: gemini-windows.jsonl
+    note: a Gemini CLI session under a Windows project root, where run_shell_command runs PowerShell and keeps its native name. Its near labels guard that mapping - a shell detector reading PowerShell would score a false positive - and measure no detector's matching. tu-x6, the test run, is left unlabelled because test-after-change keys its hit on the change, tu-x5
+    labels:
+      - at: "1:tu-x1"
+        near: [transcript-hygiene/whole-file-cat]
+      - at: "1:tu-x2"
+        near: [transcript-hygiene/unfiltered-find]
+      - at: "1:tu-x3"
+        near: [git-safety/force-push-default]
+      - at: "1:tu-x4"
+        near: [package-manager/pip-install]
+      - at: "1:tu-x5"
+        fire: [secrets/secret-in-write]
+        near: [testing/test-after-change]
+        note: write_file is Write on any root; the test run after it is a native shell call
+      - at: "2:tu-x7"
+        near: [verification/no-verify, commits/non-conventional-subject]
+      - at: "2:tu-x8"
+        near: [secrets/secret-file-add]

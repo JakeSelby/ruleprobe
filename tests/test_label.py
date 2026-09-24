@@ -142,7 +142,7 @@ class EventsSessionTests(unittest.TestCase):
     def test_the_shipped_corpus_has_no_two_files_of_one_name(self):
         names = [name for _d, _s, files in os.walk(os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ruleprobe",
-            "corpus", "sessions")) for name in files]
+            "corpus", "sessions")) for name in files if name.endswith(".jsonl")]
         self.assertEqual(len(names), len(set(names)))
 
     def test_an_empty_file_is_refused(self):
