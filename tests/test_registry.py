@@ -137,7 +137,8 @@ _HOOK = []
 
 def _audit(event, args):
     if _RECORDERS and event in _AUDITED:
-        _RECORDERS[-1].append((event, args[0] if args else None))
+        for recorder in _RECORDERS:
+            recorder.append((event, args[0] if args else None))
 
 
 @contextlib.contextmanager
@@ -198,9 +199,23 @@ class FoldMapTests(unittest.TestCase):
         self.assertEqual(registry.fold_map(), {})
         self.assertIn("a/x", registry)
 
-    def test_the_consumer_may_undo_a_shipped_rename(self):
-        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
-            self.assertEqual(Registry(renamed={"a/old": "a/old"}).fold_map(), {})
+    def test_the_consumer_may_undo_a_shipped_rename_and_the_map_shows_it(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one", "a/gone": "a/old"}):
+            self.assertEqual(Registry(renamed={"a/old": "a/old"}).fold_map(),
+                             {"a/gone": "a/old", "a/old": "a/old"})
+
+    def test_a_non_string_id_is_refused_by_name(self):
+        for bad in ({1: "a/x"}, {"a/x": None}):
+            with self.subTest(renamed=bad):
+                with self.assertRaisesRegex(ValueError, "fold map ids are strings"):
+                    Registry(renamed=bad)
+
+    def test_a_cycle_names_each_edge_and_whose_it_is(self):
+        with mock.patch.dict(contract_data.RENAMED, {"a/x": "a/y"}):
+            with self.assertRaises(ValueError) as caught:
+                Registry(renamed={"a/y": "a/x"})
+        self.assertIn("a/x -> a/y (shipped)", str(caught.exception))
+        self.assertIn("a/y -> a/x (consumer)", str(caught.exception))
 
     def test_the_default_registry_folds_the_shipped_map_and_holds_no_map_of_its_own(self):
         self.assertEqual(DEFAULT.renamed, {})
@@ -215,6 +230,13 @@ class NoFileReadTests(unittest.TestCase):
             registry.fold_map()
             DEFAULT.copy().fold_map()
         self.assertEqual(seen, [])
+
+    def test_nested_traces_each_see_a_read(self):
+        with traced_file_reads() as outer:
+            with traced_file_reads() as inner:
+                os.listdir(os.path.dirname(__file__))
+        self.assertEqual([name for name, _path in outer], ["os.listdir"])
+        self.assertEqual(outer, inner)
 
     def test_the_trace_sees_a_read(self):
         with traced_file_reads() as seen:

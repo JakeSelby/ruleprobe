@@ -626,6 +626,15 @@ class FoldTests(Temp):
         # The near miss: without the fold they are two detectors and the corpus scores.
         self.assertTrue(score_corpus(Registry([compile_detector(CAT)]), path)["x/cat"].scored)
 
+    def test_one_unrenamed_id_in_fire_and_near_at_one_label_still_scores(self):
+        labels = ("version: 1\nsessions:\n  - session: case.jsonl\n    labels:\n"
+                  '      - at: "1:tu-a"\n        fire: [x/cat]\n        near: [x/cat]\n')
+        path = self.corpus(labels, {"case.jsonl": cc_lines(CASE_EVENTS)})
+        for renamed in ({}, {"x/other": "x/cat"}):
+            with self.subTest(renamed=renamed):
+                score = score_corpus(Registry([compile_detector(CAT)], renamed), path)["x/cat"]
+                self.assertEqual((score.positives, score.negatives), (1, 1))
+
     def test_scoring_a_corpus_under_a_fold_leaves_the_corpus_as_loaded(self):
         path = self.corpus(self.labels_under("x/old-cat", "x/old-cat"),
                            {"case.jsonl": cc_lines(CASE_EVENTS)})

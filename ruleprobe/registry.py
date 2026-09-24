@@ -71,26 +71,35 @@ def fold_map(renamed=None):
 
     It is the shipped map in `ruleprobe.contract_data` with `renamed`, a consumer's own map,
     laid over it: the consumer's entry wins a clash. Each id is followed to the end of its
-    chain, so `a -> b` and `b -> c` fold `a` onto `c`, and an entry mapping an id to itself is
-    no rename and is left out. A cycle raises `ValueError`, since no id in it is current.
+    chain, so `a -> b` and `b -> c` fold `a` onto `c`. An entry mapping an id to itself is no
+    rename and is left out, unless it is the consumer undoing a shipped rename: that one is
+    kept, so a stored map shows the override. A cycle raises `ValueError` naming each edge and
+    whose it is, since no id in it is current, and so does an id that is not a string.
 
     The report, `report_data` and validity all fold through this, and `report_data` emits its
     result, so a stored JSON report folds with no registry at hand. The result is complete and
     is applied as it stands: passing it back in merges the shipped map again, which undoes a
     consumer's override of a shipped rename, so resolve once and look ids up in the result.
     """
+    consumer = dict(renamed or {})
     merged = dict(SHIPPED_RENAMED)
-    merged.update(renamed or {})
+    merged.update(consumer)
+    for old, new in merged.items():
+        if not isinstance(old, str) or not isinstance(new, str):
+            raise ValueError("fold map ids are strings: %r -> %r" % (old, new))
     out = {}
     for start in sorted(merged):
         chain, current = [start], merged[start]
         while current in merged and merged[current] != current:
             if current in chain:
-                raise ValueError("the fold map has a cycle: %s"
-                                 % " -> ".join(chain + [current]))
+                edges = chain[chain.index(current):] + [current]
+                raise ValueError("the fold map has a cycle: %s" % ", ".join(
+                    "%s -> %s (%s)" % (a, b, "consumer" if a in consumer else "shipped")
+                    for a, b in zip(edges, edges[1:])))
             chain.append(current)
             current = merged[current]
-        if current != start:
+        if current != start or (start in consumer
+                                and SHIPPED_RENAMED.get(start, start) != start):
             out[start] = current
     return out
 

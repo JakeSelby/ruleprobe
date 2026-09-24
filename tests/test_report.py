@@ -240,6 +240,13 @@ class PersistedFoldTests(unittest.TestCase):
             data = report_data(rows, by="repo", registry=registry)
         self.assertEqual(data["groups"][0]["top"], [["a/one", 3]])
 
+    def test_a_raw_chained_map_folds_to_its_end_without_the_shipped_map(self):
+        raw = {"a/older": "a/old", "a/old": "a/one"}
+        errored = row({}, rules_errors=[{"detector": "a/older", "error": "KeyError"}])
+        with mock.patch.dict(contract_data.RENAMED, {"a/one": "a/two"}):
+            self.assertEqual(folded_rules(row({"a/older": 1, "a/old": 2}), raw), {"a/one": 3})
+            self.assertEqual(errored_detectors(errored, raw), {"a/one"})
+
     def test_an_error_under_a_retired_id_is_charged_to_the_current_one(self):
         registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
         errored = row({"a/two": 1}, rules_errors=[{"detector": "a/older", "error": "KeyError"}])
@@ -279,8 +286,9 @@ class EmittedFoldMapTests(unittest.TestCase):
             data = report_data(rows, registry=registry)
         hits = dict((d["detector"], d["hits"]) for d in data["detectors"])
         self.assertEqual(hits, {"a/old": 3, "a/one": 1, "a/two": 0})
-        # The emitted map agrees with the counts: applied as it stands, it moves nothing.
-        self.assertEqual(data["renamed"], {})
+        # The emitted map shows the override, and applied as it stands it moves nothing.
+        self.assertEqual(data["renamed"], {"a/old": "a/old"})
+        self.assertEqual(folded_rules(rows[0], data["renamed"]), {"a/old": 2, "a/one": 1})
 
     def test_the_emitted_map_agrees_with_the_counts_under_a_shipped_chain(self):
         registry = REGISTRY.copy().rename("a/old", "a/one")
