@@ -507,8 +507,20 @@ class RobustnessTests(TreeTest):
     def test_a_non_list_messages_on_the_metadata_line_is_ignored(self):
         for listed in ({"u1": user("u1", "go")}, 7, "text"):
             with self.subTest(messages=listed):
-                session = self.tree.session([meta(messages=listed)])
+                path = self.tree.write("session-2026-09-20T10-00-0b5e7c1a.jsonl",
+                                       [meta(messages=listed)])
+                self.assertIsNone(gemini.read(path))
+                session = gemini.read(path, empty=True)
                 self.assertEqual((session.id, session.events), (SESSION_ID, []))
+
+    def test_a_file_with_no_event_is_no_session_unless_asked_for_an_empty_one(self):
+        path = self.tree.write("session-2026-09-20T10-00-0b5e7c1a.jsonl", [meta()])
+        self.assertIsNone(gemini.read(path))
+        self.assertEqual(gemini.read(path, empty=True).events, [])
+        errors = []
+        self.assertEqual(list(iter_sessions(root=self.tree.base, runtime="gemini",
+                                            errors=errors)), [])
+        self.assertEqual([e["error"] for e in errors], ["no session in it"])
 
     def test_a_file_name_with_no_dot_is_the_id_when_no_metadata_names_one(self):
         session = gemini.read(self.tree.write("sessionfile", [user("u1", "go")]))

@@ -84,8 +84,10 @@ def recognises(entry):
     return isinstance(entry.get("$set"), dict) or isinstance(entry.get("$rewindTo"), str)
 
 
-def read(path):
-    """One `Session` from one session file, or None when the file holds no session.
+def read(path, empty=False):
+    """One `Session` from one session file, or None when the file yields no event, as in the
+    other readers. With `empty`, a file that names a session is returned with no events,
+    so `iter_sessions` can drop it by date before it reports the rest.
 
     A line that is not JSON, or not an object, is skipped: a session is written by a live
     process and its tail may be half a line.
@@ -139,7 +141,7 @@ def read(path):
     events = _events(list(messages.values()), project_root)
     stamps.extend(m["timestamp"] for m in messages.values()
                   if isinstance(m.get("timestamp"), str) and m["timestamp"])
-    if not session_id and not events:
+    if not events and not (empty and session_id):
         return None
     own = session_id or os.path.splitext(os.path.basename(path))[0]
     return Session(id="/".join(nested + [own]),

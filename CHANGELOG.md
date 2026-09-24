@@ -125,6 +125,13 @@ the policy.
   and the first commit message, and `command.program` and `command.first_operand` read a
   segment's program by its basename and its first operand past flags
   ([#49](https://github.com/JakeSelby/ruleprobe/issues/49)).
+- Gemini CLI is the third runtime: `--runtime gemini` reads its sessions from `~/.gemini/tmp`, and
+  `auto` includes them ([#55](https://github.com/JakeSelby/ruleprobe/issues/55)). Its shell tool
+  reaches detectors as `Bash` when the project root is a POSIX path, and `write_file` and `replace`
+  as `Write` and `Edit`; other tools stay native. What its transcripts do not let ruleprobe
+  measure is stated in the README: compaction, which leaves no marker; shell commands on a
+  Windows or unknown root; model changes, which its router and quota fallback make unasked; and
+  subagent calls, whose arguments are unchecked.
 
 ### Changed
 
