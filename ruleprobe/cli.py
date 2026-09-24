@@ -227,23 +227,22 @@ def _catalog_note(detector, registry):
 
 
 def _score_restated(scores, registry):
-    """Add to a shipped detector's score the `examples:` of the catalog entry that restates
-    it, so every entry's own examples are scored, and fall under the floor with it. A row
-    the corpus did not score is the examples' score alone, and says so in its `source`. A
-    shipped id a plugin or a detector file replaced takes nothing: the entry does not
-    describe that detector. `report --validity` and `corpus` both go through this, so the
-    two print one score for a detector."""
+    """Score a shipped detector the corpus did not score by the `examples:` of the catalog
+    entry that restates it, so every entry's own examples are scored, and fall under the
+    floor with it, and say so in the row's `source`. A row the corpus scored is left as it
+    is: `validity()` reads corpus labels for the detectors a corpus labels and examples for
+    the rest, and a restated detector is no exception. A shipped id a plugin or a detector
+    file replaced takes nothing: the entry does not describe that detector. `report
+    --validity` and `corpus` both go through this, so the two print one score for a
+    detector."""
     for entry in catalog_detectors(registry.fold_map()):
         held = registry.get(entry.id)
         if not entry.examples or held is None or held is entry \
                 or held is not DEFAULT.get(entry.id):
             continue
-        examples = score_examples([entry])[entry.id]
         current = scores.get(entry.id)
         if current is None or not current.scored:
-            scores[entry.id] = examples
-        else:
-            current.add(examples)
+            scores[entry.id] = score_examples([entry])[entry.id]
     return scores
 
 
@@ -320,7 +319,8 @@ def cmd_corpus(args, out):
     The floor is this repository's CI gate, not a runtime failure for a user: nothing in
     `ruleprobe report` reads it, and a detector nobody labelled is passed over rather than
     failed. Every catalog entry is scored, whether a rule bound it or not, and an entry
-    restating a shipped detector adds its examples to that detector's row.
+    restating a shipped detector scores that detector's row when the corpus labels none of
+    it.
     """
     bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:

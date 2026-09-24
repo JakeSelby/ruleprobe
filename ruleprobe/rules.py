@@ -92,18 +92,17 @@ def _is_catalog(detector):
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
-    __slots__ = ("detectors", "rules", "findings", "sources", "_binding", "_labelled",
-                 "_labelled_items")
+    __slots__ = ("detectors", "rules", "findings", "sources", "_bound")
 
     def __init__(self, detectors=None, rules=None, findings=None, sources=None):
         self.detectors = list(detectors or [])
         self.rules = list(rules or [])
         self.findings = list(findings or [])
         self.sources = list(sources or [])
-        # The rules as bound, and as the last `registry()` call labelled them.
-        self._binding = None
-        self._labelled = None
-        self._labelled_items = None
+        # Every entry any `registry()` call labelled, by identity, with the entry it was
+        # labelled from: `{id(labelled): (labelled, bound)}`. The labelled entry is held so
+        # its identity is never reused by another object.
+        self._bound = {}
 
     def registry(self, base=DEFAULT, whole_catalog=False):
         """`base`, then the catalog detectors a rule bound, then everything loaded. A
@@ -123,20 +122,16 @@ class Bundle(object):
         the rules as `load_bundle` bound them, never from an earlier call's, so each call
         answers for its own `base` alone; before any call, `rules`, `coverage()` and
         `summary()` read as `load_bundle` left them. Rules added, removed or assigned after a
-        call are read with the ones that call labelled put back as they were bound, and a
-        catalog detector no rule binds any more does not join."""
+        call - an earlier call's list included - are read with every entry any call labelled
+        put back as it was bound, and a catalog detector no rule binds any more does not
+        join."""
         registry = base.copy() if base is not None else Registry()
         fold = registry.fold_map()
-        if self._labelled is None:
-            self._binding = list(self.rules)
-        elif self.rules is not self._labelled or len(self.rules) != len(self._binding) \
-                or any(a is not b for a, b in zip(self.rules, self._labelled_items)):
-            # Changed since the last call, in place or replaced: an entry that call
-            # labelled goes back to how it was bound, and any other is taken as bound.
-            originals = dict((id(labelled), bound) for labelled, bound
-                             in zip(self._labelled_items, self._binding))
-            self._binding = [originals.get(id(entry), entry) for entry in self.rules]
-        bound = set(did for entry in self._binding if entry.source == "catalog"
+        binding = []
+        for entry in self.rules:
+            known = self._bound.get(id(entry))
+            binding.append(known[1] if known is not None and known[0] is entry else entry)
+        bound = set(did for entry in binding if entry.source == "catalog"
                     for did in entry.detectors)
         for detector in catalog_detectors(fold):
             if (whole_catalog or detector.id in bound) and detector.id not in registry:
@@ -148,8 +143,9 @@ class Bundle(object):
                                           or not (whole_catalog or detector.id in bound)):
                 continue
             registry.add(detector)
-        self.rules = self._labelled = _sourced(self._binding, registry, fold)
-        self._labelled_items = list(self.rules)
+        self.rules = _sourced(binding, registry, fold)
+        for labelled, entry in zip(self.rules, binding):
+            self._bound[id(labelled)] = (labelled, entry)
         return registry
 
     def counts(self):
@@ -527,11 +523,16 @@ def _file_prose(body):
 # --- catalog binding ---------------------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-#: An exception or a permission: a sentence carrying one binds nothing, since "never X
-#: except Y" and "X is fine" are not the rule a catalog pattern reads.
+#: An exception or a permission. Anywhere in a rule, its heading included, it unbinds the
+#: rule: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools"
+#: are not the rules the catalog patterns read.
 _EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|unless|other\s+than|apart\s+from|"
-                        r"excluding|without|but|however|allowed|fine|okay|ok|if|when)\b",
-                        re.IGNORECASE)
+                        r"excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
+#: A condition or a contrast. It unbinds a rule only in a sentence a pattern matched ("Never
+#: force-push to main when others share it"): elsewhere it qualifies another sentence, as
+#: "If one fails, fix it." does beside "Run the tests before finishing.", and a file bound
+#: by its whole text is full of them.
+_CONDITION = re.compile(r"\b(?:if|when|but|however|without)\b", re.IGNORECASE)
 _MARKUP = re.compile(r"[`*]+")
 _TASK = re.compile(r"^\[[ xX]\][ \t]+")
 
@@ -551,39 +552,43 @@ def _sentences(heading, paragraphs):
     return out
 
 
-def _exception(heading, paragraphs):
-    """The first exception, condition or permission word (`_EXCEPTION`) in any sentence of
-    the rule, heading included, or None. A rule carrying one binds nothing: "Never
-    force-push to main. Hotfixes excepted." is not the rule the pattern reads."""
-    for sentence in _sentences(heading, paragraphs):
-        found = _EXCEPTION.search(sentence)
+def _match(heading, paragraphs):
+    """`(detectors, marker)`: the catalog detectors whose pattern matches the start of any
+    sentence of the rule, in catalog order, and the word that unbinds them, or None - an
+    exception or permission (`_EXCEPTION`) in any sentence, else a condition (`_CONDITION`)
+    in a sentence a pattern matched. Binding reads text and nothing else, against the
+    shipped fold map: a consumer's own renames are applied when `Bundle.registry` is
+    built."""
+    sentences = _sentences(heading, paragraphs)
+    retired = fold_map()
+    matched, matching = [], []
+    for pattern, detector in _CATALOG:
+        if detector.id in retired:
+            continue
+        found = [sentence for sentence in sentences if pattern.match(sentence)]
         if found:
-            return found.group(0).lower()
-    return None
+            matched.append(detector)
+            matching.extend(found)
+    for marker, texts in ((_EXCEPTION, sentences), (_CONDITION, matching)):
+        for sentence in texts:
+            found = marker.search(sentence)
+            if found:
+                return matched, found.group(0).lower()
+    return matched, None
 
 
 def _catalog_matches(heading, paragraphs):
-    """The catalog detectors whose pattern matches the start of any sentence of the rule,
-    in catalog order, or none when the rule carries an exception (`_exception`). Binding
-    reads text and nothing else, against the shipped fold map: a consumer's own renames are
-    applied when `Bundle.registry` is built."""
-    if _exception(heading, paragraphs):
-        return []
-    return _pattern_matches(_sentences(heading, paragraphs))
-
-
-def _pattern_matches(sentences):
-    retired = fold_map()
-    return [detector for pattern, detector in _CATALOG if detector.id not in retired
-            and any(pattern.match(sentence) for sentence in sentences)]
+    """The catalog detectors a rule binds to (`_match`): none when a word unbinds it."""
+    matched, marker = _match(heading, paragraphs)
+    return [] if marker else matched
 
 
 def _bind(rule, path, heading, paragraphs, reason=""):
-    """A rule's entry: measured and catalog-bound when exactly one entry matches, else
-    unmeasured, with the entries named when more than one did, or else with `reason`."""
-    matched = _catalog_matches(heading, paragraphs)
-    marker = _exception(heading, paragraphs)
-    if marker and _pattern_matches(_sentences(heading, paragraphs)):
+    """A rule's entry: measured and catalog-bound when exactly one entry matches and no word
+    unbinds it, else unmeasured, with the word or the entries named when there is one, or
+    else with `reason`."""
+    matched, marker = _match(heading, paragraphs)
+    if matched and marker:
         return RuleEntry(rule, path, "unmeasured",
                          "a catalog shape with an exception or condition (%s)" % marker, [])
     if len(matched) == 1:

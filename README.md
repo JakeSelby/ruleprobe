@@ -116,19 +116,24 @@ measure.
 
 The binding under-counts on purpose. A section matching none, or more than one, stays
 unmeasured, and the coverage block names the entries when it matched several. A pattern
-never reaches across a clause break (`;`, `,`, `:`, ` - `, ` -- `, a dash), except the comma
-of its own contrast ("use uv, not pip"), and a rule carrying an exception, a condition or a
-permission in any sentence, its heading included - except (excepted, exception), unless,
-other than, apart from, excluding, without, but, however, allowed, fine, okay, ok, if, when
-- binds nothing, so "Never force-push to main. Hotfixes excepted." is left unmeasured rather
-than read as a rule it is not. `only` is not a marker: it intensifies as often as it
-narrows. A catalog detector joins the report only when a rule binds it, a detector of your
+never reaches across a clause break (`;`, `,`, `:`, a run of hyphens between spaces such as
+` - ` or ` -- `, a dash), except the comma of its own contrast ("use uv, not pip"). A rule
+carrying an exception or a permission anywhere, its heading included - except (excepted,
+exception), unless, other than, apart from, excluding, allowed, fine, okay, ok - binds
+nothing, so "Never force-push to main. Hotfixes excepted." is left unmeasured rather than
+read as a rule it is not. A condition or a contrast - if, when, but, however, without -
+unbinds a rule only in the sentence the pattern matched: "Never force-push to main when
+others share it" binds nothing, while "Run the tests before finishing. If one fails, fix
+it." binds. `only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
 own with a catalog id replaces it, `ruleprobe corpus` scores every entry, and
 `ruleprobe detectors` lists every entry marked `catalog`.
 
 One place it over-counts, knowingly. A file with no heading, or none of whose sections is a
-rule, is one rule and binds by its whole text, so one matching sentence marks the whole file
-measured, whatever else it asks; the measured share counts it as one measured rule.
+rule, is one rule and binds by its whole text: one matching sentence marks the whole file
+measured, and its other sentences may say "if" or "when" as they like, so the measured share
+counts it as one measured rule while the detector measures one sentence of it. The exception
+and permission words still apply to the whole text, so such a file that says "fine" or
+"unless" anywhere stays unmeasured - in a long file, the likelier outcome.
 
 A catalog entry measures the shape it names and no more. "Never commit secrets" binds
 `secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
@@ -435,22 +440,24 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
 commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
-git-safety/force-push-default             6    7    6    0    0   1.00    1.00   1.00
+git-safety/force-push-default             7    7    7    0    0   1.00    1.00   1.00
 package-manager/pip-install               4    4    4    0    0   1.00    1.00   1.00
 secrets/secret-file-add                   4    8    4    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
 testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat         7    9    7    0    0   1.00    1.00   1.00
-verification/no-verify                    9    9    9    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
+verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    60   78   60    0    0   1.00    1.00   1.00  floor 0.90
+total                                    56   72   56    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors are scored over the corpus, and each catalog entry by its own
-`examples:`; an entry restating a shipped detector adds its examples to that detector's row,
-whose `source` in `--json` stays `corpus`. A row the corpus does not score at all is the
-examples' alone, and says `examples`.
+`examples:`. A detector the corpus labels is scored by those labels alone, so an entry
+restating a shipped detector leaves that detector's row as the corpus scored it; its examples
+score the row only when the corpus labels none of it, and the row's `source` in `--json` then
+says `examples`. The test suite runs every restating entry's examples against the shipped
+detector, so they stay true of it.
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
 `ruleprobe corpus --floor 0.9` exits non-zero when a scored detector falls under the floor,

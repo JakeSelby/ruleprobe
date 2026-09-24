@@ -12,9 +12,9 @@ Each entry is a mapping of three keys:
 - `shape` - the rule shape, in words, for a person reading the catalog.
 - `pattern` - one regular expression, anchored with `^`, matched case-insensitively at the
   start of each sentence of a rule's text. It never crosses a clause break (`;`, `,`, `:`,
-  ` - `, ` -- `, an en or em dash): where it needs words between two it spans a run of characters
-  that stops at one, never `.*`, and the one comma it may cross is the one opening its own
-  contrast, as in "use uv, not pip".
+  a run of hyphens between spaces such as ` - ` or ` -- `, an en or em dash): where it
+  needs words between two it spans a run of characters that stops at one, never `.*`, and
+  the one comma it may cross is the one opening its own contrast, as in "use uv, not pip".
 - `detector` - a declarative detector entry, as a detector file holds one, carrying an
   `examples:` block with a deliberate near-miss beside each positive. `ruleprobe corpus`
   scores those examples, and the floor applies to them as to any detector.
@@ -40,27 +40,32 @@ ENTRIES = (
     {
         "shape": "Run the tests before finishing",
         "pattern": r"^(?:always\s+)?run\s+(?:the\s+|all\s+(?:the\s+)?|your\s+)?(?:unit\s+)?"
-                   r"tests?\b(?:(?!\s--?\s)[^;,:–—])*?\bbefore\b",
+                   r"tests?\b(?:(?!\s-+\s)[^;,:–—])*?\bbefore\b",
         "detector": {
             "id": "testing/test-after-change",
             "rule": "testing",
             "event": "session",
             "description": "Compliance, not violations: unlike every other catalog row, a hit "
                            "is a rule followed. Each Write, Edit, MultiEdit or Codex "
-                           "`apply_patch` opens an opportunity, and a "
-                           "hit is one a later test run followed, so the detector's "
-                           "opportunities, and how many were followed, say how often a change "
-                           "was tested. A test run is a pipeline segment whose program, by "
+                           "`apply_patch`, as a tool or run as a command, opens an "
+                           "opportunity, and a hit is one a later test run followed, so "
+                           "the detector's opportunities, and how many were followed, say "
+                           "how often a change was tested. A test run is a pipeline segment whose program, by "
                            "basename and past any `NAME=value`, is a known runner, or a build "
                            "tool whose first operand is its test target (`go test`, "
-                           "`mvn -q test`), or a common wrapper around one. Missed: a runner "
-                           "behind `env` or `sudo`, a wrapper not listed, and a build tool "
-                           "whose option takes a value before the target (`make -C dir "
-                           "test`).",
+                           "`mvn -q test`, `make -C dir test`), past the value of a "
+                           "`--cwd`, `-C`, `--prefix`, `--dir`, `-f` or `--file` flag, or a "
+                           "common wrapper around one. Missed: a runner behind `env` or "
+                           "`sudo`, a wrapper not listed, a build tool given another target "
+                           "before its test one (`mvn clean test`, `gradle clean test`, "
+                           "`make clean test`), and one whose other option takes a value "
+                           "before the target (`mvn -pl core test`).",
             "when": {
                 "order": {
-                    "first": {"tool": {"name": ["Write", "Edit", "MultiEdit",
-                                                "apply_patch"]}},
+                    "first": {"any": [
+                        {"tool": {"name": ["Write", "Edit", "MultiEdit", "apply_patch"]}},
+                        {"command": {"program": r"apply_patch"}},
+                    ]},
                     "then": {
                         "any": [
                             {"command": {"program": r"pytest|py\.test|tox|nox|jest|vitest|"
@@ -167,7 +172,7 @@ ENTRIES = (
     {
         "shape": "Never force-push the default branch",
         "pattern": r"^(?:never|do\s+not|don't)\s+force[- ]?push\b"
-                   r"(?:(?!\s--?\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
+                   r"(?:(?!\s-+\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
         "detector": {
             "id": "git-safety/force-push-default",
             "rule": "git-safety",
@@ -177,8 +182,8 @@ ENTRIES = (
                            "`--force` flag beside the branch as `main`, `HEAD:main`, "
                            "`main:main` or `refs/heads/main` in either place. A bare "
                            "`git push -f` from the default branch names none, and is missed; "
-                           "so are `feature:main`, a cluster such as `-uf`, `--force` beside "
-                           "`--force-if-includes`, and a branch given through a variable. "
+                           "so are `feature:main`, a cluster such as `-uf`, and a branch "
+                           "given through a variable. "
                            "`--force-if-includes` alone forces nothing and is no hit.",
             "when": {
                 "any": [
@@ -202,8 +207,7 @@ ENTRIES = (
                                           "HEAD:refs/heads/main", "HEAD:refs/heads/master",
                                           "main:main", "master:master",
                                           "main:refs/heads/main", "master:refs/heads/master"],
-                             "token_prefix": "--force",
-                             "args_none": ["--force-if-includes"]}},
+                             "arg_regex": "^--force$"}},
                 ],
             },
             "examples": {
@@ -216,6 +220,8 @@ ENTRIES = (
                     {"bash": "git push --force-with-lease origin HEAD:refs/heads/main",
                      "note": "a full ref"},
                     {"bash": "git push origin +refs/heads/master", "note": "a forced full ref"},
+                    {"bash": "git push --force --force-if-includes origin main",
+                     "note": "forced, beside a safety flag that needs a lease"},
                 ],
                 "skip": [
                     {"bash": "git push origin main", "note": "not forced"},
@@ -237,7 +243,7 @@ ENTRIES = (
     {
         "shape": "Use the named package manager, not another: uv, not pip",
         "pattern": r"^(?:always\s+)?(?:use|install\s+(?:\w+\s+)?with)\s+uv\b"
-                   r"(?:(?!\s--?\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
+                   r"(?:(?!\s-+\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
                    r"rather\s+than)\s+(?:with\s+)?(?:sudo\s+)?pip\b",
         "detector": {
             "id": "package-manager/pip-install",
@@ -245,9 +251,12 @@ ENTRIES = (
             "event": "tool_use",
             "description": "An install through pip rather than uv: `pip install` by any "
                            "path or version suffix (`.venv/bin/pip3.12 -q install`), "
-                           "`python -m pip install`, or `sudo pip install`. Missed: `-m pip` "
-                           "through a python by path or with a flag before `-m`, and pip "
-                           "behind `env` or another wrapper.",
+                           "`python -m pip install` and `python3 -m pip install`, or `sudo "
+                           "pip install` and `sudo pip3 install`. Missed: `-m pip` through a "
+                           "python by path, with a version (`python3.12 -m pip install`) or "
+                           "with a flag before `-m`, a pip with a version behind `sudo` "
+                           "(`sudo pip3.12 install`), and pip behind `env` or another "
+                           "wrapper.",
             "when": {
                 "any": [
                     {"command": {"program": r"pip[0-9.]*", "first_operand": r"install"}},

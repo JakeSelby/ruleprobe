@@ -24,7 +24,7 @@ import zipfile
 from unittest import mock
 
 from corpus import bash, say, tool_result, tool_use
-from ruleprobe import DEFAULT, Registry, analyse, contract_data, run
+from ruleprobe import DEFAULT, Registry, analyse, contract_data, matchers, run
 from ruleprobe.cli import main
 from ruleprobe.declarative import load
 from ruleprobe.detectors import catalog
@@ -154,15 +154,21 @@ class DetectorTests(unittest.TestCase):
                         "cargo test", "make check", "cd api; make test",
                         "npm test && echo 'a; b' | tee log", "mvn -q test", "CI=1 pytest",
                         "/usr/local/bin/pytest -x", "~/.local/bin/tox -e py39",
-                        "node_modules/.bin/vitest run", "python3.12 -m pytest"):
+                        "node_modules/.bin/vitest run", "python3.12 -m pytest",
+                        "make -C api test", "mvn -f api/pom.xml test",
+                        "yarn --cwd web test"):
             with self.subTest(command=command):
                 self.assertTrue(self.hits("testing/test-after-change",
                                           [edit, bash(command, turn=2, id="t1")]))
-        # The last two are stated under-counts: a runner behind `env`, and a build tool
-        # option taking a value before the target.
+        # The value of a directory flag is no target. The last five are stated
+        # under-counts: a runner behind `env`, and a build tool given another target, or
+        # another option's value, before its test one.
         for command in ("pytest-watch --help", "npm install", "go build ./...",
                         "make lint", "echo pytest", "echo 'x; pytest'", "cat bin/pytest",
-                        "python3 pytest_plugin.py", "env CI=1 pytest", "make -C api test"):
+                        "python3 pytest_plugin.py", "yarn --cwd test install",
+                        "go -C test build", "npm --prefix test ci", "env CI=1 pytest",
+                        "mvn clean test", "./gradlew clean test", "make clean test",
+                        "mvn -pl core test"):
             with self.subTest(command=command):
                 self.assertEqual(self.hits("testing/test-after-change",
                                            [edit, bash(command, turn=2, id="t1")]), [])
@@ -231,6 +237,38 @@ class DetectorTests(unittest.TestCase):
         self.assertTrue(self.hits(did, [bash(
             "git push --force-with-lease --force-if-includes origin main")]))
         self.assertTrue(self.hits(did, [bash("git push --force origin main")]))
+
+    def test_force_beside_force_if_includes_is_a_force_push(self):
+        did = "git-safety/force-push-default"
+        for command in ("git push --force --force-if-includes origin main",
+                        "git push --force-if-includes --force origin HEAD:master"):
+            with self.subTest(command=command):
+                self.assertTrue(self.hits(did, [bash(command)]))
+        for command in ("git push --force-if-includes origin main",
+                        "git push --force-if-includes --force origin feature",
+                        "git push --forced origin main"):
+            with self.subTest(command=command):
+                self.assertEqual(self.hits(did, [bash(command)]), [])
+
+    def test_a_versioned_python_or_a_sudo_versioned_pip_is_a_stated_miss(self):
+        did = "package-manager/pip-install"
+        for command in ("python3.12 -m pip install ruff", "sudo pip3.12 install ruff"):
+            with self.subTest(command=command):
+                self.assertEqual(self.hits(did, [bash(command)]), [])
+        for entry in catalog.ENTRIES:
+            if entry["detector"]["id"] == did:
+                self.assertIn("python3.12 -m pip install", entry["detector"]["description"])
+                self.assertIn("sudo pip3.12 install", entry["detector"]["description"])
+
+    def test_an_apply_patch_run_as_a_command_opens_an_opportunity(self):
+        detector = dict((d.id, d) for _p, d in _CATALOG)["testing/test-after-change"]
+        patch = "apply_patch <<'EOF'\n*** Begin Patch\n*** Update File: a.py\n*** End Patch\nEOF"
+        events = [bash(patch, turn=1, id="p1"), bash("pytest -q", turn=2, id="t1"),
+                  bash("/usr/local/bin/apply_patch '*** Begin Patch'", turn=3, id="p2"),
+                  bash("echo apply_patch", turn=4, id="n1"),
+                  bash("cat apply_patch.md", turn=4, id="n2")]
+        self.assertEqual(detector.opportunities(events, analyse(events)),
+                         [(1, "p1", True), (3, "p2", False)])
 
     def test_pip_is_read_by_basename_version_and_past_leading_flags(self):
         did = "package-manager/pip-install"
@@ -312,16 +350,18 @@ class HostileInputTests(unittest.TestCase):
     """Every catalog pattern and detector stays linear on inputs built to defeat it.
 
     The limit is generous so a slow shared runner never fails it; the inputs are sized so
-    exponential or quadratic behaviour would take far longer - 2,000 segments where 12
-    took 9 s on the old prefix, and 10,000 edits among 40,000 events, where the walk per
-    edit took 4.3 s at a quarter of that size."""
+    exponential or quadratic behaviour would take far longer: 2,000 segments, and 10,000
+    edits among 40,000 events."""
 
     LIMIT = 5.0
+    #: Every key a catalog entry may hold a regular expression under: its binding pattern,
+    #: and each matcher key `ruleprobe.matchers` compiles as one.
+    KEYS = ("pattern", "regex", "arg_regex", "message_regex", "program", "first_operand")
 
     def regexes(self, value, found):
         if isinstance(value, dict):
             for key, item in value.items():
-                if key in ("pattern", "regex", "arg_regex", "message_regex"):
+                if key in self.KEYS:
                     found.extend([item] if isinstance(item, str) else item)
                 else:
                     self.regexes(item, found)
@@ -370,11 +410,37 @@ class HostileInputTests(unittest.TestCase):
                     detector.opportunities(events, ctx)
                 self.assertLess(time.perf_counter() - started, self.LIMIT)
 
-    def test_every_pattern_is_covered_by_the_regex_check(self):
+    def test_every_regex_bearing_key_is_covered_by_the_regex_check(self):
+        # The matcher keys compiled as regular expressions, read from the matchers' source,
+        # so a key added there and not here fails this test.
+        with open(inspect.getsourcefile(matchers), encoding="utf-8") as handle:
+            compiled = set(re.findall(r'_regexes\(value\.get\("(\w+)"\)', handle.read()))
+        self.assertTrue(compiled)
+        self.assertLessEqual(compiled, set(self.KEYS))
         patterns = self.regexes(list(catalog.ENTRIES), [])
+
+        def walk(value):
+            if isinstance(value, dict):
+                for key, item in value.items():
+                    if key in compiled or key == "pattern":
+                        yield key, item
+                    else:
+                        for found in walk(item):
+                            yield found
+            elif isinstance(value, (list, tuple)):
+                for item in value:
+                    for found in walk(item):
+                        yield found
+
+        seen = set()
         for entry in catalog.ENTRIES:
-            with self.subTest(shape=entry["shape"]):
-                self.assertIn(entry["pattern"], patterns)
+            for key, item in walk(entry):
+                seen.add(key)
+                for pattern in [item] if isinstance(item, str) else item:
+                    with self.subTest(shape=entry["shape"], key=key):
+                        self.assertIn(pattern, patterns)
+        self.assertLessEqual({"pattern", "program", "first_operand", "arg_regex",
+                              "message_regex"}, seen)
 
     def test_no_pattern_spans_a_clause_with_a_wildcard(self):
         for entry in catalog.ENTRIES:
@@ -537,9 +603,44 @@ class BindingTests(Temp):
         [entry] = self.rules("# Pushing\n\nNever force-push to main. Rebase instead.\n").rules
         self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
 
-    def test_a_double_dash_is_a_clause_break(self):
-        self.assertEqual(matched("Never force-push feature branches -- main is protected."), [])
-        self.assertEqual(matched("Use uv for scripts -- not pip."), [])
+    def test_a_condition_elsewhere_in_the_rule_leaves_it_bound(self):
+        [entry] = self.rules("# Testing\n\nRun the tests before finishing. "
+                             "If one fails, fix it.\n").rules
+        self.assertEqual((entry.state, entry.detectors),
+                         ("measured", ["testing/test-after-change"]))
+        for text in ("# Testing\n\nRun the tests before finishing, if you can.\n",
+                     "# Run the tests before finishing when you can\n\nAlways.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual(entry.state, "unmeasured")
+                self.assertIn("exception or condition", entry.reason)
+
+    def test_an_exception_or_permission_anywhere_unbinds_the_rule(self):
+        for text in ("# Pushing\n\nNever force-push to main. Hotfixes excepted.\n",
+                     "# Pushing\n\nNever force-push to main. A tag is fine.\n",
+                     "# Pushing\n\nNever force-push to main.\n\n- Drafts are allowed.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.source), ("unmeasured", None))
+                self.assertIn("exception or condition", entry.reason)
+
+    def test_a_heading_less_file_binds_by_its_matching_sentence_despite_conditions(self):
+        bundle = self.rules("Never force-push to main.\n\nIf a hook fails, fix it. "
+                            "When in doubt, ask. Keep it short, but clear.\n")
+        [entry] = bundle.rules
+        self.assertEqual((entry.state, entry.detectors),
+                         ("measured", ["git-safety/force-push-default"]))
+        [entry] = self.rules("Never force-push to main.\n\nUnless told otherwise, be brief.\n"
+                             ).rules
+        self.assertEqual(entry.state, "unmeasured")
+
+    def test_a_run_of_dashes_is_a_clause_break(self):
+        for dashes in ("-", "--", "---", "----"):
+            with self.subTest(dashes=dashes):
+                self.assertEqual(matched("Never force-push feature branches %s main is "
+                                         "protected." % dashes), [])
+                self.assertEqual(matched("Use uv for scripts %s not pip." % dashes), [])
+        self.assertEqual(len(matched("Never force-push to main-line or main.")), 1)
 
     def test_a_pattern_never_spans_a_clause_break(self):
         for text in ("Never force-push feature branches; main is protected.",
@@ -645,21 +746,35 @@ class RegistryTests(Temp):
                 self.assertTrue(lines[did].endswith("catalog"))
         self.assertFalse(lines["secrets/secret-in-write"].endswith("catalog"))
 
-    def test_corpus_scores_a_restating_entry_s_examples_on_the_shipped_row(self):
+    def test_a_shipped_row_the_corpus_scored_takes_no_catalog_examples(self):
+        # Corpus labels for the detectors a corpus labels, `examples:` for the rest.
         out = io.StringIO()
         main(["corpus", "--no-config", "--json"], out=out)
         scores = json.loads(out.getvalue())["detectors"]
         corpus_only = score_corpus(DEFAULT)
-        for entry in catalog.ENTRIES:
-            did = entry["detector"]["id"]
-            if did not in DEFAULT:
-                continue
-            examples = entry["detector"]["examples"]
+        restated = [e["detector"]["id"] for e in catalog.ENTRIES
+                    if e["detector"]["id"] in DEFAULT]
+        self.assertEqual(len(restated), 2)
+        for did in restated:
             with self.subTest(detector=did):
-                self.assertEqual(scores[did]["positives"],
-                                 corpus_only[did].positives + len(examples["fire"]))
-                self.assertEqual(scores[did]["negatives"],
-                                 corpus_only[did].negatives + len(examples["skip"]))
+                self.assertTrue(corpus_only[did].scored)
+                self.assertEqual((scores[did]["positives"], scores[did]["negatives"],
+                                  scores[did]["source"]),
+                                 (corpus_only[did].positives, corpus_only[did].negatives,
+                                  corpus_only[did].source))
+
+    def test_every_restating_entry_s_examples_pass_on_the_shipped_detector(self):
+        restated = [d for d in catalog_detectors() if d.id in DEFAULT]
+        self.assertEqual(len(restated), 2)
+        for entry in restated:
+            shipped = DEFAULT.get(entry.id)
+            twin = Detector(shipped.id, shipped.rule, shipped.event, shipped.fn,
+                            shipped.gate, entry.examples)
+            with self.subTest(detector=entry.id):
+                score = score_examples([twin])[entry.id]
+                self.assertEqual((score.positives, score.negatives),
+                                 (len(entry.examples.fire), len(entry.examples.skip)))
+                self.assertEqual((score.fp, score.fn), (0, 0))
 
     def test_a_catalog_id_the_base_registry_retires_is_neither_added_nor_bound(self):
         did = "git-safety/force-push-default"
@@ -736,6 +851,25 @@ class RegistryTests(Temp):
         self.assertEqual(bundle.rules[1].rule, "extra")
         self.assertEqual(bundle.coverage()["catalog"], 1)
 
+    def test_rules_reassigned_to_an_earlier_call_s_list_relabel_from_the_binding(self):
+        did = "git-safety/force-push-default"
+        plugin = DEFAULT.copy()
+        plugin.add(Detector(did, "git-safety", "tool_use", lambda events, ctx: []))
+        bundle = self.rules("# Git\n\nNever force-push to main.\n")
+        bundle.registry(plugin)
+        first = bundle.rules
+        self.assertEqual(first[0].source, "own")
+        bundle.registry()
+        bundle.registry(plugin)
+        self.assertIsNot(bundle.rules[0], first[0])
+        bundle.rules = first
+        registry = bundle.registry()
+        self.assertEqual(bundle.rules[0].source, "catalog")
+        self.assertIs(registry.get(did), dict((d.id, d) for d in catalog_detectors())[did])
+        bundle.rules = list(first)
+        bundle.registry(plugin)
+        self.assertEqual(bundle.rules[0].source, "own")
+
     def test_a_catalog_detector_no_rule_binds_any_more_does_not_join(self):
         did = "git-safety/force-push-default"
         bundle = self.rules("# Git\n\nNever force-push to main.\n")
@@ -745,14 +879,6 @@ class RegistryTests(Temp):
         bundle.rules = []
         self.assertNotIn(did, bundle.registry())
         self.assertIn(did, bundle.registry(whole_catalog=True))
-
-    def test_catalog_detectors_is_exported_but_not_in_the_readme_api(self):
-        import ruleprobe.rules as rules_module
-        self.assertIn("catalog_detectors", rules_module.__all__)
-        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:
-            readme = handle.read()
-        api = readme[readme.index("## The public API"):readme.index("## Development")]
-        self.assertNotIn("catalog_detectors", api)
 
     def run_cli(self, *argv):
         out = io.StringIO()
@@ -765,7 +891,11 @@ class RegistryTests(Temp):
         failing = [("a push past the hooks it cannot see",
                     [bash("git status", id="tu1")])]
         weaker = Examples(list(detector.examples.fire) + failing, detector.examples.skip)
-        with mock.patch.object(detector, "examples", weaker):
+        # No corpus labels, so the row is the restating entry's examples alone. The module
+        # comes from `sys.modules`: `ruleprobe.validity` is also the name of a function.
+        module = sys.modules["ruleprobe.validity"]
+        with mock.patch.object(detector, "examples", weaker), \
+                mock.patch.object(module, "score_corpus", return_value={}):
             _code, corpus_text = self.run_cli("corpus", "--no-config", "--json")
             _code, report_text = self.run_cli("report", "--root", os.path.join(ROOT, "docs"),
                                               "--no-config", "--validity", "--json")

@@ -26,7 +26,9 @@ The matchers, by the shape they read:
   regex that must match the whole basename of the segment's first word once leading
   `NAME=value` assignments are stepped over (`pip[0-9.]*` holds of `.venv/bin/pip3.12`), and
   `first_operand` one that must match the whole of that command's first operand, flags
-  stepped over (`install` in `pip -q install ruff`).
+  stepped over (`install` in `pip -q install ruff`), and with them the value of a
+  `--cwd`, `-C`, `--prefix`, `--dir`, `-f` or `--file` given as the next word (`test` in
+  `make -C src test`, and not in `yarn --cwd test install`).
 - `git` - `subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`,
   `message_regex`: a `git` call, with its flags and `-C`/`-c` options already stepped over.
   `arg_regex` is searched in each parsed argument after the subcommand on its own, so a
@@ -506,7 +508,7 @@ def _m_command(value, where, owner, key):
                                     for rx in programs):
                 return False
             if first_operands:
-                given = operands(words)
+                given = operands(_without_flag_values(words))
                 if not given or not any(rx.fullmatch(given[0]) for rx in first_operands):
                     return False
         return True
@@ -584,6 +586,24 @@ def _m_git(value, where, owner, key):
             return True
         return _UNDECIDED if undecided else False
     return match
+
+
+#: The flags whose value, given as the next word, `first_operand` steps over with them: a
+#: working directory, a prefix or a file, which reads as an operand and is not one.
+_VALUED_FLAGS = frozenset(("--cwd", "-C", "--prefix", "--dir", "-f", "--file"))
+
+
+def _without_flag_values(words):
+    """`words` less each `_VALUED_FLAGS` flag and the word after it."""
+    kept, skip = [], False
+    for index, word in enumerate(words):
+        if skip:
+            skip = False
+        elif index and word in _VALUED_FLAGS:
+            skip = True
+        else:
+            kept.append(word)
+    return kept
 
 
 #: The short flags `git commit` takes without a value, which may lead an `m` in a cluster.

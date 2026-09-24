@@ -12,9 +12,11 @@ from corpus import bash, tool_result
 from ruleprobe import analyse
 from ruleprobe.matchers import compile_detector
 
-#: One event per label: `first` true, `then` true, both undecided (a command the parse
-#: skips), neither, and a tool result, which `within` does not count.
-COMMANDS = {"F": "touch a.py", "T": "pytest -q", "U": "echo 'unterminated", "N": "ls"}
+#: One event per label: `first` true, `then` true, both true (one segment each), both
+#: undecided (a command the parse skips), neither, and a tool result, which `within` does
+#: not count and which `first` opens when the detector is built with `results_open`.
+COMMANDS = {"F": "touch a.py", "T": "pytest -q", "B": "touch a.py && pytest -q",
+            "U": "echo 'unterminated", "N": "ls"}
 
 
 def events_for(labels):
@@ -27,26 +29,30 @@ def events_for(labels):
     return out
 
 
-def detector(within):
+def detector(within, results_open=False):
+    first = {"command": {"name": "touch"}}
+    if results_open:
+        first = {"any": [first, {"kind": "tool_result"}]}
     return compile_detector({"id": "t/order", "rule": "t", "event": "session", "when": {
-        "order": {"first": {"command": {"name": "touch"}},
-                  "then": {"command": {"name": "pytest"}}, "within": within}}}, "<test>")
+        "order": {"first": first, "then": {"command": {"name": "pytest"}},
+                  "within": within}}}, "<test>")
 
 
-def reference(labels, events, within):
+def reference(labels, events, within, results_open=False):
     """The walk `order` made before it was linear, over the labels."""
+    opens = "FBR" if results_open else "FB"
     out = []
     for i, label in enumerate(labels):
         if label == "U":
-            out.append((events[i]["turn"], events[i]["id"], None))
+            out.append((events[i]["turn"], events[i].get("id"), None))
             continue
-        if label != "F":
+        if label not in opens:
             continue
         followed, distance = False, 0
         for j in range(i + 1, len(labels)):
             if labels[j] == "U":
                 followed = None
-            elif labels[j] == "T":
+            elif labels[j] in "TB":
                 followed = True
                 break
             if labels[j] == "R":
@@ -54,7 +60,7 @@ def reference(labels, events, within):
             distance += 1
             if distance >= within:
                 break
-        out.append((events[i]["turn"], events[i]["id"], followed))
+        out.append((events[i]["turn"], events[i].get("id"), followed))
     return out
 
 
@@ -62,13 +68,15 @@ class OrderDifferentialTests(unittest.TestCase):
     def test_the_linear_evaluation_matches_the_naive_walk(self):
         rng = random.Random(49)
         for case in range(400):
-            labels = [rng.choice("FFTUNNRR") for _ in range(rng.randint(0, 40))]
+            labels = [rng.choice("FFTBUNNRR") for _ in range(rng.randint(0, 40))]
             within = rng.choice([1, 2, 3, 5, 8, 100000])
+            results_open = case % 2 == 1
             events = events_for(labels)
-            found = detector(within)
+            found = detector(within, results_open)
             ctx = analyse(events)
-            expected = reference(labels, events, within)
-            with self.subTest(case=case, labels="".join(labels), within=within):
+            expected = reference(labels, events, within, results_open)
+            with self.subTest(case=case, labels="".join(labels), within=within,
+                              results_open=results_open):
                 self.assertEqual(found.opportunities(events, ctx), expected)
                 self.assertEqual([tuple(hit) for hit in found.fn(events, ctx)],
                                  [(t, i) for t, i, f in expected if f is True])
