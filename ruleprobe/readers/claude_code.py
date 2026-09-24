@@ -12,9 +12,15 @@ Two shapes cost more care than they look:
   twice is one block, not two events: the later, longer text replaces the partial in the
   event already emitted.
 - A subagent's turns may appear in the parent's file as `isSidechain` lines (older Claude
-  Code) or in a file of their own (newer). Sidechain lines are that agent's work, not this
-  session's, so they make no event here and the subagent's own file is read as its own
-  session.
+  Code) or in a file of their own (newer, `<session>/subagents/agent-<id>.jsonl`). In a
+  parent's file, sidechain lines are that agent's work, not this session's, so they make no
+  event. The subagent's own file marks every line `isSidechain` too, so the file is told by
+  its content rather than its path: when every message line in it is a sidechain line naming
+  one and the same `agentId`, the lines are this file's own work, and the file is read as its
+  own session with the agent id as its id.
+
+A transcript that yields no event is not a measured session: `read` returns None for it, as
+for a file that holds no session at all, so it never enters a share's denominator.
 """
 import json
 import os
@@ -37,11 +43,12 @@ def transcripts(root=None):
 
 
 def read(path):
-    """One `Session` from one transcript, or None when the file holds no session.
+    """One `Session` from one transcript, or None when the file yields no event.
 
     A line that is not JSON, or not an object, is skipped rather than fatal: a transcript is
     written by a live process and its tail may be half a line.
     """
+    agent_id = _own_agent(path)
     events = []
     session_id = ""
     cwd = ""
@@ -63,7 +70,7 @@ def read(path):
                 continue
             if not isinstance(entry, dict):
                 continue
-            sidechain = bool(entry.get("isSidechain"))
+            sidechain = bool(entry.get("isSidechain")) and not agent_id
             stamp = entry.get("timestamp") or ""
             if stamp:
                 started = stamp if not started or stamp < started else started
@@ -133,12 +140,43 @@ def read(path):
                                    "input": block.get("input")})
     if pending_final is not None:
         pending_final["final"] = True
-    if not session_id and not events:
+    if not events:
         return None
-    return Session(id=session_id or os.path.basename(path)[:-6],
+    return Session(id=agent_id or session_id or os.path.basename(path)[:-6],
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="claude-code", events=events, path=path,
                    started=started, ended=ended)
+
+
+def _own_agent(path):
+    """The agent id when `path` is a subagent's own transcript, else "".
+
+    It is one when every `user`, `assistant` and `system` line is `isSidechain` and all of
+    them name the same non-empty `agentId`. Other line types carry no work and do not
+    decide it. A parent's file holds its own non-sidechain lines, so its sidechain lines
+    stay another agent's work; a file mixing agent ids is read as a parent, which counts
+    less rather than more.
+    """
+    agent = ""
+    try:
+        handle = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    with handle:
+        for line in handle:
+            try:
+                entry = json.loads(line)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict) or \
+                    entry.get("type") not in ("user", "assistant", "system"):
+                continue
+            named = entry.get("agentId")
+            if not entry.get("isSidechain") or not isinstance(named, str) or not named \
+                    or (agent and named != agent):
+                return ""
+            agent = named
+    return agent
 
 
 def _prompt_text(content):

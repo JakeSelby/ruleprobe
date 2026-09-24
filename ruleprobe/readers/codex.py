@@ -39,7 +39,8 @@ def transcripts(root=None):
 
 
 def read(path):
-    """One `Session` from one rollout, or None when the file names no session."""
+    """One `Session` from one rollout, or None when the file yields no event: a rollout
+    with nothing to measure is not a session, as in the Claude Code reader."""
     events = []
     meta = {}
     session_id = cwd = model_now = ""
@@ -115,7 +116,7 @@ def read(path):
                                    "text": _text(payload)})
     if pending_final is not None:
         pending_final["final"] = True
-    if not session_id and not events:
+    if not events:
         return None
     return Session(id=session_id or os.path.basename(path)[:-6],
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
