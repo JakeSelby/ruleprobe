@@ -29,6 +29,9 @@ What is read differently from the transcript, and why:
 - `write_file` is `Write` and `replace` is `Edit`: their keys are Claude Code's. A relative
   `file_path` is resolved against a POSIX `.project_root` unless it climbs out of it. `invoke_agent` stays native until its
   arguments are checked against `Agent`'s, and every other tool keeps its native name.
+- A write or edit the user changed before accepting it, `modified_by_user`, is read as the
+  model proposed it, from `ai_proposed_content`, and keeps its native name when no proposal
+  is recorded: the user's text is never counted as the agent's.
 
 A subagent writes its own file under `chats/<parent session id>/`, read as its own session
 with the id `<parent session id>/<its own session id>`, so it stays unique even when the file
@@ -237,6 +240,8 @@ def _call(call, turn, posix, project_root):
         name = "Bash"
     else:
         name = _TOOL_NAMES.get(native, native)
+    if name in ("Write", "Edit") and arguments.get("modified_by_user"):
+        name, arguments = _proposal(native, name, arguments)
     if name in ("Write", "Edit") and posix:
         file_path = arguments.get("file_path")
         if isinstance(file_path, str) and file_path and not file_path.startswith("/"):
@@ -248,6 +253,23 @@ def _call(call, turn, posix, project_root):
         out.append({"kind": "tool_result", "turn": turn, "tool_use_id": use_id,
                     "tool_name": name, "text": result_text(_result(call["result"]), name)})
     return out
+
+
+def _proposal(native, name, arguments):
+    """The model's own call when the user edited it before accepting: the recorded args are
+    the user's version, and `ai_proposed_content` is what the model proposed - a
+    `write_file`'s whole `content`, a `replace`'s `new_string`. A `replace` the user edited
+    records the file as it stood in `old_string`, not the model's, so that key is dropped.
+    With no proposal recorded the call keeps its native name, so no detector reads the
+    user's text as the agent's."""
+    proposed = arguments.get("ai_proposed_content")
+    if not isinstance(proposed, str):
+        return native, arguments
+    if name == "Write":
+        return name, dict(arguments, content=proposed)
+    edited = dict(arguments, new_string=proposed)
+    edited.pop("old_string", None)
+    return name, edited
 
 
 def _parts(content):

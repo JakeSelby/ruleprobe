@@ -376,7 +376,7 @@ under-count: a missed hit is a quieter report, a false hit is a wrong one.
 
 **Gemini CLI records less, so it is measured less.** Its sessions are read into the same
 events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_command` as
-`Bash`, and five gaps under-count on it rather than guess:
+`Bash`, and six gaps under-count on it rather than guess:
 
 - A context compaction is not told apart from truncation, tool-output masking and rollback,
   which rewrite the history the same way, so `cache-hygiene/compact` never fires on Gemini.
@@ -391,6 +391,10 @@ events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_co
   subagent calls; each subagent's own session is read as a session of its own, with the id
   `<parent session id>/<its own id>`.
 - Turns are not recorded. One starts at each user record that is not only tool responses.
+- A write or edit the user changed before accepting it is read as the model proposed it,
+  from `ai_proposed_content`, so a detector never counts the user's text as the agent's.
+  When no proposal is recorded the call keeps its native name and no detector reads it; an
+  edit read from its proposal carries no `old_string`, since Gemini records the file there.
 
 Every other shipped and catalog detector is scored on labelled Gemini sessions under a
 POSIX root, near-misses included. A session under a Windows root checks that the shell

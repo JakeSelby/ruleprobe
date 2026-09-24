@@ -7,7 +7,7 @@
     "epic": 10,
     "story": 21,
     "task": 6,
-    "bug": 8,
+    "bug": 9,
     "chore": 5,
     "spike": 4,
     "decision": 12
@@ -729,19 +729,6 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-B006",
-      "github_number": 91,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
-      "title": "fix(report): an order detector opening on events with no tool-use id keeps its compliance",
-      "type": "bug",
-      "native_type": "Bug",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
-      "parent_bmad_id": null,
-      "parent_github_number": null,
-      "lifecycle": "completed",
-      "provenance": "authored"
-    },
-    {
       "bmad_id": "RP-B004",
       "github_number": 87,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/87",
@@ -755,6 +742,19 @@
       "provenance": "authored"
     },
     {
+      "bmad_id": "RP-B006",
+      "github_number": 91,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/91",
+      "title": "fix(report): an order detector opening on events with no tool-use id keeps its compliance",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
       "bmad_id": "RP-B007",
       "github_number": 98,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/98",
@@ -762,6 +762,19 @@
       "type": "bug",
       "native_type": "Bug",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B007.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B008",
+      "github_number": 102,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/102",
+      "title": "fix(readers): a Gemini write the user edited is not read as the agent's",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B008.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
