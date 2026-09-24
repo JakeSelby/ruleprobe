@@ -512,10 +512,10 @@ def emit(value, indent=0):
     strings, integers, floats, booleans and None. A string is bare when it reads back as
     itself, double-quoted when it holds no quote or backslash, and single-quoted otherwise;
     one holding a control character or a line separator has no spelling here and is refused,
-    as is anything else. Raises `DeclarativeError`, and never returns text that does not
-    parse back to `value`.
+    as is anything else, and so is a value nested past `MAX_DEPTH` or holding itself. Raises
+    `DeclarativeError`, and never returns text that does not parse back to `value`.
     """
-    lines = _emit_block(value, indent)
+    lines = _emit_block(value, indent, 0)
     text = "\n".join(lines) + "\n"
     try:
         same = parse(text) == value
@@ -526,7 +526,10 @@ def emit(value, indent=0):
     return text
 
 
-def _emit_block(value, indent):
+def _emit_block(value, indent, depth):
+    # The reader's bound, which also ends a value that holds itself.
+    if depth > MAX_DEPTH:
+        raise DeclarativeError("nested too deeply to write")
     pad = " " * indent
     if isinstance(value, dict) and value:
         lines = []
@@ -535,7 +538,7 @@ def _emit_block(value, indent):
                 raise DeclarativeError("a mapping key must be a string: %r" % (key,))
             if isinstance(item, (dict, list)) and item:
                 lines.append("%s%s:" % (pad, _emit_scalar(key)))
-                lines.extend(_emit_block(item, indent + 2))
+                lines.extend(_emit_block(item, indent + 2, depth + 1))
             else:
                 lines.append("%s%s: %s" % (pad, _emit_scalar(key), _emit_scalar(item)))
         return lines
@@ -544,7 +547,7 @@ def _emit_block(value, indent):
         for item in value:
             if isinstance(item, (dict, list)) and item:
                 # The item's first line moves onto the dash; the rest stay two columns in.
-                inner = _emit_block(item, indent + 2)
+                inner = _emit_block(item, indent + 2, depth + 1)
                 lines.append("%s- %s" % (pad, inner[0][indent + 2:]))
                 lines.extend(inner[1:])
             else:

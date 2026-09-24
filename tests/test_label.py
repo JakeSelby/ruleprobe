@@ -77,6 +77,18 @@ class EmitTests(unittest.TestCase):
             handle.write(emit({"version": 1, "sessions": [self.ENTRY]}))
         self.assertEqual(load(path)[0], {"version": 1, "sessions": [self.ENTRY]})
 
+    def test_a_value_past_the_depth_or_holding_itself_is_refused(self):
+        looped = []
+        looped.append(looped)
+        deep = inner = []
+        for _n in range(40):
+            inner.append([1])
+            inner = inner[-1]
+        for value in (looped, {"k": looped}, deep):
+            with self.subTest(value=type(value).__name__):
+                with self.assertRaisesRegex(DeclarativeError, "nested too deeply"):
+                    emit(value)
+
     def test_what_the_subset_cannot_spell_is_refused(self):
         for value in ("a\nb", "a\rb", "a\x1cb", "a\tb", "a\u2028b", {1: "a"},
                       set([1]), object(), float("nan"), float("inf"), (1, 2)):
@@ -115,6 +127,22 @@ class EventsSessionTests(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaisesRegex(CorpusError, ":%d: " % line):
                     read_events(text, "s.events.jsonl")
+
+    def test_two_session_files_of_one_name_are_refused(self):
+        line = json.dumps({"kind": "tool_use", "turn": 1, "id": "tu-1", "name": "Bash",
+                           "input": {"command": "ls"}}) + "\n"
+        for sub in ("a", "b"):
+            os.mkdir(os.path.join(self.base, "sessions", sub))
+            self.write("sessions/%s/same.events.jsonl" % sub, line)
+        self.write("labels.yaml", "version: 1\nsessions:\n  - session: same.events.jsonl\n")
+        with self.assertRaisesRegex(CorpusError, "two session files are named same"):
+            load_corpus(self.base)
+
+    def test_the_shipped_corpus_has_no_two_files_of_one_name(self):
+        names = [name for _d, _s, files in os.walk(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ruleprobe",
+            "corpus", "sessions")) for name in files]
+        self.assertEqual(len(names), len(set(names)))
 
     def test_an_empty_file_is_refused(self):
         path = self.write("sessions/empty.events.jsonl", "\n")
@@ -290,7 +318,8 @@ class LabelTests(unittest.TestCase):
     def test_a_name_that_is_not_a_plain_stem_is_refused(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         for name in ("", ".hidden", "..", "../elsewhere/x", "a/b", "a\\b", "a..b",
-                     os.path.join(self.sibling, "x"), "a\nb"):
+                     os.path.join(self.sibling, "x"), "a\nb", "a\u202eb", "a\u200bb",
+                     " lead", "trail ", "tab\t"):
             with self.subTest(name=name):
                 self.assertRefused("not a plain file stem", name=name)
 
@@ -314,8 +343,12 @@ class LabelTests(unittest.TestCase):
                          gate=("commits", None))
         with mock.patch("ruleprobe.cli._bundle_and_registry",
                         return_value=(Bundle(), Registry([gated]))):
-            self.assertRefused("gated on a stance", "--stance", "commits=any",
-                               detector="x/gated")
+            self.assertRefused("gated on a stance", detector="x/gated")
+
+    def test_label_takes_no_stance(self):
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit):
+                self.label("--stance", "commits=any")
 
     def test_an_existing_session_file_or_a_missing_corpus_is_refused(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
@@ -367,31 +400,166 @@ class LabelTests(unittest.TestCase):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         self.hand_written()
         self.assertRefused("old.events.jsonl already exists", name="old")
-        os.remove(os.path.join(self.corpus, "sessions", "old.events.jsonl"))
+        # Moved into a subdirectory, the file is still the labelled session, and the name is
+        # still taken.
+        sessions = os.path.join(self.corpus, "sessions")
+        os.mkdir(os.path.join(sessions, "moved"))
+        os.rename(os.path.join(sessions, "old.events.jsonl"),
+                  os.path.join(sessions, "moved", "old.events.jsonl"))
         self.assertRefused("already names old.events.jsonl", name="old")
+
+    def test_a_corpus_broken_as_it_stands_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        self.hand_written()
+        stray = os.path.join(self.corpus, "sessions", "stray.events.jsonl")
+        with open(stray, "w") as handle:
+            handle.write(json.dumps({"kind": "user_prompt", "turn": 1}) + "\n")
+        self.assertRefused("broken as it stands: .*no labels for stray.events.jsonl")
+        os.remove(stray)
+        os.remove(os.path.join(self.corpus, "sessions", "old.events.jsonl"))
+        self.assertRefused("broken as it stands: .*no session file named 'old.events.jsonl'")
+
+    def test_sessions_without_a_labels_file_are_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        self.hand_written()
+        os.remove(os.path.join(self.corpus, "labels.yaml"))
+        self.assertRefused("holds sessions but .* has no labels.yaml")
+
+    def test_a_non_utf8_labels_file_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        path = self.hand_written()
+        with open(path, "ab") as handle:
+            handle.write(b"# \xff\n")
+        self.assertRefused("not UTF-8")
+
+    def test_a_labels_link_or_directory_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        target = os.path.join(self.sibling, "labels.yaml")
+        with open(target, "w") as handle:
+            handle.write("version: 1\nsessions: []\n")
+        path = os.path.join(self.corpus, "labels.yaml")
+        os.symlink(target, path)
+        self.assertRefused("labels.yaml is a link")  # the tree, the target's bytes included
+        os.remove(path)
+        os.mkdir(path)
+        self.assertRefused("labels.yaml is a link or not a plain file")
 
     def test_sessions_not_last_or_not_appendable_is_refused(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         path = self.hand_written(self.HAND_WRITTEN + "owner: me\n")
         self.assertRefused("sessions is not the last key")
+        os.remove(os.path.join(self.corpus, "sessions", "old.events.jsonl"))
         with open(path, "w") as handle:
             handle.write("version: 1\nsessions: []\n")
         self.assertRefused("would not read back as the old document plus one entry")
         with open(path, "w") as handle:
             handle.write("version: 1\nsessions: [\n")
-        self.assertRefused("cannot read")
+        self.assertRefused("broken as it stands")
 
-    def test_a_failure_after_writing_restores_everything(self):
+    def test_labelling_twice_appends_to_the_file_label_wrote(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m a"}),
+                         ("toolu_2", "Bash", {"command": "git commit --no-verify -m b"})])
+        self.assertEqual(self.label(name="first")[0], 0)
+        code, text, err = self.label(key="1:toolu_2", name="second")
+        self.assertEqual(code, 0, err)
+        self.assertIn("appended to", text)
+        corpus = load_corpus(self.corpus)
+        self.assertEqual([c.name for c in corpus],
+                         ["first.events.jsonl", "second.events.jsonl"])
+        score = score_corpus(DEFAULT, corpus=corpus)[NO_VERIFY]
+        self.assertEqual((score.negatives, score.fp), (2, 2))
+
+    # --- detectors that raise or hit elsewhere ---------------------------------------
+
+    def with_detector(self, fn, **kw):
+        registry = Registry([Detector("x/d", "x", "tool_use", fn)])
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            return self.assertRefused(kw.pop("why"), detector="x/d", **kw)
+
+    @staticmethod
+    def uses(events):
+        return [(e["turn"], e["id"]) for e in events if e.get("kind") == "tool_use"]
+
+    def test_a_detector_raising_on_the_session_is_refused_with_its_error(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})])
+        self.with_detector(boom, why="x/d raised KeyError over claude-code:sess-1")
+
+    def test_a_detector_raising_on_the_written_event_is_refused_with_its_error(self):
+        def lone(events, ctx):
+            if len(events) == 1:
+                raise ValueError("x")
+            return self.uses(events)
+
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})])
+        self.with_detector(lone, why="x/d raised ValueError over the written event")
+
+    def test_a_second_hit_on_the_written_event_is_refused(self):
+        def twice(events, ctx):
+            return self.uses(events) + [(1, None)]
+
+        self.transcript([("toolu_1", "Bash", {"command": "ls"})])
+        self.with_detector(twice, why="hits at 1:toolu_1, 1:-, not only at 1:toolu_1")
+
+    def test_more_than_one_event_at_the_key_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m a"}),
+                         ("toolu_1", "Bash", {"command": "git commit --no-verify -m b"})])
+        self.assertRefused("1:toolu_1 is more than one event")
+
+    def test_redaction_that_changes_the_key_is_refused(self):
+        tool_id = "toolu_" + FAKE_KEY
+        self.transcript([(tool_id, "Bash", {"command": "git commit --no-verify"})])
+        err = self.assertRefused("redaction changed the event's key", key="1:" + tool_id)
+        self.assertNotIn(FAKE_KEY, err)
+
+    # --- rollback ------------------------------------------------------------------------
+
+    def fail_on_second(self, failure):
+        """`load_corpus` as it is for the check before writing, then `failure`."""
+        calls = []
+
+        def load(directory=None):
+            calls.append(directory)
+            if len(calls) > 1:
+                raise failure
+            return load_corpus(directory)
+
+        return mock.patch("ruleprobe.cli.load_corpus", side_effect=load)
+
+    def test_a_corpus_or_io_failure_after_writing_restores_everything(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         self.hand_written()
-        for failure in (CorpusError("broken"), OSError("disk full"), KeyError("x")):
+        for failure in (CorpusError("broken"), OSError("disk full")):
             with self.subTest(failure=failure):
                 before = tree(self.scratch)
-                with mock.patch("ruleprobe.cli.load_corpus", side_effect=failure):
+                with self.fail_on_second(failure):
                     code, _text, err = self.label()
                 self.assertEqual(code, 2)
-                self.assertIn("nothing was kept", err)
+                self.assertIn("%s; nothing was kept" % failure, err)
+                self.assertNotIn("detector raised", err)
                 self.assertEqual(tree(self.scratch), before)
+
+    def test_a_bug_of_label_own_is_rolled_back_and_re_raised(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        self.hand_written()
+        before = tree(self.scratch)
+        with self.fail_on_second(KeyError("x")):
+            with self.assertRaises(KeyError):
+                self.label()
+        self.assertEqual(tree(self.scratch), before)
+
+    def test_a_detector_raising_while_scoring_is_named_as_such(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        before = tree(self.scratch)
+        with mock.patch("ruleprobe.cli.score_corpus", side_effect=ZeroDivisionError()):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("a detector raised ZeroDivisionError while the written corpus was "
+                      "scored; nothing was kept", err)
+        self.assertEqual(tree(self.scratch), before)
 
     def test_a_failure_removes_a_created_labels_file_and_sessions_directory(self):
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
@@ -411,6 +579,84 @@ class LabelTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("did not score the new negative", err)
         self.assertEqual(tree(self.scratch), before)
+
+    def test_a_failed_rollback_step_names_what_it_left(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        real_remove = os.remove
+        events = os.path.join(self.corpus, "sessions", "wrong-hit.events.jsonl")
+
+        def remove(path, *a, **kw):
+            if path == events:
+                raise PermissionError(path)
+            return real_remove(path, *a, **kw)
+
+        with mock.patch("ruleprobe.cli.score_corpus", side_effect=CorpusError("broken")), \
+                mock.patch("ruleprobe.cli.os.remove", side_effect=remove):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("the rollback left behind %s (PermissionError)" % events, err)
+        self.assertIn("sessions, created by label (OSError)", err)
+        self.assertFalse(os.path.exists(os.path.join(self.corpus, "labels.yaml")))
+
+    def test_an_fdopen_failure_closes_the_descriptor_and_rolls_back(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        before = tree(self.scratch)
+        real_close = os.close
+        with mock.patch("ruleprobe.cli.os.fdopen", side_effect=OSError("no fdopen")), \
+                mock.patch("ruleprobe.cli.os.close", side_effect=real_close) as close:
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("no fdopen; nothing was kept", err)
+        self.assertEqual(close.call_count, 1)
+        self.assertEqual(tree(self.scratch), before)
+
+    def after_the_check(self, change):
+        """Run `change` once `labels.yaml` has been checked and before it is written."""
+        from ruleprobe import cli
+
+        real = cli._labels_addition
+
+        def checked(*args):
+            out = real(*args)
+            change()
+            return out
+
+        return mock.patch("ruleprobe.cli._labels_addition", side_effect=checked)
+
+    def test_a_labels_file_changed_since_the_check_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        path = self.hand_written()
+
+        def edit():
+            with open(path, "a") as handle:
+                handle.write("# edited meanwhile\n")
+
+        with self.after_the_check(edit):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("changed since it was checked; nothing was kept", err)
+        with open(path) as handle:
+            self.assertEqual(handle.read(), self.HAND_WRITTEN + "# edited meanwhile\n")
+        self.assertEqual(os.listdir(os.path.join(self.corpus, "sessions")),
+                         ["old.events.jsonl"])
+
+    def test_a_labels_file_swapped_for_a_link_is_not_written_through(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
+        path = self.hand_written()
+        target = os.path.join(self.sibling, "other.yaml")
+        with open(target, "w") as handle:
+            handle.write(self.HAND_WRITTEN)
+
+        def swap():
+            os.remove(path)
+            os.symlink(target, path)
+
+        with self.after_the_check(swap):
+            code, _text, err = self.label()
+        self.assertEqual(code, 2)
+        self.assertIn("became a link or changed kind since it was checked", err)
+        with open(target) as handle:
+            self.assertEqual(handle.read(), self.HAND_WRITTEN)
 
 
 if __name__ == "__main__":

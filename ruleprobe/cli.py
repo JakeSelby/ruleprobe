@@ -12,8 +12,7 @@
                       [--rules DIR] [--detectors FILE] [--no-config]
     ruleprobe label --session RUNTIME:ID --detector ID --key TURN:TOOL_USE_ID
                     --corpus DIR --name NAME
-                    [--since DATE] [--root DIR] [--runtime NAME]
-                    [--stance DIM=VARIANT] [--plugins]
+                    [--since DATE] [--root DIR] [--runtime NAME] [--plugins]
                     [--rules DIR] [--detectors FILE] [--no-config]
 
 Declarative detectors are read from `.ruleprobe/detectors.yaml` in the repository you are
@@ -30,6 +29,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 import unicodedata
 
@@ -147,10 +147,7 @@ def build_parser():
     label_cmd.add_argument("--runtime", choices=["auto"] + sorted(RUNTIMES),
                            default="auto",
                            help="which runtime wrote them (default: decide per file)")
-    label_cmd.add_argument("--stance", action="append", default=None, type=_stance,
-                           metavar="DIM=VARIANT",
-                           help="the configuration these sessions ran under, as for "
-                                "report; repeatable, read by gated detectors")
+    # No --stance: a detector gated on one is refused, because the corpus runs with none.
     label_cmd.add_argument("--plugins", action="store_true",
                            help="also load detectors installed packages advertise")
     _declarative_options(label_cmd)
@@ -367,7 +364,15 @@ def cmd_explain(args, out):
 
 
 class _Refused(Exception):
-    """Why `label` wrote nothing."""
+    """Why `label` kept nothing, and what a failed rollback left behind."""
+
+
+class _ScoringRaised(Exception):
+    """A detector raised while the written corpus was scored."""
+
+
+# A link at a path label writes is refused rather than followed, where the platform can.
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
 def cmd_label(args, out):
@@ -380,10 +385,12 @@ def cmd_label(args, out):
     labelled; no session, or more than one, at the address; no hit at the key, or not one
     event behind it; a detector that is gated, since the corpus runs no stances; a written
     event the detector no longer hits, because redaction changed what it matched or the hit
-    needs more than one event, since that negative would pass trivially; any secret shape
-    left in the bytes it would write; and a `labels.yaml` it cannot append to and read back
-    as the old document plus the one entry. The corpus is read back after writing, and
-    anything short of the new negative scoring is rolled back.
+    needs more than one event, since that negative would pass trivially; a written event
+    it hits anywhere but the key; a detector that raised; a corpus already broken as it
+    stands; any secret shape left in the bytes it would write; and a `labels.yaml` it cannot
+    append to and read back as the old document plus the one entry. The corpus is read back
+    after writing, and anything short of the new negative scoring is rolled back; a rollback
+    step that fails is named with what it left.
     """
     try:
         lines = _label(args)
@@ -425,6 +432,7 @@ def _label(args):
     if not detector.enabled(None):
         raise _Refused("%s is gated on a stance and the corpus runs with none, so a negative "
                        "for it would pass trivially" % detector_id)
+    _check_corpus(base, sessions_dir, labels_path)
     only = Registry([detector])
     event = _labelled_event(args, only, detector_id, key)
 
@@ -433,13 +441,18 @@ def _label(args):
     loaded = read_events(line, events_path)
     if event_key(loaded[0]) != key:
         raise _Refused("redaction changed the event's key, so the label could not name it")
-    if key not in _hit_keys(loaded, only, detector_id):
-        if key in _hit_keys([event], only, detector_id):
+    got = _hit_keys(loaded, only, detector_id, "the written event")
+    if key not in got:
+        if key in _hit_keys([event], only, detector_id, "the unredacted event"):
             raise _Refused("redaction changed what %s matched at %s: the written event no "
                            "longer hits, so the negative would pass trivially"
                            % (detector_id, key))
         raise _Refused("%s does not hit at %s on that event alone: the hit needs events "
                        "around it, which one event cannot carry" % (detector_id, key))
+    if got != [key]:
+        raise _Refused("on the written event %s hits at %s, not only at %s, so one near "
+                       "label would not be the whole truth about it"
+                       % (detector_id, ", ".join(got), key))
 
     entry = {"session": file_name, "labels": [{"at": key, "near": [detector_id]}]}
     original, addition = _labels_addition(labels_path, entry)
@@ -460,9 +473,11 @@ def _label_name(name):
     """`name` when it is a plain file stem, so nothing is written outside the directory."""
     seps = [os.sep] + ([os.altsep] if os.altsep else []) + ["/", "\\"]
     if not name or name.startswith(".") or ".." in name or any(s in name for s in seps) \
-            or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in name):
+            or name != name.strip() \
+            or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in name):
         raise _Refused("--name %r is not a plain file stem: no separator, no '..', no "
-                       "leading dot, not empty" % name)
+                       "leading dot or edge whitespace, no control or format character, "
+                       "not empty" % name)
     return name
 
 
@@ -484,8 +499,7 @@ def _labelled_event(args, registry, detector_id, key):
     if matches > 1:
         raise _Refused("%d sessions are at %s; narrow --root or --runtime to one"
                        % (matches, args.session))
-    stances = dict(args.stance or [])
-    if key not in _hit_keys(found.events, registry, detector_id, stances):
+    if key not in _hit_keys(found.events, registry, detector_id, args.session):
         raise _Refused("%s has no hit at %s in %s; ruleprobe explain lists its hits"
                        % (detector_id, key, args.session))
     events = [e for e in found.events if isinstance(e, dict) and e.get("kind") == "tool_use"
@@ -496,9 +510,30 @@ def _labelled_event(args, registry, detector_id, key):
     return events[0]
 
 
-def _hit_keys(events, registry, detector_id, stances=None):
-    return [hit_key(h) for h in run(events, stances, registry=registry,
-                                    errors=[]).get(detector_id, [])]
+def _hit_keys(events, registry, detector_id, where):
+    """The keys `detector_id` hits over `events`, with no stances, as the corpus runs it. A
+    detector that raised is refused with its error rather than read as no hit."""
+    errors = []
+    hits = run(events, registry=registry, errors=errors)
+    if errors:
+        raise _Refused("%s raised %s over %s" % (errors[0]["detector"], errors[0]["error"],
+                                                 where))
+    return [hit_key(h) for h in hits.get(detector_id, [])]
+
+
+def _check_corpus(base, sessions_dir, labels_path):
+    """Refuse a corpus that is broken before label touches it, so a later failure is label's
+    own and the rollback returns a working corpus."""
+    if os.path.lexists(labels_path):
+        try:
+            load_corpus(base)
+        except CorpusError as exc:
+            raise _Refused("the corpus in %s is broken as it stands: %s" % (base, exc))
+        return
+    for _directory, _dirs, files in os.walk(sessions_dir):
+        if any(name.endswith(".jsonl") for name in files):
+            raise _Refused("%s holds sessions but %s has no %s" % (sessions_dir, base,
+                                                                   LABELS_FILE))
 
 
 def _redacted_event(value):
@@ -575,56 +610,108 @@ def _item_indent(text):
 
 def _write_label(base, sessions_dir, events_path, labels_path, line, original, addition,
                  registry, detector_id, file_name):
-    """Both writes, then the corpus read back; any failure removes what was written and
-    restores `labels.yaml` byte for byte."""
-    made_dir = wrote_events = wrote_labels = False
+    """Both writes, then the corpus read back. On any failure every rollback step is tried:
+    `labels.yaml` restored byte for byte or removed, the session file removed, and a
+    `sessions/` directory label made removed. A corpus or I/O failure, or a detector raising
+    while the corpus is scored, is a refusal; anything else is label's own bug and is
+    re-raised after the rollback."""
+    state = {"made_dir": False, "events": False, "labels": None}
     try:
-        if not os.path.isdir(sessions_dir):
-            os.mkdir(sessions_dir)
-            made_dir = True
-        handle = os.fdopen(os.open(events_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-                                   0o644), "w", encoding="utf-8", newline="\n")
-        wrote_events = True
-        with handle:
-            handle.write(line)
-        if original is None:
-            with open(labels_path, "x", encoding="utf-8", newline="\n") as labels:
-                wrote_labels = True
-                labels.write(addition)
-        else:
-            with open(labels_path, "ab") as labels:
-                wrote_labels = True
-                labels.write(addition.encode("utf-8"))
+        _write_both(state, sessions_dir, events_path, labels_path, line, original, addition)
         labelled = [one for one in load_corpus(base) if one.name == file_name]
-        score = score_corpus(registry, corpus=labelled)[detector_id]
+        try:
+            score = score_corpus(registry, corpus=labelled)[detector_id]
+        except CorpusError:
+            raise
+        except Exception as exc:
+            raise _ScoringRaised(type(exc).__name__)
         if (score.negatives, score.fp) != (1, 1):
             raise _Refused("the corpus read back did not score the new negative")
     except BaseException as exc:
-        if wrote_labels:
-            if original is None:
-                _quietly(os.remove, labels_path)
-            else:
-                with open(labels_path, "wb") as labels:
-                    labels.write(original)
-        if wrote_events:
-            _quietly(os.remove, events_path)
-        if made_dir:
-            _quietly(os.rmdir, sessions_dir)
+        left = _roll_back(state, sessions_dir, events_path, labels_path, original)
+        tail = ("; the rollback left behind %s" % "; ".join(left) if left
+                else "; nothing was kept")
         if isinstance(exc, _Refused):
-            raise
+            raise _Refused("%s%s" % (exc, tail))
+        if isinstance(exc, _ScoringRaised):
+            raise _Refused("a detector raised %s while the written corpus was scored%s"
+                           % (exc, tail))
         if isinstance(exc, (OSError, CorpusError)):
-            raise _Refused("%s; nothing was kept" % exc)
-        if isinstance(exc, Exception):
-            raise _Refused("a detector raised %s over the written corpus; nothing was kept"
-                           % type(exc).__name__)
+            raise _Refused("%s%s" % (exc, tail))
+        if left:
+            sys.stderr.write(_redact("label: the rollback left behind %s" % "; ".join(left))
+                             + "\n")
         raise
 
 
-def _quietly(remove, path):
+def _write_both(state, sessions_dir, events_path, labels_path, line, original, addition):
+    if not os.path.lexists(sessions_dir):
+        os.mkdir(sessions_dir)
+        state["made_dir"] = True
+    _still_plain(sessions_dir, stat.S_ISDIR)
+    if os.path.lexists(events_path):
+        raise _Refused("%s appeared since it was checked" % events_path)
+    fd = os.open(events_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644)
+    state["events"] = True
+    _write_fd(fd, line.encode("utf-8"))
+    if original is None:
+        if os.path.lexists(labels_path):
+            raise _Refused("%s appeared since it was checked" % labels_path)
+        fd = os.open(labels_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW, 0o644)
+        state["labels"] = "created"
+    else:
+        _still_plain(labels_path, stat.S_ISREG)
+        fd = os.open(labels_path, os.O_RDONLY | _NOFOLLOW)
+        with os.fdopen(fd, "rb") as handle:
+            if handle.read() != original:
+                raise _Refused("%s changed since it was checked" % labels_path)
+        _still_plain(labels_path, stat.S_ISREG)
+        fd = os.open(labels_path, os.O_WRONLY | os.O_APPEND | _NOFOLLOW)
+        state["labels"] = "appended"
+    _write_fd(fd, addition.encode("utf-8"))
+
+
+def _still_plain(path, is_kind):
+    """Refuse `path` when it has become a link, or not the kind it was, since the check."""
+    mode = os.lstat(path).st_mode
+    if stat.S_ISLNK(mode) or not is_kind(mode):
+        raise _Refused("%s became a link or changed kind since it was checked" % path)
+
+
+def _write_fd(fd, data):
     try:
-        remove(path)
-    except OSError:
-        pass
+        handle = os.fdopen(fd, "wb")
+    except BaseException:
+        os.close(fd)
+        raise
+    with handle:
+        handle.write(data)
+
+
+def _roll_back(state, sessions_dir, events_path, labels_path, original):
+    """Every rollback step, each tried whatever the others did; what each failed step left."""
+    left = []
+
+    def restore():
+        _still_plain(labels_path, stat.S_ISREG)
+        _write_fd(os.open(labels_path, os.O_WRONLY | os.O_TRUNC | _NOFOLLOW), original)
+
+    if state["labels"] == "created":
+        _step(left, lambda: os.remove(labels_path), "%s, created by label" % labels_path)
+    elif state["labels"] == "appended":
+        _step(left, restore, "%s, possibly with the new entry appended" % labels_path)
+    if state["events"]:
+        _step(left, lambda: os.remove(events_path), events_path)
+    if state["made_dir"]:
+        _step(left, lambda: os.rmdir(sessions_dir), "%s, created by label" % sessions_dir)
+    return left
+
+
+def _step(left, action, what):
+    try:
+        action()
+    except Exception as exc:
+        left.append("%s (%s)" % (what, type(exc).__name__))
 
 
 def main(argv=None, out=None):

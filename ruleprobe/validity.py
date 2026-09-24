@@ -37,8 +37,8 @@ from .readers import iter_sessions
 from .registry import DEFAULT, fold_map, run
 
 __all__ = ["CorpusError", "Score", "DEFAULT_FLOOR", "corpus_dir", "load_corpus",
-           "load_events", "read_events", "score_corpus", "score_examples", "validity", "validity_table",
-           "below_floor", "scores_as_dict"]
+           "load_events", "read_events", "score_corpus", "score_examples", "validity",
+           "validity_table", "below_floor", "scores_as_dict"]
 
 #: The floor `ruleprobe corpus` fails under. It is a CI gate for this repository, not a
 #: runtime failure for a user: nothing in `ruleprobe report` reads it.
@@ -237,11 +237,18 @@ def load_corpus(directory=None):
     sessions_dir = os.path.join(base, SESSIONS_DIRNAME)
     # An event-schema file ends in `.jsonl` too, so the readers see it; it is theirs to skip
     # and `load_events`' to read.
-    by_name = dict((os.path.basename(s.path), s)
-                   for s in iter_sessions(root=sessions_dir)
-                   if not s.path.endswith(EVENTS_SUFFIX))
-    for events_path in _event_session_paths(sessions_dir):
-        by_name[os.path.basename(events_path)] = load_events(events_path)
+    # A label names its session by file name, so two files of one name in different
+    # subdirectories are refused rather than one silently replacing the other.
+    by_name = {}
+    sessions = [s for s in iter_sessions(root=sessions_dir)
+                if not s.path.endswith(EVENTS_SUFFIX)]
+    sessions.extend(load_events(p) for p in _event_session_paths(sessions_dir))
+    for session in sessions:
+        name = os.path.basename(session.path)
+        if name in by_name:
+            raise CorpusError("%s: two session files are named %s under %s/"
+                              % (path, name, SESSIONS_DIRNAME))
+        by_name[name] = session
     out = []
     seen = set()
     for entry in document["sessions"]:
