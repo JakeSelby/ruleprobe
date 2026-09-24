@@ -9,10 +9,11 @@ import tempfile
 import unittest
 from unittest import mock
 
+import ruleprobe
 from ruleprobe import Detector, Registry, contract_data, report
 from ruleprobe.cli import main
-from ruleprobe.report import (RULE_MIN_OPPORTUNITIES, folded_compliance, opportunity_errors,
-                              report_data)
+from ruleprobe.report import (RULE_MIN_OPPORTUNITIES, folded_compliance, malformed_compliance,
+                              opportunity_errors, report_data)
 from test_readers import FIXTURES
 
 
@@ -179,9 +180,30 @@ class FoldTests(unittest.TestCase):
         compliance = {"o/order": {"opportunities": "3", "followed": 1, "undecided": 0},
                       "o/x": tally(1, 2), "o/y": None, "o/z": {"opportunities": True,
                                                                "followed": 0, "undecided": 0},
-                      7: tally(1, 1), "o/ok": tally(1, 1)}
+                      "o/neg": tally(-1, 0), 7: tally(1, 1), "o/ok": tally(1, 1)}
         self.assertEqual(folded_compliance(row({}, compliance), {}), {"o/ok": tally(1, 1)})
         self.assertEqual(folded_compliance(row({}, "nope"), {}), {})
+        self.assertEqual(malformed_compliance(row({}, compliance), {}),
+                         {"o/order", "o/x", "o/y", "o/z", "o/neg"})
+
+    def test_a_malformed_tally_is_counted_and_noted_never_silent(self):
+        rows = [row({"o/order": 1}, {"o/order": tally(-1, 0)}),
+                row({"o/order": 1}, {"o/order": tally(4, 3)})]
+        data = report_data(rows, registry=REGISTRY, min_opportunities=1)
+        self.assertEqual(data["malformed_compliance"], {"o/order": 1})
+        self.assertIn("1 detector(s) carry an unreadable compliance entry in 1 session(s): "
+                      "o/order (1)", data["notes"])
+        got = entry(data, "o/order")
+        self.assertEqual((got["opportunities"], got["followed"]), (4, 3))
+        self.assertEqual((got["hits"], got["of"]), (2, 2))
+
+    def test_a_malformed_retired_entry_drops_the_folded_sum_for_that_session(self):
+        registry = REGISTRY.copy().rename("o/old", "o/order")
+        rows = [row({}, {"o/old": tally(-1, 0), "o/order": tally(2, 2)})]
+        data = report_data(rows, registry=registry)
+        # A partial sum after the fold would be a false figure: the session is out.
+        self.assertEqual(entry(data, "o/order")["opportunities"], 0)
+        self.assertEqual(data["malformed_compliance"], {"o/order": 1})
 
 
 class OpportunityErrorTests(unittest.TestCase):
@@ -237,6 +259,35 @@ class OpportunityErrorTests(unittest.TestCase):
         self.assertEqual(report_data([failing], registry=registry)["opportunity_errors"],
                          {"o/order": 1})
 
+    def test_a_group_where_every_session_failed_shows_the_detector_at_zero(self):
+        rows = [row({}, repo="r1", rules_errors=[opp_error("o/order")]),
+                row({}, {"o/order": tally(2, 1)}, repo="r2")]
+        groups = dict((g["key"], g) for g in
+                      report_data(rows, by="repo", registry=REGISTRY)["groups"])
+        self.assertEqual(groups["r1"]["compliance"], {"o/order": {
+            "opportunities": 0, "followed": 0, "undecided": 0, "compliance_rate": None}})
+        self.assertIn("  o/order: opportunities 0, followed 0, undecided 0, rate -",
+                      report(rows, by="repo", registry=REGISTRY))
+
+    def test_an_unregistered_id_with_only_compliance_or_a_failure_gets_a_line(self):
+        rows = [row({}, {"x/stored": tally(3, 1)}, rules_errors=[opp_error("x/failed")])]
+        data = report_data(rows, registry=REGISTRY)
+        self.assertEqual(entry(data, "x/stored")["opportunities"], 3)
+        self.assertEqual(entry(data, "x/stored")["hits"], 0)
+        self.assertEqual(entry(data, "x/failed")["opportunities"], 0)
+        self.assertEqual([d["detector"] for d in data["detectors"]],
+                         ["a/plain", "o/order", "x/failed", "x/stored"])
+
+    def test_a_rescanned_session_is_not_counted_among_the_failures(self):
+        rows = [row({}, stances={"c": "on"}, rules_errors=[opp_error("o/order")]),
+                row({}, stances={"c": "on"}, stances_source="rescan",
+                    rules_errors=[opp_error("o/order"), opp_error("o/other")])]
+        data = report_data(rows, by="stance", registry=REGISTRY)
+        self.assertEqual(data["opportunity_errors"], {"o/order": 1})
+        # By rule nothing is filtered, so both sessions count.
+        self.assertEqual(report_data(rows, registry=REGISTRY)["opportunity_errors"],
+                         {"o/order": 2, "o/other": 1})
+
     def test_a_failure_leaves_the_session_out_of_its_group_too(self):
         rows = [row({}, {"o/order": tally(3, 1)}, repo="r1"),
                 row({}, {"o/order": tally(9, 9)}, repo="r1",
@@ -248,11 +299,59 @@ class OpportunityErrorTests(unittest.TestCase):
 class MarkerTests(unittest.TestCase):
     def test_the_threshold_marker_is_frequent_and_advises_nothing(self):
         rows = [row({"a/plain": 1}) for _ in range(5)] + [row({}) for _ in range(5)]
-        data = report_data(rows, min_sessions=10, promote_share=0.30, registry=REGISTRY)
+        data = report_data(rows, min_sessions=10, frequent_share=0.30, registry=REGISTRY)
         self.assertEqual(entry(data, "a/plain")["note"], "frequent")
-        text = report(rows, min_sessions=10, promote_share=0.30, registry=REGISTRY)
+        text = report(rows, min_sessions=10, frequent_share=0.30, registry=REGISTRY)
         self.assertEqual(line(text, "a/plain").split()[-1], "frequent")
         self.assertNotIn("promote", text)
+
+
+class MinimumArgumentTests(unittest.TestCase):
+    def test_a_minimum_that_is_not_an_integer_is_refused(self):
+        for bad in (True, 2.5, "20", None):
+            with self.assertRaises(TypeError):
+                report_data([], min_opportunities=bad)
+            with self.assertRaises(TypeError):
+                report([], min_opportunities=bad)
+
+    def test_the_default_is_exported_from_the_package_root(self):
+        self.assertIn("RULE_MIN_OPPORTUNITIES", ruleprobe.__all__)
+        self.assertEqual(ruleprobe.RULE_MIN_OPPORTUNITIES, 20)
+
+
+class LayoutTests(unittest.TestCase):
+    ROWS = ([row({"a/plain": 1, "o/order": 1}, {"o/order": tally(30, 21, 2)})]
+            + [row({"a/plain": 1}, {"o/order": tally(0, 0)}) for _ in range(20)])
+
+    def test_the_note_starts_under_its_header_beside_compliance_columns(self):
+        text = report(self.ROWS, registry=REGISTRY)
+        head = text.split("\n")[0]
+        plain = line(text, "a/plain")
+        self.assertEqual(plain.index("frequent"), head.index("note"))
+        self.assertEqual(len(line(text, "o/order")), head.index("note") - 2)
+        self.assertTrue(line(text, "o/order").endswith("70%"))
+        self.assertTrue(head.index("rate") + len("rate") == len(line(text, "o/order")))
+
+    def test_compliance_columns_and_the_validity_column_line_up(self):
+        text = report(self.ROWS, registry=REGISTRY, validity={})
+        head = text.split("\n")[0]
+        self.assertEqual(head.split()[-6:], ["opportunities", "followed", "undecided", "rate",
+                                             "note", "validity"])
+        self.assertEqual(line(text, "a/plain").index("frequent"), head.index("note"))
+        for did in ("a/plain", "o/order"):
+            got = line(text, did)
+            self.assertEqual(got.index("not in the corpus"), head.index("validity"), did)
+        self.assertEqual(line(text, "o/order").split()[5:9], ["30", "21", "2", "70%"])
+
+    def test_by_stance_prints_each_groups_compliance_under_it(self):
+        rows = [row({"o/order": 1}, {"o/order": tally(3, 2)}, stances={"c": "on"}),
+                row({"o/order": 1}, {"o/order": tally(4, 4, 1)}, stances={"c": "off"})]
+        lines = report(rows, by="stance", registry=REGISTRY, min_opportunities=4).split("\n")
+        self.assertEqual(lines[0].split(), ["stance", "sessions", "hits", "top", "detectors"])
+        self.assertEqual(lines[2].split()[:3], ["c=off", "1", "1"])
+        self.assertEqual(lines[3], "  o/order: opportunities 4, followed 4, undecided 1, rate 100%")
+        self.assertEqual(lines[4].split()[:3], ["c=on", "1", "1"])
+        self.assertEqual(lines[5], "  o/order: opportunities 3, followed 2, undecided 0, rate -")
 
 
 class DeterminismTests(unittest.TestCase):

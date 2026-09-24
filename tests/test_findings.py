@@ -241,7 +241,7 @@ class GatingFindingTests(unittest.TestCase):
 
     def test_finding_11_json_applies_the_same_denominator_and_min_sessions(self):
         _code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
-                                   "--min-sessions", "1", "--promote-share", "0.1",
+                                   "--min-sessions", "1", "--frequent-share", "0.1",
                                    "--json")
         data = json.loads(text)
         self.assertEqual(data["min_sessions"], 1)

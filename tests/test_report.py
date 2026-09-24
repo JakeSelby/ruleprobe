@@ -61,7 +61,7 @@ class NoteTests(unittest.TestCase):
 
     def test_a_common_observable_is_marked_frequent(self):
         rows = [row({"a/one": 1}) for _ in range(5)] + [row({}) for _ in range(5)]
-        text = report(rows, min_sessions=10, promote_share=0.30, registry=REGISTRY)
+        text = report(rows, min_sessions=10, frequent_share=0.30, registry=REGISTRY)
         self.assertIn("frequent", text.split("a/one")[1].split("\n")[0])
         self.assertIn("unobserved", text.split("a/two")[1])
 

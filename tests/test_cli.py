@@ -86,7 +86,7 @@ class ReportCommandTests(unittest.TestCase):
 
     def test_the_notes_are_tunable_from_the_command_line(self):
         _, text = run_cli("report", "--root", FIXTURES, "--min-sessions", "1",
-                          "--promote-share", "0.1")
+                          "--frequent-share", "0.1")
         self.assertIn("frequent", text)
 
 

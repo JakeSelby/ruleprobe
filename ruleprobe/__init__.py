@@ -24,8 +24,8 @@ from .events import Hit, Session, counts
 from .matchers import compile_detector, compile_matcher, is_undecided
 from .readers import iter_sessions
 from .registry import DEFAULT, Detector, Registry, from_spec, register_compiler, run
-from .report import (RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, measure, report,
-                     report_data)
+from .report import (RULE_FREQUENT_SHARE, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS,
+                     measure, report, report_data)
 from .rules import Bundle, Finding, RuleEntry, load_bundle
 from .shell import analyse, pipelines
 from .validity import (CorpusError, DEFAULT_FLOOR, Score, load_corpus,
@@ -40,5 +40,6 @@ __all__ = [
     "analyse", "compile_detector", "compile_matcher", "counts", "from_spec",
     "is_undecided", "iter_sessions", "load_bundle", "load_corpus", "measure", "pipelines",
     "register_compiler", "report", "report_data", "run", "score_corpus", "score_examples", "validity",
-    "validity_table", "RULE_MIN_SESSIONS", "RULE_PROMOTE_SHARE", "__version__",
+    "validity_table", "RULE_MIN_SESSIONS", "RULE_FREQUENT_SHARE", "RULE_MIN_OPPORTUNITIES",
+    "__version__",
 ]

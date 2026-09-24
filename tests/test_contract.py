@@ -484,12 +484,12 @@ class ValidityTests(unittest.TestCase):
     def test_validity_report_and_report_data(self):
         scores = validity(registry=Registry(common.DETECTORS), directory=None)
         self.assertTrue(all(isinstance(s, Score) for s in scores.values()))
-        self.assertIsInstance(report([], by="rule", min_sessions=20, promote_share=0.30), str)
+        self.assertIsInstance(report([], by="rule", min_sessions=20, frequent_share=0.30), str)
         self.assertIsInstance(report_data([], by="rule"), dict)
 
     # Covers: the 0.2.0 `min_opportunities` keyword of `report` and `report_data`.
     def test_report_and_report_data_take_min_opportunities(self):
-        self.assertIsInstance(report([], by="rule", min_sessions=20, promote_share=0.30,
+        self.assertIsInstance(report([], by="rule", min_sessions=20, frequent_share=0.30,
                                      min_opportunities=20), str)
         self.assertEqual(report_data([], by="rule", min_opportunities=5)["min_opportunities"],
                          5)
