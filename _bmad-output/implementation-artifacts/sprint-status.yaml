@@ -1,0 +1,151 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 09-24-2026 02:22
+last_updated: 09-24-2026 02:27
+project: ruleprobe
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: done
+  1-1-decision-contract-the-schema-version-s-type-and-the-value-0: done
+  1-2-decision-api-whether-root-__all__-names-outside-fr-30-join-t: done
+  1-3-decision-contract-whether-a-0-x-minor-may-break-again-after: done
+  1-4-feat-declarative-schema_version-on-detector-entries: done
+  1-5-feat-report-schema_version-on-rows-and-report_data: done
+  1-6-feat-registry-persisted-fold-map-and-a-shipped-id-rename-tes: done
+  1-7-existing-bug-19-rp-b001-fix-matchers-not-and-absent-fire-on: done
+  1-8-feat-api-declare-the-public-api-and-hold-it-with-a-contract: done
+  1-9-docs-contract-state-the-versioning-policy-and-name-the-0-2-b: done
+  1-10-test-envelope-fail-on-a-new-dependency-a-network-call-or-a-w: done
+  epic-1-retrospective: done
+
+  epic-2: done
+  2-1-decision-report-the-minimum-opportunity-count: done
+  2-2-decision-registry-how-a-python-detector-declares-an-opportun: done
+  2-3-decision-report-what-promote-becomes: done
+  2-4-feat-matchers-opportunities-for-order-and-absent-detectors: done
+  2-5-feat-report-rows-carry-compliance-for-detectors-that-define: done
+  2-6-feat-report-compliance-per-opportunity-for-order-and-absent: done
+  2-7-decision-report-compliance-by-position-stays-out-of-0-2-0: done
+  epic-2-retrospective: optional
+
+  epic-3: in-progress
+  3-1-decision-rules-the-section-split-unit: done
+  3-2-decision-detectors-the-catalog-s-first-shapes-and-how-many: done
+  3-3-feat-rules-print-the-measured-share-in-the-coverage-block: done
+  3-4-feat-rules-split-a-rule-file-into-one-rule-per-section: done
+  3-5-feat-detectors-a-shipped-catalog-of-common-rule-shapes-bound: 
+    ready-for-dev
+  3-6-spike-report-time-the-sixty-second-path-on-a-reference-volum: 
+    ready-for-dev
+  epic-3-retrospective: optional
+
+  epic-4: in-progress
+  4-1-feat-cli-ruleprobe-explain-prints-the-event-behind-every-hit: done
+  4-2-feat-cli-ruleprobe-label-turns-a-false-positive-into-a-label: done
+  4-3-spike-validity-field-precision-per-shipped-detector-from-han: 
+    ready-for-dev
+  epic-4-retrospective: optional
+
+  epic-5: in-progress
+  5-1-spike-readers-choose-the-third-runtime-cursor-or-gemini-cli: done
+  5-2-feat-readers-read-the-third-runtime-s-transcripts-into-the-e: 
+    ready-for-dev
+  5-3-test-corpus-labelled-third-runtime-sessions-with-near-misses: 
+    ready-for-dev
+  epic-5-retrospective: optional
+
+  epic-6: in-progress
+  6-1-decision-release-the-success-targets-and-window-for-0-2-0: done
+  6-2-chore-release-re-derive-the-harness-surface-and-cut-0-2-0: ready-for-dev
+  epic-6-retrospective: optional
+
+  epic-7: done
+  7-1-decision-draft-whether-the-drafting-command-belongs-in-0-2-0: done
+  7-2-feat-draft-an-opt-in-command-that-drafts-a-detector-from-a-r: done
+  epic-7-retrospective: optional
+action_items:
+  - id: "epic-1-retro-item-1-run-the-series-contract-check-on-every-p"
+    epic: 1
+    action: "Run the series-contract check on every pull request once v0.2.0 exists,
+      and report a base file with no __version__ as a release error"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-2-refuse-an-x-y-0-release-that-drops-a-dec"
+    epic: 1
+    action: "Refuse an X.Y.0 release that drops a declared name without a Breaking
+      heading, as decision 1.3 requires"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-3-decide-whether-the-series-contract-cover"
+    epic: 1
+    action: "Decide whether the series contract covers call shapes and schemas, not
+      only names, and amend FR-31 or the preflight story to match"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-4-answer-epics-md-open-questions-17-18-and"
+    epic: 1
+    action: "Answer epics.md open questions 17, 18 and 19 before story 6.2 cuts 0.2.0"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-5-clear-the-stale-assumption-tag-in-the-sp"
+    epic: 1
+    action: "Clear the stale ASSUMPTION tag in the spine AD-9 package-data bullet
+      through bmad-architecture update"
+    owner: "architect"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-6-state-in-the-matchers-docstring-and-read"
+    epic: 1
+    action: "State in the matchers docstring and README that entry schema versions
+      1 and 2 are read the same way"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-7-name-the-base-init-preflight-step-in-the"
+    epic: 1
+    action: "Name the --base-init preflight step in the AGENTS.md Gate block and clear
+      its deferred-work entry"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-1-retro-item-8-require-a-this-test-can-fail-line-red-be"
+    epic: 1
+    action: "Require a this-test-can-fail line (red-before run or mutant) in dev notes
+      for contract, envelope and gate tests, in docs/bmad-governance.md"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"

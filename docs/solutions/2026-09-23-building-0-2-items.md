@@ -1,0 +1,8 @@
+# Building a 0.2 item: traps and the commands that worked
+
+- 2026-09-23: Run the 3.9 floor in a worktree as `uv run --no-project --python 3.9 python -m unittest discover -s tests`; without `--no-project`, `uv` writes an ignored `.venv/` and `uv.lock` into the worktree, and a clean `worktree remove` then refuses it.
+- 2026-09-23: `bmad-build` takes the item's story file as its spec, so enter it at step 3 and keep the workflow's own state (`status`, `baseline_commit`, review loops) in the story's Dev agent record, never in its frontmatter, which `scripts/bmad_issue_sync.py` owns and rewrites.
+- 2026-09-23: The `issue-ownership` check fails a PR with two closing references, and GitHub reads phrases such as "fix #19" as one. Grep the body before `gh pr create`: `grep -n -i -E "(close|closes|closed|fix|fixes|fixed|resolve|resolves|resolved)[: ]+\(?#[0-9]" body.md`.
+- 2026-09-23: A rebase that applies cleanly can still break the branch when main renamed an import it uses (#51 over #81: `run` became `_run`, a `NameError` in 54 tests). Run the whole suite after every rebase, before the changelog line and the push.
+- 2026-09-23: A regex that finds a command position by splitting on `;&|(` backtracks exponentially on a long `a && b && …` chain. A detector reads segments through the shared shell parse (AD-5, the declarative `command` and `git` keys), and any regex it keeps gets a hostile-input timing test.
+- 2026-09-23: Redacting printed transcript text needs redact, then escape, then redact again: an escape such as `\x1c` can finish a key name (`\x1client_secret`) that the raw control character had broken.
