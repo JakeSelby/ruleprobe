@@ -479,9 +479,9 @@ secrets/secret-in-write                  15   13   15    0    0   1.00    1.00  
 testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find       10   15   10    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
-verification/no-verify                   11   12   11    0    0   1.00    1.00   1.00
+verification/no-verify                   11   13   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    87  110   87    0    0   1.00    1.00   1.00  floor 0.90
+total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
