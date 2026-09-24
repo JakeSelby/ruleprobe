@@ -22,6 +22,51 @@ SECRET_PATTERNS = [
     r"ghp_[A-Za-z0-9]{20,}", r"sk-[A-Za-z0-9]{20,}",
 ]
 
+#: What `redact` puts where a secret shape was.
+REDACTED = "[redacted]"
+
+_PRIVATE_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
+_REST_OF_TOKEN = re.compile(r"\S*")
+_ASSIGNED_VALUE = re.compile(r"[ \t]*\S*")
+
+
+def redact(text):
+    """`text` with every `SECRET_PATTERNS` shape replaced by `REDACTED`: the one path for
+    text ruleprobe prints from a transcript.
+
+    A match is widened before it is replaced, because several patterns name only the front
+    of a secret: to the end of its run of non-space characters (`xoxb-` and the token after
+    it), past a `:` or `=` to the value it assigns, and from a private key's header to its
+    footer, or to the end of the text when there is none. Over-redacting is the safe side.
+    Anything but a string is returned as the empty string.
+    """
+    if not isinstance(text, str):
+        return ""
+    for pattern in SECRET_PATTERNS:
+        text = _redact_one(re.compile(pattern), text)
+    return text
+
+
+def _redact_one(compiled, text):
+    out, pos = [], 0
+    while True:
+        found = compiled.search(text, pos)
+        if found is None:
+            break
+        matched = found.group(0)
+        if "PRIVATE KEY" in matched:
+            footer = _PRIVATE_KEY_END.search(text, found.end())
+            end = footer.end() if footer else len(text)
+        elif matched.endswith((":", "=")):
+            end = _ASSIGNED_VALUE.match(text, found.end()).end()
+        else:
+            end = _REST_OF_TOKEN.match(text, found.end()).end()
+        out.append(text[pos:found.start()])
+        out.append(REDACTED)
+        pos = max(end, found.start() + 1)
+    out.append(text[pos:])
+    return "".join(out)
+
 #: A `find` argument that narrows the search, or consumes the result. One of these present
 #: and the call is not the unfiltered walk this detector is looking for.
 FIND_FILTERS = frozenset((

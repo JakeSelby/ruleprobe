@@ -396,3 +396,115 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
                      % (group["key"][:42], group["sessions"], group["hits"],
                         ", ".join("%s %d" % (did, n) for did, n in group["top"]) or "-"))
     return "\n".join(lines)
+
+
+def _hit_key(hit):
+    """Imported late for the same reason as `_validity_note`: a label and a hit are keyed by
+    one function, and it lives in `ruleprobe.validity`."""
+    from .validity import hit_key
+
+    return hit_key(hit)
+
+
+def _redact(text):
+    """`detectors.common.redact`, the one path for text printed from a transcript."""
+    from .detectors.common import redact
+
+    return redact(text)
+
+
+def session_address(runtime, session_id):
+    """`<runtime>:<session id>`: a session id is unique within the runtime that wrote it,
+    and a hit key only within its session, so this plus the key names one hit anywhere."""
+    return "%s:%s" % (runtime or "", session_id or "")
+
+
+def _turn_order(turn):
+    return (0, turn, "") if isinstance(turn, int) and not isinstance(turn, bool) \
+        else (1, 0, str(turn))
+
+
+def _event_field(event):
+    """The name and text of what a hit on `event` matched: a Bash command, or any other
+    tool's whole input as sorted JSON, since a hit does not say which of its fields fired."""
+    import json
+
+    data = event.get("input") if isinstance(event.get("input"), dict) else {}
+    if event.get("name") == "Bash" and isinstance(data.get("command"), str):
+        return "command", data["command"]
+    return "input", json.dumps(data, sort_keys=True, default=str)
+
+
+def explain(sessions, stances=None, registry=DEFAULT, errors=None):
+    """Every hit `measure()` would count over `sessions`, one dict each, with the event
+    behind it.
+
+    Each dict carries `session` (the `session_address`), `key` (the hit's
+    `"<turn>:<tool_use_id>"`, or `"<turn>:-"` for a hit on the session), `detector`, `turn`,
+    `tool_use_id`, `tool`, `field` and `value`. `value` has been through
+    `detectors.common.redact`; a session hit has no event, so its `tool`, `field` and
+    `value` are None. Sessions keep the order given; within one, hits are by turn, a
+    session hit ahead of the tool uses, those in transcript order, then by detector id. `errors`, when a list is passed, collects what `run()`
+    collects, with the session address added. Nothing is written and no row is built, so
+    no report number can move.
+    """
+    for session in sessions:
+        address = session_address(session.runtime, session.id)
+        events = [e for e in (session.events or []) if isinstance(e, dict)]
+        position = {}
+        for index, event in enumerate(events):
+            if event.get("kind") == "tool_use" and event.get("id") is not None:
+                position.setdefault(event.get("id"), index)
+        found = []
+        session_errors = [] if errors is not None else None
+        hits = run(events, stances, registry=registry, errors=session_errors)
+        for detector_id in sorted(hits):
+            for one in hits[detector_id]:
+                at = position.get(one.tool_use_id, -1) if one.tool_use_id else -1
+                found.append(((_turn_order(one.turn), at, detector_id), one))
+        for entry in session_errors or ():
+            errors.append(dict(entry, session=address))
+        found.sort(key=lambda pair: pair[0])
+        for (_order, at, _did), one in found:
+            item = {"session": address, "key": _hit_key(one), "detector": one.id,
+                    "turn": one.turn, "tool_use_id": one.tool_use_id, "tool": None,
+                    "field": None, "value": None}
+            if at >= 0:
+                event = events[at]
+                field, value = _event_field(event)
+                item.update(tool=event.get("name"), field=field, value=_redact(value))
+            yield item
+
+
+def explain_text(item):
+    """One `explain()` dict as the block `ruleprobe explain` prints, redacted whole."""
+    lines = ["session   %s" % item["session"],
+             "key       %s" % item["key"],
+             "detector  %s" % item["detector"],
+             "turn      %s" % item["turn"]]
+    if item["field"] is not None:
+        lines.append("tool use  %s (%s)" % (item["tool_use_id"], item["tool"]))
+        body = "\n          ".join((item["value"] or "").split("\n"))
+        lines.append("%-9s %s" % (item["field"], body))
+    elif item["tool_use_id"]:
+        lines.append("tool use  %s (not an event in this session)" % item["tool_use_id"])
+    else:
+        lines.append("tool use  -  (a hit on the session, not on one event)")
+    return _redact("\n".join(lines))
+
+
+def explain_row(row):
+    """What explain can say about a stored row: that it carries counts only, and the rerun
+    over its runtime and session id that would explain each hit."""
+    row = row if isinstance(row, dict) else {}
+    runtime = row.get("runtime") if isinstance(row.get("runtime"), str) else ""
+    session_id = row.get("session_id") if isinstance(row.get("session_id"), str) else ""
+    hits = sum(folded_rules(row, {}).values())
+    rerun = "ruleprobe explain"
+    if runtime:
+        rerun += " --runtime %s" % runtime
+    if session_id:
+        rerun += " --session %s" % session_address(runtime, session_id)
+    return _redact("session %s: this row carries counts only (%d hit(s)), not the events "
+                  "behind them; rerun `%s` over its transcripts to see each hit"
+                  % (session_address(runtime, session_id), hits, rerun))

@@ -311,6 +311,43 @@ under-count: a missed hit is a quieter report, a false hit is a wrong one.
 `whole-file-cat` firing 89 times above does not prove the agent wasted context; it proves it
 read 89 files whole, which is a fact worth having and an argument worth starting.
 
+## Why did that fire?
+
+A count you are surprised by is one you want to check. `ruleprobe explain` reruns the
+detectors over the same transcripts and prints every hit `report` counts, with the event
+behind it:
+
+```sh
+uvx ruleprobe explain                                   # every hit
+uvx ruleprobe explain --detector verification/no-verify # one detector's
+uvx ruleprobe explain --session claude-code:sess-1 --key 1:toolu_2
+```
+
+```
+session   claude-code:sess-1
+key       1:toolu_2
+detector  verification/no-verify
+turn      1
+tool use  toolu_2 (Bash)
+command   git commit --no-verify -m 'fix: the thing'
+```
+
+A hit's address is its session, `<runtime>:<session id>`, plus its key, `<turn>:<tool use
+id>`, or `<turn>:-` for a hit on the session rather than on one tool use, which has no single
+event to show. A key is unique only within its session, so both are printed. What is shown is
+the Bash command, or any other tool's whole input as JSON, because a hit does not record which
+field of the event matched. `--session` takes the address or the bare session id;
+`--session`, `--detector` and `--key` each narrow the output, and one that matches nothing
+prints nothing and exits 0. It takes `report`'s `--root`, `--runtime` and `--since`, and
+`--rules`, `--detectors` and `--no-config`.
+
+Every line it prints passes through `redact` first, which replaces each shape in
+`SECRET_PATTERNS`, with the rest of its token, the value assigned after it, or a private
+key's body, by `[redacted]`. Like `report`, it writes nothing and sends nothing, and running
+it changes no report number. A stored row keeps counts only, not the events behind them, so
+it cannot be explained after the fact: `ruleprobe.report.explain_row(row)` says so and names
+the rerun over that row's runtime and session id that would.
+
 ## How good are the detectors?
 
 A hit rate is a rate of the detector until somebody says what the detector *should* have

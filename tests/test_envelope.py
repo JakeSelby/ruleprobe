@@ -343,5 +343,32 @@ class ReportWritesAndSendsNothingTests(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(scratch)), ["existing.txt"])
 
 
+class ExplainWritesAndSendsNothingTests(unittest.TestCase):
+    """`explain` holds the same envelope as `report`: the transcripts are read, the detectors
+    rerun in memory, and each hit printed."""
+
+    temporary_directory = ReportWritesAndSendsNothingTests.temporary_directory
+    run_guarded = ReportWritesAndSendsNothingTests.run_guarded
+
+    def test_explain_over_the_corpus_runs_with_no_socket_and_no_write(self):
+        code, text, err = self.run_guarded("explain", "--root", CORPUS_SESSIONS, "--no-config")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertTrue(text.startswith("session   "))
+        self.assertIn("detector  transcript-hygiene/whole-file-cat", text)
+
+    def test_explain_with_config_discovery_and_filters_writes_nothing(self):
+        home = self.temporary_directory()
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(home)
+        with mock.patch.dict(os.environ, {"HOME": home, "XDG_CONFIG_HOME": home}):
+            code, text, err = self.run_guarded("explain", "--root", CORPUS_SESSIONS,
+                                               "--detector", "no/such-detector")
+        self.assertEqual((code, text), (0, ""))
+        self.assertNotIn("produced no session", err)
+        self.assertEqual(os.listdir(home), [])
+
+
 if __name__ == "__main__":
     unittest.main()
