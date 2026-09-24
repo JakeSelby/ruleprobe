@@ -80,9 +80,12 @@ Read-only. A local AD that weakens either is a conflict to surface, not an overr
   that breaks the zip import the harness relies on.
 - **Rule:**
   - Imports point down the graph below. Nothing imports `cli`.
-  - Three upward imports are sanctioned, each inside a function or at the module's tail, and no
+  - Five upward imports are sanctioned, each inside a function or at the module's tail, and no
     others: `registry.from_spec` imports `matchers`; `report._validity_note` imports `validity`;
-    `registry` imports `detectors.common` at its tail to populate `DEFAULT`.
+    `registry` imports `detectors.common` at its tail to populate `DEFAULT`; and explain's two
+    helpers in `report`, `report._hit_key` importing `validity` for `hit_key` (AD-6) and
+    `report._redact` importing `detectors.common` for `redact` (AD-13). The explain pair is
+    implemented under #51 and ships in v0.2.0.
   - A new module takes a place in this graph in the change that adds it, and the spine is updated.
   - `detectors.catalog` (planned, v0.2.0, story 3.5) is a Python literal module under AD-9's package
     data rule. `rules` imports it; it imports `matchers` to compile its entries and nothing else.
