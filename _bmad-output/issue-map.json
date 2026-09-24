@@ -8,7 +8,7 @@
     "story": 21,
     "task": 8,
     "bug": 13,
-    "chore": 6,
+    "chore": 7,
     "spike": 4,
     "decision": 14
   },
@@ -905,6 +905,19 @@
       "type": "decision",
       "native_type": "Task",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-D013.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C006",
+      "github_number": 117,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/117",
+      "title": "docs(changelog): move the Documentation URL entry from 0.2.0 to Unreleased",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C006.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",

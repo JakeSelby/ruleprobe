@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+### Added
+
+- The package metadata links the reference site, <https://ruleprobe.jakeselby.com>, as its
+  `Documentation` URL ([#67](https://github.com/JakeSelby/ruleprobe/issues/67)). The site is built
+  from the README, this changelog and the planning corpus at each release tag.
+
 ## 0.2.0 (2026-09-24)
 
 ### Breaking
@@ -142,9 +148,6 @@ the policy.
 - The declarative `git` matcher gains `config_regex`, matched against the effective value of each
   `-c key=value` given before the subcommand, and `ruleprobe.shell.git_config` returns those values
   ([#88](https://github.com/JakeSelby/ruleprobe/issues/88)).
-- The package metadata links the reference site, <https://ruleprobe.jakeselby.com>, as its
-  `Documentation` URL ([#67](https://github.com/JakeSelby/ruleprobe/issues/67)). The site is built
-  from the README, this changelog and the planning corpus at each release tag.
 
 ### Changed
 
