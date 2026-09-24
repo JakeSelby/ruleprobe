@@ -37,9 +37,9 @@ it has never fired in the window. `frequent` means it fired in more than 30 perc
 it describes the share and advises nothing. Both notes stay blank until there are twenty
 measured sessions, because a share over five sessions is noise.
 
-Nothing is sent anywhere, no model is asked anything, nothing is written to disk, and the
-same transcript gives the same answer every time. Python 3.9 or newer, standard library
-only.
+Nothing is sent anywhere, no model is asked anything, `report` and `explain` write nothing,
+`label` writes only under the directory you name, and the same transcript gives the same
+answer every time. Python 3.9 or newer, standard library only.
 
 Other groupings, and a window:
 
@@ -413,6 +413,38 @@ under an obvious mistake and a place to put the next surprising transcript, not 
 field accuracy. Growing it is the cheapest contribution this repository takes: add a session
 under `ruleprobe/corpus/sessions/`, label it in `ruleprobe/corpus/labels.yaml`, and the
 table above moves.
+
+**A wrong hit of yours becomes a labelled negative.** When `ruleprobe explain` shows a hit that
+should not have fired, `ruleprobe label` records it in a corpus directory you name:
+
+```sh
+mkdir -p ~/ruleprobe-corpus
+ruleprobe label --session claude-code:sess-1 --detector verification/no-verify \
+                --key 1:toolu_2 --corpus ~/ruleprobe-corpus --name no-verify-in-a-message
+ruleprobe corpus --corpus ~/ruleprobe-corpus
+```
+
+It reruns the detector over your transcripts, takes the one event behind the hit, and writes it,
+redacted, as `sessions/<name>.events.jsonl` - one event per line, read back without a runtime
+reader - with one `near` label for it in `labels.yaml`, which it creates or appends to so a
+hand-written file keeps its comments. It is the only command that writes, and it writes nothing
+outside that directory. It refuses, says why and writes nothing when the hit is a session hit
+(`<turn>:-`), which one event cannot reproduce; when the written event no longer produces the
+hit, because redaction changed what the detector matched or the hit needs the events around
+it, since that negative would pass trivially; when a secret shape would survive into the
+written bytes; and when the session file exists already or `labels.yaml` would not read back
+as before plus one entry. It takes `report`'s `--root`, `--runtime` and `--since`, and
+`--rules`, `--detectors` and `--no-config`; `--name` is a plain file stem. It takes no
+`--stance`, because a detector gated on one is refused, since the corpus runs with none, and
+no `--plugins`, because `ruleprobe corpus` loads none to score the negative with. When a
+subagent's transcript shares its parent's session id, the session with the hit at the key is
+the one taken. It prints the `ruleprobe corpus` command that scores the new negative, with the
+same `--rules`, `--detectors` and `--no-config` it was given. The new negative scores as a
+false positive until the detector stops firing on it, which is the point.
+
+In a corpus's `sessions/`, the suffix `.events.jsonl` is reserved: a file ending in it is read
+as one event per line, never through a runtime reader, so a native transcript must not be
+named that way.
 
 **A detector of your own scores itself.** Rather than a corpus, a declarative detector may
 carry an `examples:` block of minimal cases, and `ruleprobe corpus --rules ./docs/rules`

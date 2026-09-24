@@ -19,6 +19,9 @@ reason - a file that two readers disagree about is worse than one that does not 
 with a leading zero, which is octal in YAML and was decimal here. Quote either to mean the
 string.
 
+`emit()` is the writer: it spells a value in this same subset, block style, and adds nothing
+the reader lacks, so `parse(emit(value)) == value` for every value it accepts.
+
 JSON is the other accepted spelling: `load()` reads a `.json` file with the standard library
 and reports its errors the same way. The two produce the same objects, so which one a
 detector file is written in is a matter of taste.
@@ -28,8 +31,9 @@ detector file is written in is a matter of taste.
 """
 import json
 import re
+import unicodedata
 
-__all__ = ["DeclarativeError", "LineMap", "load", "parse", "parse_with_lines",
+__all__ = ["DeclarativeError", "LineMap", "emit", "load", "parse", "parse_with_lines",
            "split_front_matter"]
 
 #: How deeply a document may nest. A detector is a handful of levels; anything past this is
@@ -492,3 +496,93 @@ def _skip_space(text, i):
     while i < len(text) and text[i] in " \t":
         i += 1
     return i
+
+
+# --- the writer ------------------------------------------------------------------------
+
+# A string written bare: it cannot start like a number, a quote, a flow collection or a
+# reserved character, and holds nothing the reader splits on.
+_EMIT_PLAIN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_./-]*$")
+
+
+def emit(value, indent=0):
+    """`value` in the subset, block style, `indent` spaces in, ending in a newline.
+
+    Only what the reader reads back unchanged is written: dicts with string keys, lists,
+    strings, integers, floats, booleans and None. A string is bare when it reads back as
+    itself, double-quoted when it holds no quote or backslash, and single-quoted otherwise;
+    one holding a control character or a line separator has no spelling here and is refused,
+    as is anything else, and so is a value nested past `MAX_DEPTH` or holding itself. Raises
+    `DeclarativeError`, and never returns text that does not parse back to `value`.
+    """
+    lines = _emit_block(value, indent, 0)
+    text = "\n".join(lines) + "\n"
+    try:
+        same = parse(text) == value
+    except DeclarativeError:
+        same = False
+    if not same:
+        raise DeclarativeError("cannot be written in the subset: %r" % (value,))
+    return text
+
+
+def _emit_block(value, indent, depth):
+    # The reader's bound, which also ends a value that holds itself.
+    if depth > MAX_DEPTH:
+        raise DeclarativeError("nested too deeply to write")
+    pad = " " * indent
+    if isinstance(value, dict) and value:
+        lines = []
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise DeclarativeError("a mapping key must be a string: %r" % (key,))
+            if isinstance(item, (dict, list)) and item:
+                lines.append("%s%s:" % (pad, _emit_scalar(key)))
+                lines.extend(_emit_block(item, indent + 2, depth + 1))
+            else:
+                lines.append("%s%s: %s" % (pad, _emit_scalar(key), _emit_scalar(item)))
+        return lines
+    if isinstance(value, list) and value:
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)) and item:
+                # The item's first line moves onto the dash; the rest stay two columns in.
+                inner = _emit_block(item, indent + 2, depth + 1)
+                lines.append("%s- %s" % (pad, inner[0][indent + 2:]))
+                lines.extend(inner[1:])
+            else:
+                lines.append("%s- %s" % (pad, _emit_scalar(item)))
+        return lines
+    return [pad + _emit_scalar(value)]
+
+
+def _emit_scalar(value):
+    if value is None:
+        return "null"
+    if value is True or value is False:
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        text = repr(value)
+        if not _FLOAT_RE.match(text):
+            raise DeclarativeError("a float the subset cannot spell: %r" % (value,))
+        return text
+    if isinstance(value, dict) and not value:
+        return "{}"
+    if isinstance(value, list) and not value:
+        return "[]"
+    if not isinstance(value, str):
+        raise DeclarativeError("not a value the subset holds: %r" % (value,))
+    if any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in value):
+        raise DeclarativeError("a control character or line separator has no spelling "
+                               "in the subset: %r" % (value,))
+    if _EMIT_PLAIN_RE.match(value):
+        try:
+            if _plain(value) == value:
+                return value
+        except DeclarativeError:
+            pass
+    if '"' not in value and "\\" not in value:
+        return '"%s"' % value
+    return "'%s'" % value.replace("'", "''")

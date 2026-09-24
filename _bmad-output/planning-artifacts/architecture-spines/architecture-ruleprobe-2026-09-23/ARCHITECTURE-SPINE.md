@@ -385,7 +385,7 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
   - The 0.2 catalog is a small set of six to eight shapes, each with `examples:` at the floor, listed
     with their detector kinds in PRD FR-16 (PRD Q3, decided 2026-09-23).
 
-### AD-13: Explain, label and redaction [PROPOSED]
+### AD-13: Explain, label and redaction [ADOPTED; explain implemented under #51 and label under #52, ship in v0.2.0]
 
 - **Binds:** FR-25, FR-26, NFR-5.
 - **Prevents:** a secret printed by explain or written into a corpus, or the row widened to carry hit

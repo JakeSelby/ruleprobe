@@ -22,17 +22,24 @@ counting; it is documentation of intent, not arithmetic.
 A detector with no corpus label and no `examples:` block of its own is *unscored* - the
 report says "no examples" rather than inventing a number - and the floor gate passes over
 it, because an unmeasured detector is a gap to see, not a failure to fix.
+
+A corpus session is a native transcript read through the real readers, or an event-schema
+file, `<name>.events.jsonl`, holding one event dict per line: the shape `ruleprobe label`
+writes. `load_events` reads one without a runtime reader and takes each event's `turn` and
+`final` as written, so a label keyed to turn 37 still names its event. The suffix is
+reserved under `sessions/`: a native transcript named that way is never read by a reader.
 """
+import json
 import os
 
 from .declarative import DeclarativeError, load
-from .events import Hit  # noqa: F401  - named in the docstring's contract
+from .events import Hit, Session  # noqa: F401  - Hit is named in the docstring's contract
 from .readers import iter_sessions
 from .registry import DEFAULT, fold_map, run
 
 __all__ = ["CorpusError", "Score", "DEFAULT_FLOOR", "corpus_dir", "load_corpus",
-           "score_corpus", "score_examples", "validity", "validity_table",
-           "below_floor", "scores_as_dict"]
+           "load_events", "read_events", "score_corpus", "score_examples", "validity",
+           "validity_table", "below_floor", "scores_as_dict"]
 
 #: The floor `ruleprobe corpus` fails under. It is a CI gate for this repository, not a
 #: runtime failure for a user: nothing in `ruleprobe report` reads it.
@@ -42,6 +49,10 @@ DEFAULT_FLOOR = 0.9
 CORPUS_DIRNAME = "corpus"
 LABELS_FILE = "labels.yaml"
 SESSIONS_DIRNAME = "sessions"
+#: The suffix of an event-schema corpus session, read by `load_events` and never by a reader.
+EVENTS_SUFFIX = ".events.jsonl"
+#: The `runtime` a session read by `load_events` carries.
+EVENTS_RUNTIME = "events"
 
 _LABEL_KEYS = ("at", "fire", "near", "note")
 _SESSION_KEYS = ("session", "note", "labels")
@@ -159,6 +170,57 @@ def hit_key(hit):
     return "%s:%s" % (hit.turn, hit.tool_use_id or "-")
 
 
+def read_events(text, path="<string>"):
+    """The events in an event-schema session's text, one JSON object per non-blank line.
+
+    Each is kept as written - `turn` and `final` are never re-derived - and only its shape is
+    checked: an object with a string `kind` and an integer `turn`. Raises `CorpusError`, with
+    the line, for anything else.
+    """
+    events = []
+    for no, line in enumerate(text.split("\n"), 1):
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError as exc:
+            raise CorpusError("%s:%d: not JSON: %s" % (path, no, exc))
+        if not isinstance(event, dict):
+            raise CorpusError("%s:%d: an event is a JSON object" % (path, no))
+        turn = event.get("turn")
+        if not isinstance(event.get("kind"), str) or not isinstance(turn, int) \
+                or isinstance(turn, bool):
+            raise CorpusError("%s:%d: an event carries a string kind and an integer turn"
+                              % (path, no))
+        events.append(event)
+    return events
+
+
+def load_events(path):
+    """One `<name>.events.jsonl` corpus session as a `Session`, its id the file name without
+    the suffix and its runtime `EVENTS_RUNTIME`. Raises `CorpusError`."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise CorpusError("%s: cannot read: %s" % (path, exc))
+    events = read_events(text, path)
+    if not events:
+        raise CorpusError("%s: holds no event" % path)
+    name = os.path.basename(path)
+    return Session(name[:-len(EVENTS_SUFFIX)], "", EVENTS_RUNTIME, events, path)
+
+
+def _event_session_paths(sessions_dir):
+    """Every `.events.jsonl` under `sessions_dir`, in path order, as the readers walk."""
+    found = []
+    for directory, _dirs, files in os.walk(sessions_dir, followlinks=True):
+        for name in files:
+            if name.endswith(EVENTS_SUFFIX):
+                found.append(os.path.join(directory, name))
+    return sorted(found)
+
+
 def load_corpus(directory=None):
     """Every labelled session in the corpus, in the order the labels file names them.
 
@@ -174,8 +236,20 @@ def load_corpus(directory=None):
     if not isinstance(document, dict) or not isinstance(document.get("sessions"), list):
         raise CorpusError("%s: expected a mapping with a sessions list" % path)
     sessions_dir = os.path.join(base, SESSIONS_DIRNAME)
-    by_name = dict((os.path.basename(s.path), s)
-                   for s in iter_sessions(root=sessions_dir))
+    # An event-schema file ends in `.jsonl` too, so the readers see it; it is theirs to skip
+    # and `load_events`' to read.
+    # A label names its session by file name, so two files of one name in different
+    # subdirectories are refused rather than one silently replacing the other.
+    by_name = {}
+    sessions = [s for s in iter_sessions(root=sessions_dir)
+                if not s.path.endswith(EVENTS_SUFFIX)]
+    sessions.extend(load_events(p) for p in _event_session_paths(sessions_dir))
+    for session in sessions:
+        name = os.path.basename(session.path)
+        if name in by_name:
+            raise CorpusError("%s: two session files are named %s under %s/"
+                              % (path, name, SESSIONS_DIRNAME))
+        by_name[name] = session
     out = []
     seen = set()
     for entry in document["sessions"]:
