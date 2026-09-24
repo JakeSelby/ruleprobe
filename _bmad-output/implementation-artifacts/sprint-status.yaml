@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-24-2026 02:22
-last_updated: '09-24-2026 03:24'
+last_updated: '09-24-2026 03:33'
 project: ruleprobe
 project_key: NOKEY
 tracking_system: file-system
@@ -76,11 +76,9 @@ development_status:
 
   epic-5: in-progress
   5-1-spike-readers-choose-the-third-runtime-cursor-or-gemini-cli: done
-  5-2-feat-readers-read-the-third-runtime-s-transcripts-into-the-e: 
-    ready-for-dev
-  5-3-test-corpus-labelled-third-runtime-sessions-with-near-misses: 
-    ready-for-dev
-  epic-5-retrospective: optional
+  5-2-feat-readers-read-the-third-runtime-s-transcripts-into-the-e: done
+  5-3-test-corpus-labelled-third-runtime-sessions-with-near-misses: done
+  epic-5-retrospective: done
 
   epic-6: in-progress
   6-1-decision-release-the-success-targets-and-window-for-0-2-0: done
@@ -244,3 +242,59 @@ action_items:
     owner: "maintainer"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-23-read-a-user-edited-gemini-write-as-the-a"
+    epic: 5
+    action: "Read a user-edited Gemini write as the agent proposal (ai_proposed_content)
+      or keep it native, with a regression test"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-24-make-runtime-gemini-root-and-auto-root-r"
+    epic: 5
+    action: "Make --runtime gemini --root and auto --root read the same Gemini files,
+      or record the set-aside file in errors, with a test for each path"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-25-decide-whether-a-cancelled-or-errored-ge"
+    epic: 5
+    action: "Decide whether a cancelled or errored Gemini call is a tool_use, after
+      checking the other readers, and record it in RP-S019 with a test"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-26-confirm-or-override-rp-s019-decision-11"
+    epic: 5
+    action: "Confirm or override RP-S019 decision 11 and build-time decisions 1 to
+      10, and log any left open in deferred-work.md"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-27-clear-the-realised-ad-3-assumption-tag-i"
+    epic: 5
+    action: "Clear the realised AD-3 ASSUMPTION tag in the spine, in the same pass
+      as the Epic 3 spec item"
+    owner: "architect"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-28-complete-the-readme-gemini-note-the-sand"
+    epic: 5
+    action: "Complete the README Gemini note: the sandbox root and how to read it
+      with --root, and the user-edited write until it is fixed"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-29-set-rp-s019-and-rp-t003-dev-agent-record"
+    epic: 5
+    action: "Set RP-S019 and RP-T003 dev agent record statuses, and decide whether
+      epic 26 closes"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-5-retro-item-30-make-sprint-status-follow-the-issue-map"
+    epic: 5
+    action: "Make sprint status follow the issue map: a sync that marks a completed
+      story done, or a delivery-PR step in docs/bmad-governance.md"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
