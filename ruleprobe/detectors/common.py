@@ -22,64 +22,78 @@ SECRET_PATTERNS = [
     r"ghp_[A-Za-z0-9]{20,}", r"sk-[A-Za-z0-9]{20,}",
 ]
 
-#: What `redact` puts where a secret shape was.
+#: Key names a secret is assigned to, for `redact` only - detection uses `SECRET_PATTERNS`.
+#: Each matches the bare name, so a quoted, subscripted or JSON-escaped key is caught too:
+#: `"client_secret": "v"`, `env["AWS_SECRET_ACCESS_KEY"] = "v"`. A key-name shape added to
+#: `SECRET_PATTERNS` gets its name here as well. Split like the list above.
+SECRET_KEY_PATTERNS = [
+    r"(?i)aws_secret" r"_access_key", r"(?i)client_secret",
+]
+
+#: What `redact` puts where a secret was.
 REDACTED = "[redacted]"
 
 _PRIVATE_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
-_REST_OF_NAME = re.compile(r"[^\s:=\"']*")
-_SEPARATOR = re.compile(r"[ \t]*[:=]")
-_SPACE_ACROSS_LINES = re.compile(r"\s*")
-_SPACE = re.compile(r"[ \t]*")
-_REST_OF_LINE = re.compile(r"[^\n]*")
+_REST_OF_TOKEN = re.compile(r"\S*")
+# What may sit between a key name and its value: a line holding only these has the value on
+# the next line, as YAML writes `client_secret:` and an indented value below it.
+_NO_VALUE = re.compile(r"[\s\"'\]:=\\]*\Z")
 
 
 def redact(text):
-    """`text` with every `SECRET_PATTERNS` shape replaced by `REDACTED`: the one path for
-    text ruleprobe prints from a transcript.
+    """`text` with every secret `SECRET_KEY_PATTERNS` and `SECRET_PATTERNS` find replaced
+    by `REDACTED`: the one path for text ruleprobe prints from a transcript.
 
-    A match is widened before it is replaced, because several patterns name only the front
-    of a secret or the key it is assigned to. A private key goes from its header to its
-    footer, or to the end of the text when there is none. Any other match takes the rest of
-    its word, then optional spaces and a `:` or `=` - after which the value may start on the
-    next line - and then the value: a quoted string whole, otherwise the rest of the line.
+    Nothing after a key name is parsed, so no quoting, escaping or subscript can get a
+    value past it: a key name is redacted with the rest of its line, with the next line when
+    the rest holds no value, and with each following line while the one before ends in a
+    backslash continuation. Every other shape is itself
+    the secret and is redacted with the rest of its token, except a private key, which goes
+    from its header to its footer, or to the end of the text when there is none.
     Over-redacting is the safe side. Anything but a string is returned as the empty string.
     """
     if not isinstance(text, str):
         return ""
+    for pattern in SECRET_KEY_PATTERNS:
+        text = _redact_each(re.compile(pattern), text, _line_end)
     for pattern in SECRET_PATTERNS:
-        text = _redact_one(re.compile(pattern), text)
+        text = _redact_each(re.compile(pattern), text, _token_end)
     return text
 
 
-def _secret_end(text, found):
-    """Where the secret that `found` points at ends in `text`."""
+def _line_end(text, found):
+    """The end of the line `found` is on, carried to the next line when the rest of it holds
+    no value, and over each backslash continuation."""
+    end, first = found.end(), True
+    while True:
+        newline = text.find("\n", end)
+        if newline < 0:
+            return len(text)
+        empty = first and _NO_VALUE.match(text, found.end(), newline) is not None
+        if not empty and not text[:newline].rstrip("\r").endswith("\\"):
+            return newline
+        end, first = newline + 1, False
+
+
+def _token_end(text, found):
     if "PRIVATE KEY" in found.group(0):
         footer = _PRIVATE_KEY_END.search(text, found.end())
         return footer.end() if footer else len(text)
-    end = _REST_OF_NAME.match(text, found.end()).end()
-    separator = _SEPARATOR.match(text, end)
-    if separator is not None:
-        end = separator.end()
-    assigned = separator is not None or found.group(0).endswith((":", "="))
-    end = (_SPACE_ACROSS_LINES if assigned else _SPACE).match(text, end).end()
-    if text[end:end + 1] in ("\"", "'"):
-        close = text.find(text[end], end + 1)
-        return close + 1 if close >= 0 else len(text)
-    return _REST_OF_LINE.match(text, end).end()
+    return _REST_OF_TOKEN.match(text, found.end()).end()
 
 
-def _redact_one(compiled, text):
+def _redact_each(compiled, text, end_of):
     out, pos = [], 0
     while True:
         found = compiled.search(text, pos)
         if found is None:
             break
-        end = _secret_end(text, found)
         out.append(text[pos:found.start()])
         out.append(REDACTED)
-        pos = max(end, found.start() + 1)
+        pos = max(end_of(text, found), found.start() + 1)
     out.append(text[pos:])
     return "".join(out)
+
 
 #: A `find` argument that narrows the search, or consumes the result. One of these present
 #: and the call is not the unfiltered walk this detector is looking for.

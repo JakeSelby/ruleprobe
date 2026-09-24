@@ -15,6 +15,8 @@ from unittest import mock
 
 import ruleprobe
 from ruleprobe.cli import main
+from ruleprobe.readers import RUNTIMES, iter_sessions
+from ruleprobe.report import explain, explain_row, explain_text, measure
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE = os.path.dirname(os.path.abspath(ruleprobe.__file__))
@@ -368,6 +370,17 @@ class ExplainWritesAndSendsNothingTests(unittest.TestCase):
         self.assertEqual((code, text), (0, ""))
         self.assertNotIn("produced no session", err)
         self.assertEqual(os.listdir(home), [])
+
+    def test_the_library_explain_and_explain_row_write_and_send_nothing(self):
+        with no_network_no_writes() as attempts:
+            sessions = iter_sessions(root=CORPUS_SESSIONS)
+            items = [explain_text(item) for item in explain(sessions)]
+            rows = [measure(s) for s in iter_sessions(root=CORPUS_SESSIONS)]
+            notes = [explain_row(row, RUNTIMES) for row in rows]
+        self.assertEqual(attempts, [])
+        self.assertTrue(items)
+        self.assertEqual(len(notes), corpus_transcripts())
+        self.assertTrue(all("counts only" in note for note in notes))
 
 
 if __name__ == "__main__":

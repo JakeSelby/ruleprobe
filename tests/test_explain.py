@@ -23,7 +23,8 @@ from ruleprobe.detectors.common import REDACTED, SECRET_PATTERNS, redact
 from ruleprobe.readers import RUNTIMES
 from ruleprobe.report import (MAX_EXPLAINED, explain, explain_row, explain_text,
                               session_address)
-from ruleprobe.validity import event_key
+from ruleprobe.events import Hit
+from ruleprobe.validity import event_key, hit_key
 from test_readers import FIXTURES
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -42,13 +43,21 @@ FAKE_SECRETS = [
 ]
 
 #: Secrets assigned to a key name, as a credentials file, YAML, a CLI call, a quoted
-#: string and a value on the next line write them: `(text, the value that must not print)`.
+#: string, a value on the next line, a subscript, a dict or JSON, an escaped quote and a
+#: backslash continuation write them: `(text, the value that must not print)`.
 ASSIGNED = [
     ("aws_secret" + "_access_key = " + "wJalr" + "V" * 20, "wJalr" + "V" * 20),
     ("AWS_SECRET" + "_ACCESS_KEY: " + "abc" + "Y" * 20, "abc" + "Y" * 20),
     ("aws configure set aws_secret" + "_access_key " + "Xq" * 10, "Xq" * 10),
     ("client_secret" + ' = "two words"', "two words"),
     ("client_secret" + ":\n  " + "nextline" + "N" * 8, "nextline" + "N" * 8),
+    ('os.environ["AWS_SECRET' + '_ACCESS_KEY"] = "' + "sub" + "S" * 10 + '"', "sub" + "S" * 10),
+    ("{'aws_secret" + "_access_key': '" + "dict" + "D" * 10 + "'}", "dict" + "D" * 10),
+    ('{"aws_secret' + '_access_key": "' + "json" + "J" * 10 + '"}', "json" + "J" * 10),
+    ('{\\"aws_secret' + '_access_key\\": \\"' + "esc" + "E" * 10 + '\\"}', "esc" + "E" * 10),
+    ('client_secret' + '="ab\\"' + "TAIL" + "T" * 8 + '"', "TAIL" + "T" * 8),
+    ("client_secret" + " = \\\n  " + "cont" + "C" * 10, "cont" + "C" * 10),
+    ('"client_secret' + '": "' + "quoted" + "Q" * 8 + '"', "quoted" + "Q" * 8),
 ]
 
 
@@ -111,8 +120,12 @@ class RedactTests(unittest.TestCase):
                 self.assertTrue(redacted.startswith("before\n"))
                 self.assertTrue(redacted.endswith("\nafter"))
 
-    def test_a_quoted_value_ends_at_its_quote(self):
-        self.assertEqual(redact("client_secret" + "='a b' tail"), REDACTED + " tail")
+    def test_a_key_name_takes_the_rest_of_its_line_and_a_continuation(self):
+        self.assertEqual(redact("x client_secret" + "='a b' tail\nnext"),
+                         "x " + REDACTED + "\nnext")
+        self.assertEqual(redact("client_secret" + " = \\\r\n  v \\\n  w\nnext"),
+                         REDACTED + "\nnext")
+        self.assertEqual(redact('env["client_secret' + '"]'), 'env["' + REDACTED)
 
     def test_a_private_key_body_goes_to_its_footer_or_to_the_end(self):
         text = redact("head\n" + FAKE_SECRETS[4] + "\ntail")
@@ -184,7 +197,7 @@ class ExplainTests(unittest.TestCase):
         self.assertEqual(items[2]["value"], "git push --no-verify")
         text = explain_text(items[0])
         self.assertIn("session   codex:s-1", text)
-        self.assertIn("a hit on the session", text)
+        self.assertIn("names no tool use, only turn 1", text)
 
     def test_a_secret_in_the_event_never_reaches_the_item_or_the_text(self):
         for secret in FAKE_SECRETS:
@@ -265,6 +278,62 @@ class ExplainTests(unittest.TestCase):
         self.assertNotIn(FAKE_KEY, value)
 
 
+    def test_bidi_and_line_separator_marks_are_escaped(self):
+        events = [prompt(), bash("cat no\u202etes\u2066.txt\u2028x")]
+        text = explain_text(list(explain([Session("s", "", "codex", events, "")]))[0])
+        for mark in ("\u200e", "\u200f", "\u2028", "\u2029", "\u202a", "\u202e",
+                     "\u2066", "\u2069"):
+            self.assertNotIn(mark, text)
+        self.assertIn("cat no\\u202etes\\u2066.txt\\u2028x", text)
+        self.assertEqual(explain_text({"session": "a\u200eb\u200f", "key": "1:-",
+                                       "detector": "d\u2029\u202a\u2069", "turn": 1,
+                                       "tool_use_id": None, "field": None}).split("\n")[0],
+                         "session   a\\u200eb\\u200f")
+
+    def test_an_input_json_cannot_hold_falls_back_to_repr(self):
+        mixed = {1: "x", "content": FAKE_KEY}
+        cyclic = {"content": FAKE_KEY}
+        cyclic["self"] = cyclic
+        for data in (mixed, cyclic):
+            with self.subTest(keys=sorted(map(str, data))):
+                events = [prompt(), tool_use("Write", data)]
+                items = list(explain([Session("s", "", "codex", events, "")]))
+                self.assertEqual(len(items), 1)
+                self.assertTrue(items[0]["value"].startswith("{"))
+                self.assertNotIn(FAKE_KEY, items[0]["value"])
+                self.assertIn(REDACTED, items[0]["value"])
+
+    def test_every_string_the_library_yields_is_redacted(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        registry = Registry([Detector("x/" + FAKE_KEY, "x", "session", boom),
+                             Detector("y/find", "y", "session",
+                                      lambda e, c: [(1, FAKE_KEY)])])
+        events = [prompt(), bash("find .", id=FAKE_KEY)]
+        errors = []
+        items = list(explain([Session(FAKE_KEY, "", "codex", events, "")], registry=registry,
+                             errors=errors))
+        self.assertEqual(len(items), 1)
+        self.assertEqual(len(errors), 1)
+        for mapping in (items[0], errors[0]):
+            for name, value in mapping.items():
+                self.assertNotIn(FAKE_KEY, str(value), name)
+        self.assertEqual(items[0]["value"], "find .")
+
+    def test_hits_are_in_numeric_turn_order(self):
+        events = []
+        for turn in (1, 2, 10):
+            events += [prompt(turn), bash("find .", turn=turn, id="tu%d" % turn)]
+        items = list(explain([Session("s", "", "codex", events, "")]))
+        self.assertEqual([i["key"] for i in items], ["1:tu1", "2:tu2", "10:tu10"])
+
+    def test_the_key_is_validity_hit_key(self):
+        for item in explain(iter_sessions(root=FIXTURES)):
+            self.assertEqual(item["key"], hit_key(Hit(item["detector"], item["turn"],
+                                                      item["tool_use_id"])))
+
+
 class StoredRowTests(unittest.TestCase):
     def test_a_row_says_counts_only_and_names_the_rerun(self):
         row = {"session_id": "sess-9", "runtime": "codex",
@@ -285,15 +354,15 @@ class StoredRowTests(unittest.TestCase):
         self.assertIn("`ruleprobe explain --session sess-9`", text)
         self.assertNotIn(":sess-9", text)
 
-    def test_an_unknown_runtime_drops_runtime_but_keeps_the_address(self):
+    def test_an_unknown_runtime_uses_the_bare_id(self):
         text = explain_row({"session_id": "sess-9", "runtime": "other", "rules": {}},
                            RUNTIMES)
-        self.assertIn("`ruleprobe explain --session other:sess-9`", text)
+        self.assertIn("`ruleprobe explain --session sess-9`", text)
         self.assertNotIn("--runtime", text)
 
     def test_no_runtime_is_known_by_default(self):
         text = explain_row({"session_id": "sess-9", "runtime": "codex", "rules": {}})
-        self.assertIn("`ruleprobe explain --session codex:sess-9`", text)
+        self.assertIn("`ruleprobe explain --session sess-9`", text)
         self.assertNotIn("--runtime", text)
 
     def test_values_are_shell_quoted(self):
@@ -370,10 +439,12 @@ class ExplainCommandTests(unittest.TestCase):
         uses.append(("toolu_bash", "Bash",
                      {"command": "cat > .env <<EOF\n%s\nEOF" % FAKE_SECRETS[6]}))
         for n, (assigned, _value) in enumerate(ASSIGNED):
+            # The key comes first; a token shape after it makes every one a hit.
+            body = "%s\ntail %s" % (assigned, FAKE_KEY)
             uses.append(("toolu_a%d" % n, "Write", {"file_path": "/tmp/demo-repo/creds",
-                                                    "content": assigned + "\n"}))
+                                                    "content": body + "\n"}))
             uses.append(("toolu_h%d" % n, "Bash",
-                         {"command": "cat > creds <<EOF\n%s\nEOF" % assigned}))
+                         {"command": "cat > creds <<EOF\n%s\nEOF" % body}))
         with open(os.path.join(scratch.name, "secret.jsonl"), "w") as handle:
             handle.write(claude_transcript("sess-secret", uses))
         code, text = run_cli("explain", "--root", scratch.name, "--no-config")
@@ -453,6 +524,35 @@ class ExplainCommandTests(unittest.TestCase):
             code, text, err = run_cli_err("explain", "--root", scratch.name)
         self.assertEqual((code, text), (0, ""))
         self.assertIn("1 detector error(s): x/boom (KeyError) in claude-code:" + REDACTED, err)
+        self.assertNotIn(FAKE_KEY, err)
+
+    def test_more_than_three_detector_errors_name_three_and_count_the_rest(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        registry = Registry([Detector("x/boom%d" % n, "x", "session", boom)
+                             for n in range(5)])
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            code, text, err = run_cli_err("explain", "--root", FIXTURES, "--runtime", "codex")
+        self.assertEqual((code, text), (0, ""))
+        self.assertIn("5 detector error(s): x/boom0 (KeyError) in codex:rollout-1, "
+                      "x/boom1 (KeyError) in codex:rollout-1, "
+                      "x/boom2 (KeyError) in codex:rollout-1, and 2 more", err)
+
+    def test_an_unreadable_transcript_is_named_on_stderr_redacted(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        with open(os.path.join(FIXTURES, "codex-rollout.jsonl")) as source:
+            good = source.read()
+        with open(os.path.join(scratch.name, "good.jsonl"), "w") as handle:
+            handle.write(good)
+        with open(os.path.join(scratch.name, FAKE_KEY + ".jsonl"), "w") as handle:
+            handle.write("not json\n")
+        code, text, err = run_cli_err("explain", "--root", scratch.name, "--no-config")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(blocks(text)), 1)
+        self.assertIn("1 transcript(s) produced no session: " + REDACTED, err)
         self.assertNotIn(FAKE_KEY, err)
 
     def test_the_output_is_byte_identical_across_hash_seeds(self):

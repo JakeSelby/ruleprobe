@@ -333,26 +333,26 @@ command   git commit --no-verify -m 'fix: the thing'
 ```
 
 A hit's address is its session, `<runtime>:<session id>`, plus its key, `<turn>:<tool use
-id>`, or `<turn>:-` for a hit on the session rather than on one tool use, which has no single
-event to show. A key is unique only within its session, so both are printed. What is shown is
-the Bash command, or any other tool's whole input as JSON, because a hit does not record which
-field of the event matched. `--session` takes the address or the bare session id;
+id>`, or `<turn>:-` for a hit that names no tool use - a compaction, a model switch - and
+so has no single event to show, only its turn. A key is unique only within its session, so
+both are printed. What is shown is the Bash command, or any other tool's whole input as JSON,
+because a hit does not record which field of the event matched. `--session` takes the address or the bare session id;
 `--session`, `--detector` and `--key` each narrow the output, and one that matches nothing
 prints nothing and exits 0; `--detector` takes a renamed id too. It takes `report`'s
 `--root`, `--runtime`, `--since`, `--stance` and `--plugins`, and `--rules`, `--detectors` and
 `--no-config`, so a gated or plugin detector `report` counts is listed as well; what a
 detector file skipped goes to stderr.
 
-Every line it prints, to either stream, passes through `redact` first, which replaces each
-shape in `SECRET_PATTERNS` by `[redacted]`, together with what follows it: a `:` or `=` and
-the value after it, even on the next line, a quoted value whole, otherwise the rest of the
-line, and a private key's body to its footer. A control character is printed as its `\xNN`
-escape, so a transcript cannot drive your terminal, and one event's text is cut at 4,000
-characters with a note of how many were cut. Like `report`, it writes nothing and sends
-nothing, and running it changes no report number. A stored row keeps counts only, not the
-events behind them, so it cannot be explained after the fact:
-`ruleprobe.report.explain_row(row, ruleprobe.readers.RUNTIMES)` says so and names the rerun
-over that row's runtime and session id that would.
+Every line it prints, to either stream, passes through `redact` first. A secret's key name,
+such as `client_secret`, quoted or not, is replaced by `[redacted]` with the rest of its line,
+and the next line too after a backslash continuation. A shape in `SECRET_PATTERNS` that is
+itself the secret is replaced with the rest of its token, and a private key to its footer. A
+control character or a bidi mark is printed as its `\xNN` or `\uNNNN` escape, so a
+transcript cannot drive your terminal or reorder a line, and one event's text is cut at
+4,000 characters with a note of how many were cut. Like `report`, it writes nothing and
+sends nothing, and running it changes no report number. A stored row keeps counts only, not
+the events behind them, so it cannot be explained after the fact; an undeclared helper in
+`ruleprobe.report` says so for a row and names the rerun over its session that would.
 
 ## How good are the detectors?
 
