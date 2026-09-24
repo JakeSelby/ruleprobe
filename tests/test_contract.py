@@ -8,7 +8,9 @@ comment above it names the item it covers, so removing a name or changing a decl
 shape fails here. A name joins `DECLARED` only with a test in this module.
 
 The wheel checks read a built wheel from `$RULEPROBE_WHEEL` when it is set, as CI's package
-job does, and check its file name; set but empty or naming no file is an error. Unset, they
+job does; set but empty or naming no file is an error. That the built wheel is the one file
+`dist/ruleprobe-<version>-py3-none-any.whl` is checked by the package job's shell step, which
+builds it, not here. Unset, they
 assemble the same archive from the source tree, so the zip import and the corpus in the
 archive are still exercised on every run.
 """
@@ -23,6 +25,11 @@ import tempfile
 import unittest
 import zipfile
 from unittest import mock
+
+try:
+    from collections.abc import Mapping
+except ImportError:  # pragma: no cover
+    from collections import Mapping
 
 from corpus import bash, compact, prompt, say, tool_result, tool_use
 
@@ -153,24 +160,25 @@ class DetectorFunctionTests(unittest.TestCase):
     def test_run_calls_fn_with_events_and_ctx(self):
         seen = {}
 
+        # `run(strict=False)` catches whatever `fn` raises, so `fn` only records what it saw
+        # and every assertion runs after `run` returns.
         def fn(events, ctx):
             seen["events"], seen["ctx"] = events, ctx
-            out = []
-            for parsed in ctx.bash:
-                self.assertIsInstance(parsed, Parsed)
-                self.assertEqual(parsed.event["kind"], "tool_use")
-                self.assertIn("git commit", parsed.command)
-                self.assertEqual(parsed.heredocs, ["fix: the thing"])
-                out.append((parsed.event.get("turn"), parsed.event.get("id")))
-            for final in ctx.finals:
-                out.append(hit(final))
-            return out
+            seen["bash"] = [(type(p), p.event, p.command, p.heredocs) for p in ctx.bash]
+            out = [(p.event.get("turn"), p.event.get("id")) for p in ctx.bash]
+            return out + [hit(final) for final in ctx.finals]
 
         errors = []
         hits = run(_session(), {"commits": "conventional"},
                    registry=Registry([Detector("contract/fn", "contract", "bash", fn, None)]),
                    strict=False, errors=errors)
         self.assertEqual(errors, [])
+        self.assertEqual(len(seen["bash"]), 1)
+        cls, event, command, heredocs = seen["bash"][0]
+        self.assertTrue(issubclass(cls, Parsed))
+        self.assertEqual(event["kind"], "tool_use")
+        self.assertIn("git commit", command)
+        self.assertEqual(heredocs, ["fix: the thing"])
         ctx = seen["ctx"]
         self.assertIsInstance(ctx, Context)
         self.assertIs(seen["events"], ctx.events)
@@ -262,20 +270,30 @@ class EventTests(unittest.TestCase):
         "compact": ("kind", "turn"),
     }
 
+    #: The kinds each fixture's transcript holds.
+    KINDS = {"claude-code": set(FIELDS), "codex": {"assistant_text", "tool_use", "tool_result"}}
+
+    def check_type(self, field, value):
+        if field == "turn":
+            self.assertIs(type(value), int)
+        elif field == "final":
+            self.assertIs(type(value), bool)
+        elif field == "input":
+            self.assertIsInstance(value, Mapping)
+        else:
+            self.assertIsInstance(value, str)
+
     def test_each_kind_carries_its_documented_fields(self):
-        sessions = list(iter_sessions(root=FIXTURES, runtime="claude-code"))
-        by_kind = {}
-        for session in sessions:
-            for event in session.events:
-                by_kind.setdefault(event.get("kind"), event)
-        self.assertEqual(set(by_kind), set(self.FIELDS))
-        for kind, fields in sorted(self.FIELDS.items()):
-            for field in fields:
-                with self.subTest(kind=kind, field=field):
-                    self.assertIsNotNone(by_kind[kind].get(field))
-        self.assertIsInstance(by_kind["tool_use"].get("input"), dict)
-        self.assertIsInstance(by_kind["assistant_text"].get("final"), bool)
-        self.assertIsInstance(by_kind["compact"].get("turn"), int)
+        for runtime, kinds in sorted(self.KINDS.items()):
+            with self.subTest(runtime=runtime):
+                events = [e for s in iter_sessions(root=FIXTURES, runtime=runtime)
+                          for e in s.events]
+                self.assertEqual(set(e.get("kind") for e in events), kinds)
+                for index, event in enumerate(events):
+                    for field in self.FIELDS[event.get("kind")]:
+                        with self.subTest(runtime=runtime, event=index, field=field):
+                            self.assertIsNotNone(event.get(field))
+                            self.check_type(field, event.get(field))
 
     # Covers: `hit(event)` and `hit(event, tool_use_id=False)`, returning `(turn, id or None)`.
     def test_hit_shapes(self):
@@ -310,7 +328,7 @@ class ShellTests(unittest.TestCase):
     # Covers: `MARKER_RE.match(value)` with group 1 an index into `Parsed.heredocs`.
     def test_marker_group_one_indexes_heredocs(self):
         parsed = Parsed(bash("cat > a.txt <<'A'\none\nA\ncat > b.txt <<'B'\ntwo\nB"))
-        markers = [m for pipe in parsed.pipelines for seg in pipe for t in seg
+        markers = [m for pipe in pipelines(parsed.command) for seg in pipe for t in seg
                    for m in [MARKER_RE.match(t)] if m]
         self.assertEqual(len(markers), 2)
         self.assertEqual([parsed.heredocs[int(m.group(1))] for m in markers],
@@ -358,6 +376,8 @@ class DeclarativeTests(unittest.TestCase):
 
     # Covers: `is_undecided(value)`, which tells a predicate's undecided result from false.
     def test_is_undecided(self):
+        # No declared function yet produces an undecided value: `compile_matcher` needs the
+        # private `_Where` and `_Env`, so this test reaches them to get a real one.
         from ruleprobe import matchers
 
         predicate = ruleprobe.compile_matcher({"command": {"name": ["git"]}},
@@ -389,12 +409,15 @@ class ValidityTests(unittest.TestCase):
         for detector_id, score in scores.items():
             self.assertIsInstance(score, Score)
             self.assertEqual(score.detector, detector_id)
+        scored = [s for _, s in sorted(scores.items()) if s.scored]
+        self.assertTrue(scored)
         score = Score("contract/x")
         self.assertEqual(score.detector, "contract/x")
         self.assertFalse(score.scored)
-        self.assertIs(score.add(Score("contract/y", positives=1, tp=1)), score)
+        self.assertIs(score.add(scored[0]), score)
         self.assertTrue(score.scored)
-        self.assertEqual((score.precision, score.recall), (1.0, 1.0))
+        self.assertEqual((score.precision, score.recall),
+                         (scored[0].precision, scored[0].recall))
         self.assertIsInstance(DEFAULT_FLOOR, float)
 
     # Covers: `score_corpus` raising `CorpusError` on a broken corpus.
@@ -406,13 +429,17 @@ class ValidityTests(unittest.TestCase):
     # Covers: `below_floor(scores, floor)`, `scores_as_dict(scores, floor)` and
     # `validity_table(scores, floor)`, positional.
     def test_the_floor_helpers_take_scores_and_floor_positionally(self):
-        scores = {"contract/low": Score("contract/low", positives=2, tp=1, fn=1),
-                  "contract/ok": Score("contract/ok", positives=1, tp=1)}
-        self.assertEqual(below_floor(scores, 0.9), ["contract/low"])
-        data = scores_as_dict(scores, 0.9)
-        self.assertEqual(data["below_floor"], ["contract/low"])
-        self.assertEqual(data["floor"], 0.9)
-        self.assertIn("below floor", validity_table(scores, 0.9))
+        scores = score_corpus(registry=Registry(common.DETECTORS), directory=None)
+        scored = sorted(did for did, s in scores.items() if s.scored)
+        self.assertTrue(scored)
+        # No rate exceeds 1.0, so every scored detector is under a floor above it.
+        self.assertEqual(below_floor(scores, 1.01), scored)
+        self.assertEqual(below_floor(scores, 0.0), [])
+        data = scores_as_dict(scores, 1.01)
+        self.assertEqual(data["below_floor"], scored)
+        self.assertEqual(data["floor"], 1.01)
+        self.assertIn("below floor", validity_table(scores, 1.01))
+        self.assertNotIn("below floor", validity_table(scores, 0.0))
 
     # Covers: the 0.1.0 names `validity`, `report` and `report_data`.
     def test_validity_report_and_report_data(self):

@@ -259,9 +259,10 @@ print(report([measure(s) for s in iter_sessions(since=30)]))
 ```
 
 `measure`, `DEFAULT`, `Detector` imported from the root, and `Parsed`'s `.turn`, `.id` and
-`.pipelines` are importable but not declared (see [the public API](#the-public-api)), so a
-tool pinning a version should import `Detector` from `ruleprobe.registry` and read
-`p.event` rather than lean on them.
+`.pipelines` are importable but not declared (see [the public API](#the-public-api)). A tool
+pinning a version has declared alternatives for some: `Detector` from `ruleprobe.registry`,
+`hit(p.event)` for `(p.turn, p.id)`, and `pipelines(p.command)` for `p.pipelines`. No declared
+function yet produces a row, so `measure` has none.
 
 The two are the same engine: `ruleprobe/detectors/common.yaml` is the shipped six written as
 data, and a test asserts it produces hit-for-hit what the Python in
@@ -405,7 +406,7 @@ Registry([Detector, ...]); Registry.add(Detector(id, rule, event, fn, gate=None)
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, promote_share=0.30)
 report_data(rows, by="rule", ...)                       # the same numbers as a dict; --json prints it
-validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall .f1)}
+validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall)}
 load_bundle(paths=None, rules_dir=None, cwd=None, config=True)  # -> Bundle(.detectors .rules .findings)
 compile_detector(spec, path="<spec>", lines=None)               # -> Detector
 ```
