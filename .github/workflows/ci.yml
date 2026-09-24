@@ -90,4 +90,11 @@ jobs:
           "$RUNNER_TEMP/venv/bin/ruleprobe" corpus --no-config --floor 0.9
       - name: The declared API holds from the built wheel imported as a zip
         run: |
-          RULEPROBE_WHEEL="$(ls dist/*.whl)" python -m unittest discover -s tests -p test_contract.py -v
+          version="$(python -c 'import ruleprobe; print(ruleprobe.__version__)')"
+          wheel="dist/ruleprobe-$version-py3-none-any.whl"
+          set -- dist/*.whl
+          if [ "$#" -ne 1 ] || [ "$1" != "$wheel" ]; then
+            echo "expected exactly $wheel, found: $*" >&2
+            exit 1
+          fi
+          RULEPROBE_WHEEL="$wheel" python -m unittest discover -s tests -p test_contract.py -v

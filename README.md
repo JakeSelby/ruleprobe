@@ -258,6 +258,11 @@ DEFAULT.add(Detector("house-style/sudo-install", "house-style", "bash", sudo_ins
 print(report([measure(s) for s in iter_sessions(since=30)]))
 ```
 
+`measure`, `DEFAULT`, `Detector` imported from the root, and `Parsed`'s `.turn`, `.id` and
+`.pipelines` are importable but not declared (see [the public API](#the-public-api)), so a
+tool pinning a version should import `Detector` from `ruleprobe.registry` and read
+`p.event` rather than lean on them.
+
 The two are the same engine: `ruleprobe/detectors/common.yaml` is the shipped six written as
 data, and a test asserts it produces hit-for-hit what the Python in
 `ruleprobe/detectors/common.py` produces over the corpus. Python remains the escape hatch,
@@ -434,7 +439,9 @@ declarative.load(path)                          # -> (document, lines)
 A predicate from `compile_matcher` returns true, false, or a falsy undecided value when it
 could not read its input. A Python caller who negates one itself reads undecided as false and
 can over-count: compose through the declarative `not`, `any` and `all`, or test the result
-with `is_undecided(value)` before negating it.
+with `is_undecided(value)` before negating it. `compile_matcher` itself is not declared: it
+needs arguments the package does not declare, so it is not yet a declared way to build a
+predicate, and `is_undecided` is declared ahead of it.
 
 Four promises are not names:
 

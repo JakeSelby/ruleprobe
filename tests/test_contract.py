@@ -8,9 +8,9 @@ comment above it names the item it covers, so removing a name or changing a decl
 shape fails here. A name joins `DECLARED` only with a test in this module.
 
 The wheel checks read a built wheel from `$RULEPROBE_WHEEL` when it is set, as CI's package
-job does. Without it they assemble the same archive from the source tree, so the zip import
-and the corpus beside `__file__` are still exercised on every run; only the wheel's file name
-needs the built one.
+job does, and check its file name; set but empty or naming no file is an error. Unset, they
+assemble the same archive from the source tree, so the zip import and the corpus in the
+archive are still exercised on every run.
 """
 import ast
 import importlib
@@ -22,6 +22,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 from corpus import bash, compact, prompt, say, tool_result, tool_use
 
@@ -99,11 +100,17 @@ class DeclaredNamesTests(unittest.TestCase):
     def test_every_declared_root_name_is_in_all(self):
         self.assertEqual(set(DECLARED["ruleprobe"]) - set(ruleprobe.__all__), set())
 
-    # Covers: the root re-exports are the same objects as the module-level names.
+    # Covers: each declared root name is the object its home module defines.
     def test_root_names_are_the_module_names(self):
-        self.assertIs(ruleprobe.Registry, Registry)
-        self.assertIs(ruleprobe.run, run)
-        self.assertIs(ruleprobe.analyse, analyse)
+        homes = {"Registry": "registry", "analyse": "shell", "compile_detector": "matchers",
+                 "counts": "events", "is_undecided": "matchers", "iter_sessions": "readers",
+                 "load_bundle": "rules", "report": "report", "report_data": "report",
+                 "run": "registry", "validity": "validity"}
+        self.assertEqual(set(homes), set(DECLARED["ruleprobe"]))
+        for name, home in sorted(homes.items()):
+            with self.subTest(name=name):
+                module = importlib.import_module("ruleprobe." + home)
+                self.assertIs(getattr(ruleprobe, name), getattr(module, name))
 
 
 class ReadmeTests(unittest.TestCase):
@@ -339,6 +346,8 @@ class DeclarativeTests(unittest.TestCase):
                              rules_dir=None, cwd=ROOT, config=False)
         for attr in ("detectors", "rules", "findings"):
             self.assertTrue(hasattr(bundle, attr), attr)
+        self.assertEqual([d.id for d in bundle.detectors], ["gated/commit-message"])
+        self.assertEqual(list(bundle.findings), [])
         detector = compile_detector({"id": "contract/sudo", "rule": "contract",
                                      "event": "tool_use",
                                      "when": {"command": {"starts_with": ["sudo"]}}},
@@ -365,6 +374,13 @@ class DeclarativeTests(unittest.TestCase):
 
 
 class ValidityTests(unittest.TestCase):
+    def setUp(self):
+        # These read the corpus inside the package, so a caller's override must not leak in.
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop("RULEPROBE_CORPUS", None)
+
     # Covers: `score_corpus(registry=, directory=)`; `Score(detector_id)` with `.add`,
     # `.scored`, `.precision`, `.recall` and `.detector`; `DEFAULT_FLOOR`.
     def test_score_corpus_and_score(self):
@@ -437,9 +453,14 @@ class SecretPatternsTests(unittest.TestCase):
 
 
 _PROBE = r"""
-import json, os, sys
+import importlib, json, os, sys
 sys.path.insert(0, sys.argv[1])
 import ruleprobe
+for module_name, names in json.loads(sys.argv[2]).items():
+    module = importlib.import_module(module_name)
+    assert module.__file__.startswith(sys.argv[1] + os.sep), module.__file__
+    for name in names:
+        getattr(module, name)
 from ruleprobe import Registry, run
 from ruleprobe.detectors import common
 from ruleprobe.validity import score_corpus
@@ -456,49 +477,61 @@ def _package_data_globs():
     """The `package-data` globs `pyproject.toml` gives setuptools."""
     with open(os.path.join(ROOT, "pyproject.toml"), encoding="utf-8") as handle:
         text = handle.read()
-    section = text.split("[tool.setuptools.package-data]", 1)[1]
-    return ast.literal_eval(re.search(r"^ruleprobe = (\[.*\])$", section, re.M).group(1))
+    section = text.split("[tool.setuptools.package-data]", 1)[-1]
+    match = re.search(r"^ruleprobe = (\[.*\])$", section, re.M)
+    if match is None:
+        raise AssertionError("pyproject.toml has no [tool.setuptools.package-data] "
+                             "ruleprobe = [...] line")
+    return ast.literal_eval(match.group(1))
 
 
 def _source_wheel(directory):
-    """The source tree packed the way the wheel packs it: every module, plus package data."""
-    import fnmatch
+    """The source tree packed the way the wheel packs it: every module, plus package data,
+    each pattern globbed as setuptools globs it, so `*` stops at a `/`."""
+    import glob
 
     package = os.path.join(ROOT, "ruleprobe")
-    globs = _package_data_globs()
+    files = set()
+    for dirpath, dirnames, filenames in os.walk(package):
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        files.update(os.path.join(dirpath, f) for f in filenames if f.endswith(".py"))
+    for pattern in _package_data_globs():
+        matched = glob.glob(os.path.join(package, pattern))
+        if not matched:
+            raise AssertionError("package-data pattern %r matches no file" % pattern)
+        files.update(matched)
     path = os.path.join(directory, "ruleprobe-%s-py3-none-any.whl" % ruleprobe.__version__)
     with zipfile.ZipFile(path, "w") as archive:
-        for dirpath, dirnames, filenames in os.walk(package):
-            dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
-            for filename in sorted(filenames):
-                full = os.path.join(dirpath, filename)
-                rel = os.path.relpath(full, package).replace(os.sep, "/")
-                if filename.endswith(".py") or any(fnmatch.fnmatch(rel, g) for g in globs):
-                    archive.write(full, "ruleprobe/" + rel)
+        for full in sorted(files):
+            archive.write(full, "ruleprobe/" + os.path.relpath(full, package).replace(os.sep, "/"))
     return path
 
 
 class WheelTests(unittest.TestCase):
-    # Covers: the pure-Python wheel named `ruleprobe-<version>-py3-none-any.whl`; the package
-    # importing and running from it on `sys.path` as a zip, uninstalled; the corpus inside it at
-    # `ruleprobe/corpus/`, found beside `ruleprobe.__file__`.
+    # Covers: the pure-Python wheel named `ruleprobe-<version>-py3-none-any.whl`, checked on
+    # the built wheel CI passes in; the package importing and running from it on `sys.path` as
+    # a zip, uninstalled; the corpus inside it at `ruleprobe/corpus/`. A zip import cannot read
+    # the corpus in place, so it needs `RULEPROBE_CORPUS` or an unpacked copy, as here.
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        built = os.environ.get(WHEEL_ENV)
-        self.wheel = os.path.abspath(built) if built else _source_wheel(self.tmp.name)
+        if WHEEL_ENV not in os.environ:
+            self.wheel = _source_wheel(self.tmp.name)
+            return
+        built = os.environ[WHEEL_ENV]
+        if not built or not os.path.isfile(built):
+            raise AssertionError("%s=%r names no wheel file" % (WHEEL_ENV, built))
+        self.wheel = os.path.abspath(built)
+        self.assertEqual(os.path.basename(self.wheel),
+                         "ruleprobe-%s-py3-none-any.whl" % ruleprobe.__version__)
 
     def probe(self, env=None):
         # -I and -S keep the checkout, PYTHONPATH and any installed copy off sys.path.
-        result = subprocess.run([sys.executable, "-I", "-S", "-c", _PROBE, self.wheel],
+        result = subprocess.run([sys.executable, "-I", "-S", "-c", _PROBE, self.wheel,
+                                 json.dumps(DECLARED)],
                                 cwd=self.tmp.name, env=env, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
-
-    # Covers: the wheel is pure Python and named `ruleprobe-<version>-py3-none-any.whl`.
-    def test_the_wheel_name_is_pure_python(self):
-        self.assertEqual(os.path.basename(self.wheel),
-                         "ruleprobe-%s-py3-none-any.whl" % ruleprobe.__version__)
 
     # Covers: the package imports and runs from the wheel on `sys.path` as a zip, uninstalled.
     def test_the_package_imports_and_runs_from_the_zip(self):
@@ -510,7 +543,8 @@ class WheelTests(unittest.TestCase):
         self.assertEqual(out["hits"], ["transcript-hygiene/whole-file-cat"])
         self.assertTrue(out["scored"])
 
-    # Covers: the corpus ships inside the wheel at `ruleprobe/corpus/`, beside `__file__`.
+    # Covers: the corpus ships inside the wheel at `ruleprobe/corpus/`, beside `__file__`; read
+    # from the zip, it is found through `RULEPROBE_CORPUS` pointed at an unpacked copy.
     def test_the_corpus_is_in_the_wheel_beside_file(self):
         out = self.probe(dict(os.environ, RULEPROBE_CORPUS=self.unpack_corpus()))
         self.assertEqual(out["dir"], os.path.join(self.wheel, "ruleprobe"))

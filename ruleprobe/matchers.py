@@ -129,7 +129,7 @@ def is_undecided(value):
 
     Undecided is falsy, so `not predicate(event, env)` reads it as a decided false; a Python
     caller negating a predicate itself asks this first and treats undecided as no hit."""
-    return value is _UNDECIDED
+    return isinstance(value, _Undecided)
 
 
 def _not3(value):
