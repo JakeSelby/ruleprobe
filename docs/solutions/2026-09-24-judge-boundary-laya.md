@@ -1,0 +1,4 @@
+# A local judge and ruleprobe's package boundary
+
+- 2026-09-24: `laya` (PyPI 0.3.20, Hugging Face `convaiinnovations/laya`, Apache-2.0) is a local decision model with a Jev-compatible `laya-serve` endpoint. It needs Python 3.10 or newer plus `torch` and `transformers`, so it can never be imported under `ruleprobe/`: the 3.9 floor, `dependencies = []` and `tests/test_envelope.py`, which bans `transformers`, all refuse it. A judge built on it belongs in a separate package that writes verdicts ruleprobe reads.
+- 2026-09-24: Laya's model card reports its base checkpoints close to chance zero-shot: 0.362 on its typed-decisions benchmark, against a 0.461 majority-class baseline. It also reports them over-confident until temperature is refit per question type. Build a judge on a labelled set and fine-tuning, and score it with `ruleprobe corpus` before its figures appear anywhere.

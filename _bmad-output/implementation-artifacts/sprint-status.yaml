@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-24-2026 02:22
-last_updated: '09-24-2026 03:33'
+last_updated: '09-24-2026 12:30'
 project: ruleprobe
 project_key: NOKEY
 tracking_system: file-system
@@ -70,9 +70,8 @@ development_status:
   epic-4: in-progress
   4-1-feat-cli-ruleprobe-explain-prints-the-event-behind-every-hit: done
   4-2-feat-cli-ruleprobe-label-turns-a-false-positive-into-a-label: done
-  4-3-spike-validity-field-precision-per-shipped-detector-from-han: 
-    ready-for-dev
-  epic-4-retrospective: optional
+  4-3-spike-validity-field-precision-per-shipped-detector-from-han: done
+  epic-4-retrospective: done
 
   epic-5: in-progress
   5-1-spike-readers-choose-the-third-runtime-cursor-or-gemini-cli: done
@@ -298,3 +297,56 @@ action_items:
     owner: "maintainer"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-31-file-the-rp-sp002-follow-ups-secret-in-w"
+    epic: 4
+    action: "File the RP-SP002 follow-ups (secret-in-write redesign, whole-file-cat
+      redirected group) with bmad_issue_sync.py new, or map them if they exist"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-32-say-in-the-readme-label-paragraph-and-th"
+    epic: 4
+    action: "Say in the README label paragraph and the refusal message that a secret
+      detector false positive is always refused and needs a hand-written synthetic
+      stand-in"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-33-amend-the-ad-1-graph-for-the-cli-imports"
+    epic: 4
+    action: "Amend the AD-1 graph for the cli imports of declarative and detectors.common,
+      or route them through report and validity, and add a test that holds the import
+      graph"
+    owner: "architect, then dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-34-amend-fr-26-and-sm-8-for-secret-detector"
+    epic: 4
+    action: "Amend FR-26 and SM-8 for secret detectors, say agent-judged in epics.md
+      4.3 and RP-SP002, and clear Epic 4 realised ASSUMPTION tags in the same spec
+      pass"
+    owner: "pm and architect"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-35-carry-unsure-counts-and-the-before-fix-s"
+    epic: 4
+    action: "Carry unsure counts and the before-fix sample populations into the 0.2.0
+      release text in story 6.2"
+    owner: "dev (story 6.2)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-36-append-a-dated-amendment-to-rp-s018-deci"
+    epic: 4
+    action: "Append a dated amendment to RP-S018 decision 23 saying #86 and #87 superseded
+      it"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
+  - id: "epic-4-retro-item-37-close-out-epic-4-records-rp-sp002-dev-ag"
+    epic: 4
+    action: "Close out Epic 4 records: RP-SP002 dev agent record and review findings,
+      workflow statuses in RP-S018 and the four fix stories, and decide whether #25
+      closes"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-24.md"
