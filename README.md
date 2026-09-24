@@ -60,7 +60,8 @@ were read through. It is complete, so a saved result folds a retired id by apply
 stands, never by merging it again with a later release's shipped map.
 The result also carries `coverage`, on every run: `measured`, `dark` and `unmeasured` count
 rules, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
-measured share of them. With no rules read, the counts are zero and `share` is `null`.
+measured share of them; `catalog` counts the measured rules the shipped catalog binds. With no
+rules read, the counts are zero and `share` is `null`.
 
 A row names each detector that raised in `rules_errors`, and that session leaves the
 detector's hit denominator only. A row also carries `compliance`, detector id to
@@ -152,7 +153,8 @@ without a flag; `--no-config` skips them.
 matched against a small shipped catalog by what it says, with no model: its heading and each
 sentence of its text are tested against one anchored pattern per entry, and a section that
 matches exactly one entry is measured by that entry's detector. The shapes are: run the tests
-before finishing (`testing/no-test-run`), never skip pre-commit hooks
+before finishing (`testing/test-after-change`, whose hits are file changes a test run
+followed, so its opportunities and followed count are the measure), never skip pre-commit hooks
 (`verification/no-verify`), never force-push the default branch
 (`git-safety/force-push-default`), use uv, not pip (`package-manager/pip-install`), do not
 read a whole file (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
@@ -160,8 +162,9 @@ read a whole file (`transcript-hygiene/whole-file-cat`), Conventional Commit sub
 (`secrets/secret-file-add`). A section matching none, or more than one, stays unmeasured, and
 the coverage block names the entries when it matched several. A bound section is listed as
 `measured` with the note `catalog-bound, <detector id>`. A catalog detector joins the report
-only when a rule binds it, a detector of your own with a catalog id replaces it, and
-`ruleprobe corpus` scores every entry. In a clone,
+only when a rule binds it, a detector of your own with a catalog id replaces it,
+`ruleprobe corpus` scores every entry, and `ruleprobe detectors` lists every entry marked
+`catalog`. A file with no heading, or none of whose sections is a rule, binds as one unit. In a clone,
 `ruleprobe report --root docs --rules tests/fixtures/catalog` binds a file holding one
 section in each shape.
 
@@ -403,16 +406,21 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
+commits/non-conventional-subject          4    6    4    0    0   1.00    1.00   1.00
+git-safety/force-push-default             4    5    4    0    0   1.00    1.00   1.00
+package-manager/pip-install               3    3    3    0    0   1.00    1.00   1.00
+secrets/secret-file-add                   4    7    4    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
+testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat         5    6    5    0    0   1.00    1.00   1.00
-verification/no-verify                    6    6    6    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat         7    9    7    0    0   1.00    1.00   1.00
+verification/no-verify                    9    9    9    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    32   42   32    0    0   1.00    1.00   1.00  floor 0.90
+total                                    56   73   56    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
-That is the six shipped detectors over the corpus. `ruleprobe corpus` prints a row for each
-catalog entry as well, scored by the entry's own `examples:`, and the total counts them.
+The six shipped detectors are scored over the corpus, and each catalog entry by its own
+`examples:`; an entry restating a shipped detector adds its examples to that detector's row.
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
 `ruleprobe corpus --floor 0.9` exits non-zero when a scored detector falls under the floor,

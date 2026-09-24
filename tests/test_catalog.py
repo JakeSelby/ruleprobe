@@ -22,13 +22,14 @@ import unittest
 import zipfile
 from unittest import mock
 
-from corpus import bash, say
-from ruleprobe import DEFAULT, Registry, contract_data, run
+from corpus import bash, say, tool_use
+from ruleprobe import DEFAULT, Registry, analyse, contract_data, run
 from ruleprobe.cli import main
 from ruleprobe.declarative import load
 from ruleprobe.detectors import catalog
 from ruleprobe.rules import Bundle, RuleEntry, _CATALOG, _catalog_matches, load_bundle
-from ruleprobe.validity import DEFAULT_FLOOR, score_examples
+from ruleprobe.registry import Detector
+from ruleprobe.validity import DEFAULT_FLOOR, score_corpus, score_examples
 from test_contract_data import non_literal
 from test_readers import FIXTURES
 
@@ -36,7 +37,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CATALOG_RULES = os.path.join(FIXTURES, "catalog")
 IDS = [entry["detector"]["id"] for entry in catalog.ENTRIES]
 #: The fixture's sections, in catalog order: section id and the entry it states.
-FIXTURE = [("team/CLAUDE.md#testing", "testing/no-test-run"),
+FIXTURE = [("team/CLAUDE.md#testing", "testing/test-after-change"),
            ("team/CLAUDE.md#hooks", "verification/no-verify"),
            ("team/CLAUDE.md#pushing", "git-safety/force-push-default"),
            ("team/CLAUDE.md#dependencies", "package-manager/pip-install"),
@@ -133,10 +134,71 @@ class DetectorTests(unittest.TestCase):
         self.assertTrue(self.hits("secrets/secret-file-add", [bash("git add .env.local")]))
         self.assertEqual(self.hits("secrets/secret-file-add", [bash("git add .envrc")]), [])
 
-    def test_a_session_with_no_events_is_no_missing_test_run(self):
-        self.assertEqual(self.hits("testing/no-test-run", []), [])
-        self.assertTrue(self.hits("testing/no-test-run", [say("Done.")]))
+    def test_a_change_opens_an_opportunity_that_a_later_test_run_follows(self):
+        detector = dict((d.id, d) for _p, d in _CATALOG)["testing/test-after-change"]
+        edit = tool_use("Edit", {"file_path": "src/app.py"}, turn=1, id="e1")
+        events = [edit, bash("python3 -m pytest", turn=2, id="t1"),
+                  tool_use("Write", {"file_path": "src/b.py"}, turn=3, id="e2")]
+        self.assertEqual(detector.opportunities(events, analyse(events)),
+                         [(1, "e1", True), (3, "e2", False)])
+        self.assertEqual(self.hits("testing/test-after-change", [say("Done.")]), [])
 
+    def test_the_common_runners_and_wrappers_are_test_runs(self):
+        edit = tool_use("Edit", {"file_path": "src/app.py"}, id="e1")
+        for command in ("poetry run pytest", "pipenv run pytest -x", "npx jest",
+                        "npm test", "yarn run test", "bun test", "python -m pytest",
+                        "mvn -q test", "./gradlew test", "bundle exec rspec", "go test ./...",
+                        "cargo test", "make check", "CI=1 pytest", "cd api; make test"):
+            with self.subTest(command=command):
+                self.assertTrue(self.hits("testing/test-after-change",
+                                          [edit, bash(command, turn=2, id="t1")]))
+        for command in ("pytest-watch --help", "npm install", "go build ./...",
+                        "make lint", "echo pytest"):
+            with self.subTest(command=command):
+                self.assertEqual(self.hits("testing/test-after-change",
+                                           [edit, bash(command, turn=2, id="t1")]), [])
+
+    def test_a_subject_from_a_variable_or_substitution_is_unreadable(self):
+        for command in ('git commit -m "$MSG"', 'git commit -m "${msg}"',
+                        "git commit -m `cat msg.txt`", 'git commit -m"$MSG"'):
+            with self.subTest(command=command):
+                self.assertEqual(self.hits("commits/non-conventional-subject",
+                                           [bash(command)]), [])
+        self.assertTrue(self.hits("commits/non-conventional-subject",
+                                  [bash('git commit -m"tidy up"')]))
+        self.assertEqual(self.hits("commits/non-conventional-subject",
+                                   [bash('git commit -m"fix: tidy up"')]), [])
+
+    def test_each_git_entry_needs_the_call_and_the_shape_in_one_segment(self):
+        cases = [("commits/non-conventional-subject",
+                  "git commit -m 'feat: x' && echo \"git commit -m wip\"",
+                  "git status && git commit -m wip"),
+                 ("secrets/secret-file-add", "git add src; echo \"git add .env\"",
+                  "echo ok; git add .env"),
+                 ("git-safety/force-push-default",
+                  "git push origin main && echo \"git push -f origin main\"",
+                  "echo ok && git push -f origin main")]
+        for did, near, positive in cases:
+            with self.subTest(detector=did):
+                self.assertEqual(self.hits(did, [bash(near)]), [])
+                self.assertTrue(self.hits(did, [bash(positive)]))
+
+    def test_a_push_through_a_global_option_or_a_flag_cluster_is_read(self):
+        self.assertTrue(self.hits("git-safety/force-push-default",
+                                  [bash("git -C app push -fu origin main")]))
+        self.assertEqual(self.hits("git-safety/force-push-default",
+                                   [bash("git -C app push -u origin main")]), [])
+
+    def test_certificates_and_test_env_files_are_not_secret_shaped(self):
+        for path in (".env.test", ".env.example", "certs/ca.pem", "certs/fullchain.pem"):
+            with self.subTest(path=path):
+                self.assertEqual(self.hits("secrets/secret-file-add",
+                                           [bash("git add " + path)]), [])
+        for path in (".env", ".env.production", "certs/privkey.pem", "tls/server-key.pem",
+                     "id_rsa"):
+            with self.subTest(path=path):
+                self.assertTrue(self.hits("secrets/secret-file-add",
+                                          [bash("git add " + path)]))
 
 class BindingTests(Temp):
     def test_each_fixture_section_binds_its_entry_and_is_catalog_bound(self):
@@ -182,7 +244,7 @@ class BindingTests(Temp):
     def test_a_pattern_matches_at_the_start_of_a_sentence_only(self):
         self.assertEqual(matched("We run the tests before lunch."), [])
         self.assertEqual(matched("Lunch is late. Run the tests before you push."),
-                         ["testing/no-test-run"])
+                         ["testing/test-after-change"])
 
     def test_the_heading_is_read_as_a_sentence(self):
         self.assertEqual([d.id for d in _catalog_matches("Never force-push main", [])],
@@ -213,6 +275,57 @@ class BindingTests(Temp):
             bundle = load_bundle(rules_dir=CATALOG_RULES, config=False)
         self.assertEqual(bundle.counts()["measured"], len(FIXTURE))
 
+    def test_a_load_into_memory_or_an_add_to_a_prompt_binds_nothing(self):
+        self.assertEqual(matched("Never load an entire file into memory; stream it."), [])
+        self.assertEqual(matched("Never add credentials to a prompt."), [])
+        self.assertEqual(matched("Never read a whole file into your context."),
+                         ["transcript-hygiene/whole-file-cat"])
+        self.assertEqual(matched("Never git add credentials."), ["secrets/secret-file-add"])
+
+    def test_a_file_with_no_heading_binds_as_one_rule(self):
+        self.write("rules/testing.md", "Run the tests before finishing.\n")
+        bundle = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
+        self.assertEqual([(r.rule, r.state, r.detectors, r.source) for r in bundle.rules],
+                         [("testing", "measured", ["testing/test-after-change"], "catalog")])
+
+    def test_a_headed_file_with_no_rule_section_binds_by_its_text(self):
+        self.write("rules/x.md", "Never force-push to main.\n\n# Notes\n")
+        bundle = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
+        self.assertEqual([(r.rule, r.state, r.source) for r in bundle.rules],
+                         [("x", "measured", "catalog")])
+
+    def test_a_task_list_marker_is_read_through(self):
+        bundle = self.rules("# Git\n\n- [ ] Never force-push to main\n- [x] Keep it small\n")
+        self.assertEqual(bundle.rules[0].detectors, ["git-safety/force-push-default"])
+
+    def test_a_catalog_id_the_fold_map_retires_binds_nothing(self):
+        with mock.patch.dict(contract_data.RENAMED,
+                             {"git-safety/force-push-default": "git-safety/renamed"}):
+            bundle = self.rules("# Git\n\nNever force-push to main.\n")
+            self.assertEqual((bundle.rules[0].state, bundle.rules[0].detectors),
+                             ("unmeasured", []))
+            self.assertNotIn("git-safety/force-push-default",
+                             Bundle().registry(whole_catalog=True))
+
+    def test_a_sentence_wrapped_across_lines_binds(self):
+        bundle = self.rules("# Git\n\nNever force-push\nto main, whatever the reason.\n")
+        self.assertEqual(bundle.rules[0].detectors, ["git-safety/force-push-default"])
+
+    def test_unpunctuated_list_items_are_sentences_of_their_own(self):
+        listed = self.rules("# Git\n\n- Keep commits small\n- Never force-push to main\n")
+        self.assertEqual(listed.rules[0].detectors, ["git-safety/force-push-default"])
+        joined = self.rules("# Git\n\nKeep commits small\nNever force-push to main\n")
+        self.assertEqual(joined.rules[0].detectors, [])
+
+    def test_a_rule_inside_a_fence_quote_table_or_comment_binds_nothing(self):
+        for block in ("```\nNever force-push to main.\n```\n",
+                      "> Never force-push to main.\n",
+                      "| Rule |\n| ---- |\n| Never force-push to main. |\n",
+                      "<!-- Never force-push to main. -->\n"):
+            with self.subTest(block=block):
+                bundle = self.rules("# Git\n\nSee below.\n\n" + block)
+                self.assertEqual((bundle.rules[0].state, bundle.rules[0].detectors),
+                                 ("unmeasured", []))
 
 class RegistryTests(Temp):
     def test_order_is_shipped_then_catalog_then_the_user_s(self):
@@ -267,6 +380,55 @@ class RegistryTests(Temp):
     def test_a_rule_entry_takes_five_fields_and_defaults_its_source(self):
         self.assertIsNone(RuleEntry("r", "r.md", "unmeasured", "", []).source)
 
+    def test_bound_catalog_detectors_lead_the_bundle_s_own(self):
+        path = self.write("detectors.yaml", "- id: house/write\n  when: {tool: Write}\n")
+        self.write("rules/CLAUDE.md", "# Pushing\n\nNever force-push to main.\n\n"
+                                      "# Reading\n\nNever cat a whole file.\n")
+        bundle = load_bundle(paths=[path], rules_dir=os.path.join(self.dir, "rules"),
+                             config=False)
+        self.assertEqual([d.id for d in bundle.detectors],
+                         ["git-safety/force-push-default", "house/write"])
+        registry = DEFAULT.copy().extend(bundle.detectors)
+        self.assertIn("git-safety/force-push-default",
+                      run([bash("git push -f origin main")], registry=registry))
+        self.assertEqual(bundle.coverage()["catalog"], 2)
+
+    def test_a_base_detector_holding_a_catalog_id_makes_the_rule_own(self):
+        base = DEFAULT.copy()
+        mine = Detector("git-safety/force-push-default", "git-safety", "bash",
+                        lambda events, ctx: [])
+        base.add(mine)
+        bundle = self.rules("# Git\n\nNever force-push to main.\n")
+        registry = bundle.registry(base)
+        self.assertIs(registry.get("git-safety/force-push-default"), mine)
+        self.assertEqual(bundle.rules[0].source, "own")
+        self.assertEqual(bundle.coverage()["catalog"], 0)
+        self.assertNotIn("catalog-bound", bundle.summary(relative_to=self.dir))
+
+    def test_detectors_lists_every_catalog_entry_marked_catalog(self):
+        out = io.StringIO()
+        self.assertEqual(main(["detectors", "--no-config"], out=out), 0)
+        lines = dict((line.split()[0], line) for line in out.getvalue().splitlines())
+        for did in IDS:
+            with self.subTest(detector=did):
+                self.assertTrue(lines[did].endswith("catalog"))
+        self.assertFalse(lines["secrets/secret-in-write"].endswith("catalog"))
+
+    def test_corpus_scores_a_restating_entry_s_examples_on_the_shipped_row(self):
+        out = io.StringIO()
+        main(["corpus", "--no-config", "--json"], out=out)
+        scores = json.loads(out.getvalue())["detectors"]
+        corpus_only = score_corpus(DEFAULT)
+        for entry in catalog.ENTRIES:
+            did = entry["detector"]["id"]
+            if did not in DEFAULT:
+                continue
+            examples = entry["detector"]["examples"]
+            with self.subTest(detector=did):
+                self.assertEqual(scores[did]["positives"],
+                                 corpus_only[did].positives + len(examples["fire"]))
+                self.assertEqual(scores[did]["negatives"],
+                                 corpus_only[did].negatives + len(examples["skip"]))
 
 class LiteralTests(unittest.TestCase):
     def test_the_catalog_module_holds_only_literals(self):
@@ -278,15 +440,16 @@ class LiteralTests(unittest.TestCase):
 
 
 _ZIP_PROBE = r"""
-import builtins, io, json, sys
+import json, sys
 zip_path, rules = sys.argv[1], sys.argv[2]
-sys.path.insert(0, zip_path)
 opened = []
-real = builtins.open
-def guarded(file, *args, **kwargs):
-    opened.append(str(file))
-    return real(file, *args, **kwargs)
-builtins.open = io.open = guarded
+
+def audit(event, args):
+    if event == "open" and args and isinstance(args[0], str):
+        opened.append(args[0])
+
+sys.path.insert(0, zip_path)
+sys.addaudithook(audit)
 from ruleprobe.detectors import catalog
 from ruleprobe.rules import load_bundle
 bundle = load_bundle(rules_dir=rules, config=False)
@@ -319,7 +482,9 @@ class ZipTests(unittest.TestCase):
         self.assertTrue(out["file"].startswith(archive + os.sep), out["file"])
         self.assertEqual(out["bound"], [did for _rule, did in FIXTURE])
         self.assertTrue(set(out["bound"]) <= set(out["registered"]))
-        self.assertEqual(out["opened"], [os.path.join(CATALOG_RULES, "team", "CLAUDE.md")])
+        # The audit hook sees every open, the import system's and zipimport's included.
+        self.assertIn(os.path.join(CATALOG_RULES, "team", "CLAUDE.md"), out["opened"])
+        self.assertEqual([p for p in out["opened"] if p.startswith(archive + os.sep)], [])
 
 
 if __name__ == "__main__":

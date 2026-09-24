@@ -34,7 +34,7 @@ from collections import namedtuple
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
 from .detectors import catalog as _catalog
 from .matchers import compile_detector, schema_version_error
-from .registry import DEFAULT, Registry
+from .registry import DEFAULT, Registry, fold_map
 
 __all__ = ["Bundle", "Finding", "RuleEntry", "discover", "load_bundle", "load_file",
            "load_rules_dir"]
@@ -71,6 +71,16 @@ def _compile_catalog():
 _CATALOG = _compile_catalog()
 
 
+def catalog_detectors():
+    """The catalog's detectors in catalog order, less any id the shipped fold map retires."""
+    retired = fold_map()
+    return [detector for _pattern, detector in _CATALOG if detector.id not in retired]
+
+
+def _is_catalog(detector):
+    return any(detector is known for _pattern, known in _CATALOG)
+
+
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
@@ -88,15 +98,22 @@ class Bundle(object):
         is how a repository overrides a shipped or a catalog detector without editing the
         package. A catalog entry that restates a detector `base` already holds leaves that
         one in place. `whole_catalog` adds every catalog entry, bound or not, which is how
-        `ruleprobe corpus` scores the whole catalog."""
+        `ruleprobe corpus` and `ruleprobe detectors` list the whole catalog.
+
+        A catalog-bound rule whose id the result holds under another detector - a plugin's,
+        `base`'s own or a loaded one - is relabelled `own` in `self.rules`, so the coverage
+        block printed after this call names what actually measures it."""
         registry = base.copy() if base is not None else Registry()
         bound = set(did for entry in self.rules if entry.source == "catalog"
                     for did in entry.detectors)
-        for _pattern, detector in _CATALOG:
+        for detector in catalog_detectors():
             if (whole_catalog or detector.id in bound) and detector.id not in registry:
                 registry.add(detector)
         for detector in self.detectors:
+            if _is_catalog(detector) and detector.id in registry:
+                continue
             registry.add(detector)
+        self.rules = _sourced(self.rules, registry)
         return registry
 
     def counts(self):
@@ -107,11 +124,13 @@ class Bundle(object):
 
     def coverage(self):
         """The counts, plus `share`: measured rules over all rules, dark ones included, or
-        `None` when there are no rules. `summary()` prints this share floored to a whole
-        percent and `report --json` carries it exact, so the two count the same rules."""
+        `None` when there are no rules, and `catalog`: the measured rules the shipped catalog
+        binds. `summary()` prints the share floored to a whole percent and `report --json`
+        carries it exact, so the two count the same rules."""
         out = self.counts()
         total = sum(out.values())
         out["share"] = out["measured"] / float(total) if total else None
+        out["catalog"] = sum(1 for entry in self.rules if entry.source == "catalog")
         return out
 
     def summary(self, relative_to=None):
@@ -141,10 +160,24 @@ class Bundle(object):
         return "\n".join(lines)
 
 
+def _sourced(rules, registry):
+    """`rules` with each catalog-bound rule whose detector id `registry` holds under a
+    detector other than the catalog's, or the shipped one it restates, marked `own`."""
+    out = []
+    for entry in rules:
+        if entry.source == "catalog":
+            for did in entry.detectors:
+                held = registry.get(did)
+                if held is not None and not _is_catalog(held) and held is not DEFAULT.get(did):
+                    entry = entry._replace(source="own")
+        out.append(entry)
+    return out
+
+
 def _percent(coverage):
     """The share as the `rules:` line prints it. Floored, so a file with one rule unmeasured
     never reads 100%; `<1%` when the floor would hide a measured rule."""
-    total = sum(v for k, v in coverage.items() if k != "share")
+    total = sum(v for k, v in coverage.items() if k not in ("share", "catalog"))
     if not total:
         return ""
     percent = 100 * coverage["measured"] // total
@@ -409,8 +442,7 @@ def _units(body):
     """`_sections` with a fourth item: the section's prose, a list of paragraphs, each list
     item starting one of its own. It is the text lines alone, so nothing a fence, a comment,
     a table or a quote holds is in it."""
-    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    kinds, visible = _line_kinds(lines)
+    kinds, visible = _kinds_of(body)
     out = []
     for index, kind in enumerate(kinds):
         if kind == "heading":
@@ -418,18 +450,40 @@ def _units(body):
             out.append([_CLOSING.sub("", text).strip(), index, False, []])
         elif kind == "text" and out:
             out[-1][2] = True
-            line = visible[index].strip()
-            if kinds[index - 1] == "text" and not _LIST.match(line) and out[-1][3]:
-                out[-1][3][-1] += " " + line
-            else:
-                out[-1][3].append(line)
+            _add_prose(out[-1][3], kinds, visible, index)
     return [tuple(s) for s in out]
+
+
+def _kinds_of(body):
+    return _line_kinds(body.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
+
+
+def _add_prose(paragraphs, kinds, visible, index):
+    """Add text line `index` to `paragraphs`: it continues the paragraph above it unless
+    the line above is not text or it opens a list item."""
+    line = visible[index].strip()
+    if index and kinds[index - 1] == "text" and not _LIST.match(line) and paragraphs:
+        paragraphs[-1] += " " + line
+    else:
+        paragraphs.append(line)
+
+
+def _file_prose(body):
+    """Every text line of `body` as paragraphs, headings ignored: the text a file that is
+    one rule binds by."""
+    kinds, visible = _kinds_of(body)
+    paragraphs = []
+    for index, kind in enumerate(kinds):
+        if kind == "text":
+            _add_prose(paragraphs, kinds, visible, index)
+    return paragraphs
 
 
 # --- catalog binding ---------------------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 _MARKUP = re.compile(r"[`*]+")
+_TASK = re.compile(r"^\[[ xX]\][ \t]+")
 
 
 def _sentences(heading, paragraphs):
@@ -440,7 +494,7 @@ def _sentences(heading, paragraphs):
     then fails to match under-counts, never over-counts."""
     out = []
     for text in [heading] + list(paragraphs):
-        text = _LIST.sub("", text, count=1)
+        text = _TASK.sub("", _LIST.sub("", text, count=1).lstrip(), count=1)
         text = _EMPHASIS.sub("", _MARKUP.sub("", _LINK.sub(r"\1", text)))
         text = " ".join(text.replace("\u2019", "'").split())
         out.extend(part for part in _SENTENCE_END.split(text) if part)
@@ -451,20 +505,21 @@ def _catalog_matches(heading, paragraphs):
     """The catalog detectors whose pattern matches the start of any sentence of the rule,
     in catalog order. Binding reads text and nothing else."""
     sentences = _sentences(heading, paragraphs)
-    return [detector for pattern, detector in _CATALOG
-            if any(pattern.match(sentence) for sentence in sentences)]
+    retired = fold_map()
+    return [detector for pattern, detector in _CATALOG if detector.id not in retired
+            and any(pattern.match(sentence) for sentence in sentences)]
 
 
-def _bind(rule, path, heading, paragraphs):
-    """A section rule's entry: measured and catalog-bound when exactly one entry matches,
-    else unmeasured, with the entries named when more than one did."""
+def _bind(rule, path, heading, paragraphs, reason=""):
+    """A rule's entry: measured and catalog-bound when exactly one entry matches, else
+    unmeasured, with the entries named when more than one did, or else with `reason`."""
     matched = _catalog_matches(heading, paragraphs)
     if len(matched) == 1:
         return RuleEntry(rule, path, "measured", "", [matched[0].id], "catalog")
     if matched:
         return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
                          % (len(matched), ", ".join(d.id for d in matched)), [])
-    return RuleEntry(rule, path, "unmeasured", "", [])
+    return RuleEntry(rule, path, "unmeasured", reason, [])
 
 
 def _uncomment(line, open_comment):
@@ -568,8 +623,9 @@ def _slug(heading):
 def _section_rules(path, root, body, first_line, name):
     """One `RuleEntry` per section of `body` that is a rule, with its id, bound to the
     catalog when exactly one entry matches its text and unmeasured otherwise; or,
-    when `body` has no heading or none of its sections is a rule, one unmeasured rule called
-    `name`, as the file always was, so that no file drops out of the coverage block.
+    when `body` has no heading or none of its sections is a rule, one rule called `name`, as
+    the file always was, so that no file drops out of the coverage block; its whole text binds
+    the catalog as one unit.
 
     A headed file takes section ids even when it has one section, so that an id does not
     change when a section is added below. A slug repeated in the file takes an ordinal
@@ -581,7 +637,7 @@ def _section_rules(path, root, body, first_line, name):
     relative = os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
     units = _units(body)
     if not units:
-        return [RuleEntry(name, path, "unmeasured", "", [])], []
+        return [_bind(name, path, "", _file_prose(body))], []
     entries, findings, seen, taken = [], [], {}, set()
     for heading, index, is_rule, paragraphs in units:
         base = _slug(heading)
@@ -596,7 +652,7 @@ def _section_rules(path, root, body, first_line, name):
         taken.add(rule)
         entries.append(_bind(rule, path, heading, paragraphs))
     if not entries:
-        return [RuleEntry(name, path, "unmeasured", "no section is a rule", [])], findings
+        return [_bind(name, path, "", _file_prose(body), "no section is a rule")], findings
     return entries, findings
 
 
@@ -619,10 +675,16 @@ def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True):
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)
-    # A detector of the user's that takes a catalog id replaces the catalog one in the
-    # registry (`Bundle.registry`), so a rule bound to that id is the user's own.
+    # A detector of the user's that takes a catalog id replaces the catalog one, so a rule
+    # bound to that id is the user's own. The bound catalog detectors lead `detectors`, so a
+    # consumer building from `DEFAULT` plus `detectors` measures what the rules say is
+    # measured; one `DEFAULT` already holds is left to it.
     own = set(d.id for d in bundle.detectors)
     bundle.rules = [entry._replace(source="own")
                     if entry.source == "catalog" and own.intersection(entry.detectors)
                     else entry for entry in bundle.rules]
+    bound = set(did for entry in bundle.rules if entry.source == "catalog"
+                for did in entry.detectors)
+    bundle.detectors[:0] = [d for d in catalog_detectors()
+                            if d.id in bound and d.id not in DEFAULT]
     return bundle

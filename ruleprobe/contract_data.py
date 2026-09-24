@@ -24,7 +24,7 @@ SHIPPED_IDS = (
     "secrets/secret-in-write",
     "cache-hygiene/compact",
     "cache-hygiene/model-switch",
-    "testing/no-test-run",
+    "testing/test-after-change",
     "git-safety/force-push-default",
     "package-manager/pip-install",
     "commits/non-conventional-subject",

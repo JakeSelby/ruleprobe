@@ -43,10 +43,11 @@ from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
                      session_address)
-from .rules import load_bundle
+from .rules import catalog_detectors, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
                        DEFAULT_FLOOR, below_floor, event_key, hit_key, load_corpus,
-                       read_events, score_corpus, scores_as_dict, validity, validity_table)
+                       read_events, score_corpus, score_examples, scores_as_dict, validity,
+                       validity_table)
 
 
 def build_parser():
@@ -215,6 +216,27 @@ def _gate_note(detector):
     return "gated on --stance %s=%s" % (dimension, "|".join(variants))
 
 
+def _catalog_note(detector, registry):
+    """`catalog` for a registered detector a catalog entry supplies, or the shipped one an
+    entry restates; `""` for one a plugin or a detector file replaced it with."""
+    for entry in catalog_detectors():
+        if entry.id == detector.id:
+            held = registry.get(detector.id)
+            return "catalog" if held is entry or held is DEFAULT.get(detector.id) else ""
+    return ""
+
+
+def _score_restated(scores, registry):
+    """Add to a shipped detector's score the `examples:` of the catalog entry that restates
+    it, so every entry's own examples are scored, and fall under the floor with it."""
+    for entry in catalog_detectors():
+        held = registry.get(entry.id)
+        if entry.examples and held is not entry and held is DEFAULT.get(entry.id) \
+                and entry.id in scores:
+            scores[entry.id].add(score_examples([entry])[entry.id])
+    return scores
+
+
 def _bundle_and_registry(args, plugins=None, whole_catalog=False):
     """The declarative bundle for this invocation, and the registry to run: the shipped
     detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
@@ -287,11 +309,13 @@ def cmd_corpus(args, out):
 
     The floor is this repository's CI gate, not a runtime failure for a user: nothing in
     `ruleprobe report` reads it, and a detector nobody labelled is passed over rather than
-    failed. Every catalog entry is scored, whether a rule bound it or not.
+    failed. Every catalog entry is scored, whether a rule bound it or not, and an entry
+    restating a shipped detector adds its examples to that detector's row.
     """
     bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:
-        scores = validity(registry=registry, directory=args.corpus)
+        scores = _score_restated(validity(registry=registry, directory=args.corpus),
+                                 registry)
     except CorpusError as exc:
         sys.stderr.write("corpus: %s\n" % exc)
         return 2
@@ -312,9 +336,11 @@ def cmd_corpus(args, out):
 
 
 def cmd_detectors(args, out):
-    bundle, registry = _bundle_and_registry(args, plugins=True)
+    bundle, registry = _bundle_and_registry(args, plugins=True, whole_catalog=True)
     for detector in registry:
-        out.write("%-40s%-20s%s\n" % (detector.id, detector.event, _gate_note(detector)))
+        notes = [n for n in (_catalog_note(detector, registry), _gate_note(detector)) if n]
+        out.write(("%-40s%-20s%s" % (detector.id, detector.event, "; ".join(notes))).rstrip()
+                  + "\n")
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")
