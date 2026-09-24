@@ -89,7 +89,7 @@ contract are in `docs/bmad-governance.md`, which every BMad workflow loads.
 
 - `ruleprobe/` — the package: readers, the shell parse, the registry, the declarative format,
   matchers, rules binding, report, and the shipped detectors and corpus as package data.
-- `tests/` — the suite. The four `test_*` files for `scripts/` stay out of the sdist.
+- `tests/` — the suite. The five `test_*` files for `scripts/` stay out of the sdist.
 - `docs/` — the worked example and the repository's process docs.
 - `scripts/` — repository tooling: the BMad issue map, the release preflight and notes, and the
   `stable` branch. Never imported by the package.
