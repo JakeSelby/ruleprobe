@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-24-2026 02:22
-last_updated: '2026-09-24'
+last_updated: '09-24-2026 02:39'
 project: ruleprobe
 project_key: NOKEY
 tracking_system: file-system
@@ -56,7 +56,7 @@ development_status:
   2-5-feat-report-rows-carry-compliance-for-detectors-that-define: done
   2-6-feat-report-compliance-per-opportunity-for-order-and-absent: done
   2-7-decision-report-compliance-by-position-stays-out-of-0-2-0: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   epic-3: in-progress
   3-1-decision-rules-the-section-split-unit: done
@@ -148,3 +148,51 @@ action_items:
     owner: "maintainer"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-1-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-9-stop-measure-refusing-a-compiled-order-d"
+    epic: 2
+    action: "Stop measure() refusing a compiled order detector own output when first
+      opens on events with no tool use id, with a regression test through measure()"
+    owner: "dev (bmad-build)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-10-run-the-ad-11-identity-test-through-meas"
+    epic: 2
+    action: "Run the AD-11 identity test through measure() and over the shipped catalog"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-11-make-the-compiled-detector-evaluation-me"
+    epic: 2
+    action: "Make the compiled detector evaluation memo safe to share and state the
+      thread contract in the Detector docstring"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-12-amend-ad-11-to-name-the-as-built-complia"
+    epic: 2
+    action: "Amend AD-11 to name the as-built compliance fields and clear the realised
+      assumption tags, before 6.2 cuts 0.2.0"
+    owner: "architect"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-13-give-the-docs-worked-example-a-rule-that"
+    epic: 2
+    action: "Give the docs worked example a rule that counts opportunities so the
+      report shows compliance"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-14-log-the-rp-s012-raising-callable-gate-qu"
+    epic: 2
+    action: "Log the RP-S012 raising-callable-gate question in deferred-work.md and
+      require maintainer questions to go there"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-2-retro-item-15-require-a-producer-to-consumer-test-for"
+    epic: 2
+    action: "Require a producer-to-consumer test for consumer-side validation, and
+      clearing a realised ASSUMPTION tag in the same PR, in docs/bmad-governance.md"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
