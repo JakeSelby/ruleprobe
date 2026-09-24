@@ -12,49 +12,47 @@ All notable changes to this project are documented here. The format follows
 and `absent`; schema versions, on detector entries (below) and on rows and the `report_data`
 result (under Added); the persisted fold map for renamed detector ids; the declared public API;
 the coverage block, which now also appears in `report --json` as `coverage`; and section rules.
-Each part has its entry below, the row schema's under Added. From 0.2.0 nothing declared breaks within a minor series, and a later 0.x
-minor may break only under a Breaking heading like this one; the README's Versioning section
-states the policy.
+Each part has its entry below, the row schema's under Added. From 0.2.0 nothing declared breaks
+within a minor series, and a later 0.x minor may break only under a Breaking heading like this
+one; the README's Versioning section states the policy.
 
 - A declarative matcher no longer counts a Bash command the shell parse skipped - empty or
-  missing, longer than 16,384 characters, or one that does not tokenize or parse - as a match
-  for `not` or `absent` ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a
-  command every `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a
-  `text` read of `source: heredocs` is undecided; `not`, `any` and `all` pass undecided through, and an undecided `when`, an `order` endpoint or an `absent`
-  candidate is no hit. A detector file using `not` or `absent` may count fewer hits; no edit is
-  needed, and a rule that wants those commands asks for `command: {unparsed: true}`. A predicate
-  from `compile_matcher` may now return a falsy undecided value: a Python caller who negates a
-  predicate itself reads it as false and can over-count, and should test it with
-  `is_undecided` or compose through the declarative `not`, `any` and `all` instead.
-- A detector file's top-level `version`, ignored in 0.1, is now read as its entries' schema
-  version, and an entry may carry its own `schema_version`, which wins
+  missing, longer than 16,384 characters, or one that does not tokenize or parse - as a match for
+  `not` or `absent` ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a command
+  every `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text`
+  read of `source: heredocs` is undecided; `not`, `any` and `all` pass undecided through, and an
+  undecided `when`, an `order` endpoint or an `absent` candidate is no hit. A detector file using
+  `not` or `absent` may count fewer hits; no edit is needed, and a rule that wants those commands
+  asks for `command: {unparsed: true}`. A predicate from `compile_matcher` may now return a falsy
+  undecided value: a Python caller who negates a predicate itself reads it as false and can
+  over-count, and should test it with `is_undecided` or compose through the declarative `not`,
+  `any` and `all` instead. - A detector file's top-level `version`, ignored in 0.1, is now read as
+  its entries' schema version, and an entry may carry its own `schema_version`, which wins
   ([#32](https://github.com/JakeSelby/ruleprobe/issues/32)). A schema version this release does
   not know - above 2, `0`, negative or not an integer - is a finding, and only the entries that
   would read it are skipped; a top-level `schema_version` is a finding too, since the file-level
-  key is `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses
-  the entries without a key of their own until it is corrected.
-- `report --rules` prints the measured share in the coverage block, as in
-  `rules: 2 measured, 1 dark, 1 unmeasured (50% measured)`, floored so a file with a rule
-  unmeasured never shows 100% ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and
-  `report --json` now carries the block as a top-level `coverage` key, where it was printed to
-  stderr only. The key counts rules, not sessions.
-- The README declares the public API: every name, call shape and non-name promise a downstream
-  tool may pin, each held by a contract test that CI also runs against the built wheel imported
-  as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name outside that list is
-  importable but may change in any release.
-- A retired detector id folds onto its current id through one fold map: the renames the package
-  ships, with a consumer's own `Registry(renamed=)` laid over them
-  ([#34](https://github.com/JakeSelby/ruleprobe/issues/34)). Chains resolve to their end, and a
-  cycle raises `ValueError` when a `Registry` is built or a rename would close one. `report_data`
-  and `--json` carry the effective map as `renamed`, and corpus labels fold the same way. A test
-  fails when a detector id any release shipped is neither registered nor folded.
-- An unbound rule file with headings now splits into one rule per section, with the id
-  `<path>#<heading-slug>` and an ordinal suffix for a repeated slug, so the coverage block counts
-  rules, not files ([#48](https://github.com/JakeSelby/ruleprobe/issues/48)). A section holding only
-  a heading, a fenced or indented code block, a table, a quote or a comment is not a rule. A file
-  with no heading, a file bound in its front matter, and a headed file with no rule section stay
-  one rule with their 0.1.0 id. The findings line now reads `findings: N (everything else still
-  loaded)`.
+  key is `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses the
+  entries without a key of their own until it is corrected. - `report --rules` prints the measured
+  share in the coverage block, as in `rules: 2 measured, 1 dark, 1 unmeasured (50% measured)`,
+  floored so a file with a rule unmeasured never shows 100%
+  ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and `report --json` now carries the
+  block as a top-level `coverage` key, where it was printed to stderr only. The key counts rules,
+  not sessions. - The README declares the public API: every name, call shape and non-name promise
+  a downstream tool may pin, each held by a contract test that CI also runs against the built
+  wheel imported as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name
+  outside that list is importable but may change in any release. - A retired detector id folds
+  onto its current id through one fold map: the renames the package ships, with a consumer's own
+  `Registry(renamed=)` laid over them ([#34](https://github.com/JakeSelby/ruleprobe/issues/34)).
+  Chains resolve to their end, and a cycle raises `ValueError` when a `Registry` is built or a
+  rename would close one. `report_data` and `--json` carry the effective map as `renamed`, and
+  corpus labels fold the same way. A test fails when a detector id any release shipped is neither
+  registered nor folded. - An unbound rule file with headings now splits into one rule per
+  section, with the id `<path>#<heading-slug>` and an ordinal suffix for a repeated slug, so the
+  coverage block counts rules, not files
+  ([#48](https://github.com/JakeSelby/ruleprobe/issues/48)). A section holding only a heading, a
+  fenced or indented code block, a table, a quote or a comment is not a rule. A file with no
+  heading, a file bound in its front matter, and a headed file with no rule section stay one rule
+  with their 0.1.0 id. The findings line now reads `findings: N (everything else still loaded)`.
 
 ### Added
 
