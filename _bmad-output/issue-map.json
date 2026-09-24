@@ -179,7 +179,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E003.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -192,7 +192,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E004.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -543,7 +543,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-SP001.md",
       "parent_bmad_id": "RP-E005",
       "parent_github_number": 24,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -608,7 +608,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S019.md",
       "parent_bmad_id": "RP-E007",
       "parent_github_number": 26,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -621,7 +621,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-T003.md",
       "parent_bmad_id": "RP-E007",
       "parent_github_number": 26,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -725,7 +725,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B003.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -738,7 +738,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B006.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -751,7 +751,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B004.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     }
   ]
