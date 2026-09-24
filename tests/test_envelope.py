@@ -15,6 +15,8 @@ from unittest import mock
 
 import ruleprobe
 from ruleprobe.cli import main
+from ruleprobe.readers import RUNTIMES, iter_sessions
+from ruleprobe.report import explain, explain_row, explain_text, measure
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PACKAGE = os.path.dirname(os.path.abspath(ruleprobe.__file__))
@@ -341,6 +343,44 @@ class ReportWritesAndSendsNothingTests(unittest.TestCase):
             os.close(descriptor)
         self.assertEqual(attempts, [label for label, _ in refusals])
         self.assertEqual(sorted(os.listdir(scratch)), ["existing.txt"])
+
+
+class ExplainWritesAndSendsNothingTests(unittest.TestCase):
+    """`explain` holds the same envelope as `report`: the transcripts are read, the detectors
+    rerun in memory, and each hit printed."""
+
+    temporary_directory = ReportWritesAndSendsNothingTests.temporary_directory
+    run_guarded = ReportWritesAndSendsNothingTests.run_guarded
+
+    def test_explain_over_the_corpus_runs_with_no_socket_and_no_write(self):
+        code, text, err = self.run_guarded("explain", "--root", CORPUS_SESSIONS, "--no-config")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "")
+        self.assertTrue(text.startswith("session   "))
+        self.assertIn("detector  transcript-hygiene/whole-file-cat", text)
+
+    def test_explain_with_config_discovery_and_filters_writes_nothing(self):
+        home = self.temporary_directory()
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(home)
+        with mock.patch.dict(os.environ, {"HOME": home, "XDG_CONFIG_HOME": home}):
+            code, text, err = self.run_guarded("explain", "--root", CORPUS_SESSIONS,
+                                               "--detector", "no/such-detector")
+        self.assertEqual((code, text), (0, ""))
+        self.assertNotIn("produced no session", err)
+        self.assertEqual(os.listdir(home), [])
+
+    def test_the_library_explain_and_explain_row_write_and_send_nothing(self):
+        with no_network_no_writes() as attempts:
+            sessions = iter_sessions(root=CORPUS_SESSIONS)
+            items = [explain_text(item) for item in explain(sessions)]
+            rows = [measure(s) for s in iter_sessions(root=CORPUS_SESSIONS)]
+            notes = [explain_row(row, RUNTIMES) for row in rows]
+        self.assertEqual(attempts, [])
+        self.assertTrue(items)
+        self.assertEqual(len(notes), corpus_transcripts())
+        self.assertTrue(all("counts only" in note for note in notes))
 
 
 if __name__ == "__main__":

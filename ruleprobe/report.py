@@ -27,7 +27,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run, run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -396,3 +396,211 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
                      % (group["key"][:42], group["sessions"], group["hits"],
                         ", ".join("%s %d" % (did, n) for did, n in group["top"]) or "-"))
     return "\n".join(lines)
+
+
+#: The most of one event's text explain prints; the rest is cut and counted.
+MAX_EXPLAINED = 4000
+
+# Every control character but a newline and a tab, and the line and paragraph separators:
+# printed raw, one in a transcript could rewrite the reader's terminal. Every Unicode format
+# character (category Cf: zero-width characters, U+061C, the bidi marks) is escaped too, since
+# one can make a printed line read as something it is not.
+_CONTROL = r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u2028\u2029]"
+
+
+def _hit_key(hit):
+    """Imported late: `ruleprobe.validity` sits above this module in the import graph, and
+    a label and a hit are keyed by the one function it owns."""
+    from .validity import hit_key
+
+    return hit_key(hit)
+
+
+def _redact(text):
+    """`detectors.common.redact`, the one path for text printed from a transcript, with
+    every control character but a newline and a tab, both line separators and every Unicode
+    format character written as its `\\xNN`, `\\uNNNN` or `\\UNNNNNNNN` escape.
+
+    It redacts, escapes, then redacts again: an escape's hex digits can complete a key name
+    the raw character broke, as `\\x1c` + `lient_secret` spells `client_secret`."""
+    import re
+    import unicodedata
+
+    from .detectors.common import redact
+
+    text = re.sub(_CONTROL, lambda found: _escape(found.group(0)), redact(text))
+    if not text.isascii():
+        text = "".join(_escape(c) if unicodedata.category(c) == "Cf" else c for c in text)
+    return redact(text)
+
+
+def _escape(char):
+    code = ord(char)
+    if code <= 0xff:
+        return "\\x%02x" % code
+    return "\\u%04x" % code if code <= 0xffff else "\\U%08x" % code
+
+
+def _capped(text):
+    if len(text) <= MAX_EXPLAINED:
+        return text
+    return "%s\n[%d more character(s) cut]" % (text[:MAX_EXPLAINED],
+                                               len(text) - MAX_EXPLAINED)
+
+
+def session_address(runtime, session_id):
+    """`<runtime>:<session id>`: a session id is unique within the runtime that wrote it,
+    and a hit key only within its session, so this plus the key names one hit anywhere."""
+    return "%s:%s" % (runtime or "", session_id or "")
+
+
+def _turn_order(turn):
+    return (0, turn, "") if isinstance(turn, int) and not isinstance(turn, bool) \
+        else (1, 0, str(turn))
+
+
+def _event_field(event):
+    """The name and text of what a hit on `event` matched: a Bash command, or any other
+    tool's whole input as sorted JSON, since a hit does not say which of its fields fired."""
+    import json
+
+    data = event.get("input") if isinstance(event.get("input"), dict) else {}
+    if event.get("name") == "Bash" and isinstance(data.get("command"), str):
+        return "command", data["command"]
+    try:
+        return "input", json.dumps(data, sort_keys=True, default=str)
+    except (TypeError, ValueError):  # keys of mixed types, or an input that holds itself
+        return "input", repr(data)
+
+
+def _tool_use_positions(events):
+    """`{(turn, tool use id): index}` for the first tool use at each pair: a hit names its
+    event by both, since an id is only promised unique within its turn's key."""
+    position = {}
+    for index, event in enumerate(events or ()):
+        if not isinstance(event, dict) or event.get("kind") != "tool_use":
+            continue
+        try:
+            position.setdefault((event.get("turn", 0), event.get("id")), index)
+        except TypeError:  # an unhashable turn or id names no hit either
+            continue
+    return position
+
+
+def _redacted_strings(mapping):
+    """`mapping` with every value but None and an integer turned to a string and redacted:
+    a transcript field may be any shape, and a list or tuple holds text as well as a string
+    does."""
+    out = {}
+    for name, value in mapping.items():
+        if value is None or (isinstance(value, int) and not isinstance(value, bool)):
+            out[name] = value
+        else:
+            out[name] = _redact(value if isinstance(value, str) else str(value))
+    return out
+
+
+def explain(sessions, stances=None, registry=DEFAULT, errors=None, session=None,
+            detector=None, key=None):
+    """Every hit `measure()` would count over `sessions`, one dict each, with the event
+    behind it.
+
+    Each dict carries `session` (the `session_address`), `key` (the hit's
+    `"<turn>:<tool_use_id>"`, or `"<turn>:-"` for a hit that names no tool use), `detector`,
+    `turn`, `tool_use_id`, `tool`, `field` and `value`. Every string among them has been through
+    `_redact`, and `value` is cut at `MAX_EXPLAINED` characters; a hit that names no tool use
+    has no event, so its `tool`, `field` and `value` are None. Sessions keep the order given;
+    within one, hits are by turn, a hit naming no tool use ahead of the tool uses, those in
+    transcript order, then by detector id. `errors`, when a list is passed, collects what
+    `run()` collects, with the session address added and its strings through `_redact`.
+    `session` (an address or a bare id), `detector` and `key` keep only what equals them,
+    compared with the values before redaction, so an id holding a control character or a secret
+    shape can still be picked. Nothing is written and no row is built, so no report number can
+    move.
+    """
+    wanted_session = session
+    for session in sessions:
+        address = session_address(session.runtime, session.id)
+        if wanted_session is not None and wanted_session not in (address, session.id):
+            continue
+        events = session.events
+        position = _tool_use_positions(events)
+        found = []
+        session_errors = [] if errors is not None else None
+        hits = run(events, stances, registry=registry, errors=session_errors)
+        for detector_id in sorted(hits):
+            if detector is not None and detector_id != detector:
+                continue
+            for one in hits[detector_id]:
+                if key is not None and _hit_key(one) != key:
+                    continue
+                at = -1
+                if one.tool_use_id:
+                    try:
+                        at = position.get((one.turn, one.tool_use_id), -1)
+                    except TypeError:
+                        at = -1
+                found.append(((_turn_order(one.turn), at, detector_id), one))
+        for entry in session_errors or ():
+            errors.append(_redacted_strings(dict(entry, session=address)))
+        found.sort(key=lambda pair: pair[0])
+        for (_order, at, _did), one in found:
+            item = {"session": address, "key": _hit_key(one), "detector": one.id,
+                    "turn": one.turn, "tool_use_id": one.tool_use_id, "tool": None,
+                    "field": None, "value": None}
+            if at >= 0:
+                event = events[at]
+                field, value = _event_field(event)
+                item.update(tool=event.get("name"), field=field, value=value)
+            item = _redacted_strings(item)
+            if item["value"] is not None:
+                item["value"] = _capped(item["value"])
+            yield item
+
+
+def explain_text(item):
+    """One `explain()` dict as the block `ruleprobe explain` prints, redacted whole."""
+    lines = ["session   %s" % item["session"],
+             "key       %s" % item["key"],
+             "detector  %s" % item["detector"],
+             "turn      %s" % item["turn"]]
+    if item["field"] is not None:
+        lines.append("tool use  %s (%s)" % (item["tool_use_id"], item["tool"]))
+        body = "\n          ".join((item["value"] or "").split("\n"))
+        lines.append("%-9s %s" % (item["field"], body))
+    elif item["tool_use_id"]:
+        lines.append("tool use  %s (not an event in this session)" % item["tool_use_id"])
+    else:
+        lines.append("tool use  -  (the hit names no tool use, only turn %s)" % item["turn"])
+    return _redact("\n".join(lines))
+
+
+def explain_row(row, runtimes=()):
+    """What explain can say about a stored row: that it carries counts only, and the rerun
+    over its runtime and session id that would explain each hit.
+
+    `runtimes` is the runtime names `--runtime` accepts, such as `readers.RUNTIMES`. For a
+    runtime among them the rerun names `--runtime` and the `<runtime>:<id>` address; for
+    any other, or none, it names the bare session id, since no reader emits that address.
+    By default no runtime is known. Each value is shell-quoted.
+    """
+    import shlex
+
+    row = row if isinstance(row, dict) else {}
+    runtime = row.get("runtime") if isinstance(row.get("runtime"), str) else ""
+    session_id = row.get("session_id") if isinstance(row.get("session_id"), str) else ""
+    shown = session_address(runtime, session_id) if runtime else (session_id or "(no id)")
+    if not isinstance(row.get("rules"), dict):
+        return _redact("session %s: this row carries no rule counts, so there is no hit "
+                       "to explain" % shown)
+    known = bool(runtime) and runtime in runtimes
+    rerun = ["ruleprobe", "explain"]
+    if known:
+        rerun += ["--runtime", runtime]
+    if session_id:
+        rerun += ["--session", session_address(runtime, session_id) if known
+                  else session_id]
+    hits = sum(folded_rules(row, {}).values())
+    return _redact("session %s: this row carries counts only (%d hit(s)), not the events "
+                   "behind them; rerun `%s` over its transcripts to see each hit"
+                   % (shown, hits, " ".join(shlex.quote(part) for part in rerun)))

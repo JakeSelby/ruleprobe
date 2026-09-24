@@ -73,6 +73,13 @@ one; the README's Versioning section states the policy.
   counted apart and never as not followed ([#42](https://github.com/JakeSelby/ruleprobe/issues/42)).
   A raising or malformed `opportunities` is recorded in `rules_errors` tagged `"hook":
   "opportunities"` and costs only that detector's compliance, not its hit figures.
+- `ruleprobe explain` reruns the detectors over your transcripts and prints the event behind every
+  hit: the session address, turn, tool-use id, detector id and the matched command or input,
+  filtered by `--session`, `--detector` and `--key`
+  ([#51](https://github.com/JakeSelby/ruleprobe/issues/51)). It changes no report number, sends
+  nothing and writes nothing. Every line it prints passes through `redact` in
+  `ruleprobe.detectors.common`, which hides the shipped secret shapes and a set of common
+  credential forms; other credentials can still print, so read the output before sharing it.
 
 ### Changed
 

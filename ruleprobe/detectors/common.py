@@ -8,6 +8,7 @@ secret-shaped string written to disk, a context compaction, and a model change m
 Under-counting is the design throughout. A missed hit is a quieter report; a false hit is a
 wrong one, and a wrong one is what makes a measurement unusable.
 """
+import bisect
 import re
 
 from ..events import hit, input_of, text_of
@@ -21,6 +22,245 @@ SECRET_PATTERNS = [
     r"(?i)client_secret\s*[:=]", r"-----BEGIN [A-Z ]*PRIVATE KEY-----", r"xox[bp]-",
     r"ghp_[A-Za-z0-9]{20,}", r"sk-[A-Za-z0-9]{20,}",
 ]
+
+#: Key names a secret is assigned to, for `redact` only - detection uses `SECRET_PATTERNS`.
+#: Each matches the bare name, so a quoted, subscripted or JSON-escaped key is caught too:
+#: `"client_secret": "v"`, `env["AWS_SECRET_ACCESS_KEY"] = "v"`. A key-name shape added to
+#: `SECRET_PATTERNS` gets its name here as well. Split like the list above.
+SECRET_KEY_PATTERNS = [
+    r"(?i)aws_secret" r"_access_key", r"(?i)client_secret",
+]
+
+#: Generic key names, for `redact` only: a name with a `:` or `=` after it, past an optional
+#: closing quote (escaped or not) and bracket, so `DB_PASSWORD=`, `"api_key": ` and
+#: `env['token'] = ` all count and `max_tokens:` does not.
+SECRET_NAME_PATTERNS = [
+    r"(?i)(?<![a-z0-9])(?:password|passwd|pwd|token|api[_-]?key|apikey|secret|access_key)"
+    r"(?:\\?[\"'])?\]?[ \t]*[:=]",
+]
+
+#: Shapes that are themselves a secret, for `redact` only. A PGP private key runs to its
+#: footer as the other private keys do. A URL's password is found apart from these, from
+#: each `://`.
+SECRET_TOKEN_PATTERNS = [
+    r"sk-ant-[A-Za-z0-9_-]+", r"sk-proj-[A-Za-z0-9_-]+", r"github_pat_[A-Za-z0-9_]+",
+    r"gh[opsur]_[A-Za-z0-9]+", r"xox[abprs]-[A-Za-z0-9-]*",
+    r"-----BEGIN PGP PRIVATE KEY BLOCK-----",
+]
+
+#: What `redact` puts where a secret was.
+REDACTED = "[redacted]"
+
+_PRIVATE_KEY_HEADER = "PRIVATE KEY"
+_PRIVATE_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")
+# A URL's `user:password@`, matched from just after its `://`; the password is group 1.
+_URL_USERINFO = re.compile(r"[^\s/:@\"']*:([^\s/@\"']+)@")
+# A token ends at whitespace, a quote, a backslash - so a `\n` escape ends it - a comma or a
+# bracket.
+_TOKEN_REST = re.compile(r"[^\s\"'\\,()\[\]{}<>]*")
+# A line ends at a real newline or at a `\n` escape, as a JSON-dumped input writes one.
+_BREAK = re.compile(r"\n|\\n")
+# What may sit between a key name and a value that starts on a later line. No two
+# alternatives can match the same text - a `#` comment only ends the line - so a failed match
+# is linear rather than exponential.
+_NO_VALUE = re.compile(r"(?:[\s:=\"'\\|>\-(\[{]|<<-?[ \t]*(?:\"\w+\"|'\w+'|\w+))*"
+                       r"(?:#[^\n]*)?\Z")
+# A heredoc a key's line opens, `<<EOF`, `<<-'EOF'`; group 2 is the terminator.
+_HEREDOC = re.compile(r"<<(-?)[ \t]*[\"']?(\w+)")
+
+
+def redact(text):
+    """`text` with every secret the patterns above find replaced by `REDACTED`: the one path
+    for text ruleprobe prints from a transcript.
+
+    Every pattern is matched against the original text and each match becomes a span; the spans
+    are widened, merged where they overlap or touch, and each merged span is replaced once, so
+    no pattern ever reads another's output. A private key's header widens to its footer, across
+    real newlines and `\\n` escapes, or to the end of the text. A key name widens through the
+    end of its line, through each backslash continuation, and - when the rest of its line holds
+    no value - through the following lines that are blank or indented deeper than it, and at
+    least the next non-blank one; a quote its line leaves open - `"`, `'`, a backtick or a
+    JSON-escaped `\\"` - widens it to the closing quote, across real newlines and `\\n`
+    escapes, or to the end of the text, as it does when it opens on the first value line; a
+    heredoc its line opens widens it to the terminator. Any other shape widens to the end of
+    its token, and a URL's password is redacted alone.
+    Over-redacting is the safe side. Anything but a string is returned as the empty string.
+    """
+    if not isinstance(text, str):
+        return ""
+    breaks = [found.end() for found in _BREAK.finditer(text)]
+
+    def key_end(text, found):
+        return _key_end(text, found, breaks)
+
+    spans = []
+    for pattern in SECRET_KEY_PATTERNS + SECRET_NAME_PATTERNS:
+        spans.extend(_spans(re.compile(pattern), text, key_end))
+    for pattern in SECRET_PATTERNS + SECRET_TOKEN_PATTERNS:
+        spans.extend(_spans(re.compile(pattern), text, _token_end))
+    spans.extend(_url_passwords(text))
+    if not spans:
+        return text
+    spans.sort()
+    out, pos = [], 0
+    start, end = spans[0]
+    for next_start, next_end in spans[1:]:
+        if next_start <= end:
+            end = max(end, next_end)
+            continue
+        out.extend((text[pos:start], REDACTED))
+        pos, start, end = end, next_start, next_end
+    out.extend((text[pos:start], REDACTED, text[end:]))
+    return "".join(out)
+
+
+def _spans(compiled, text, end_of):
+    """Each match's widened `(start, end)`. A match inside the span before it is skipped, so
+    a run of matches is widened once, in linear time."""
+    out, pos = [], 0
+    while True:
+        found = compiled.search(text, pos)
+        if found is None:
+            return out
+        start, end = found.start(), end_of(text, found)
+        out.append((start, end))
+        pos = max(end, found.start() + 1)
+
+
+def _url_passwords(text):
+    """The password span of every `scheme://user:password@`, found from each `://` so a
+    long run of scheme characters with none is not searched again from every offset."""
+    out, pos = [], text.find("://")
+    while pos >= 0:
+        found = _URL_USERINFO.match(text, pos + 3)
+        if found is not None:
+            out.append(found.span(1))
+        pos = text.find("://", pos + 3)
+    return out
+
+
+def _token_end(text, found):
+    if _PRIVATE_KEY_HEADER in found.group(0):
+        footer = _PRIVATE_KEY_END.search(text, found.end())
+        return footer.end() if footer else len(text)
+    return _TOKEN_REST.match(text, found.end()).end()
+
+
+def _line_break(text, pos):
+    """`(where the line holding pos ends, where the next line starts)`."""
+    found = _BREAK.search(text, pos)
+    return (len(text), len(text)) if found is None else found.span()
+
+
+def _continued(text, line_start, line_end):
+    """Whether the line ends in a backslash continuation, a `\\r` before it aside."""
+    end = line_end
+    if end > line_start and text[end - 1] == "\r":
+        end -= 1
+    elif end - 2 >= line_start and text[end - 2:end] == "\\r":
+        end -= 2
+    return end > line_start and text[end - 1] == "\\"
+
+
+def _indent(text, line_start, line_end):
+    pos = line_start
+    while pos < line_end and text[pos] in " \t":
+        pos += 1
+    return pos - line_start, pos == line_end
+
+
+def _open_quote(text, start, end):
+    """The quote left open at `end` by `text[start:end]`: a `"`, `'` or backtick, or `\\"`,
+    the JSON-escaped double quote; None when every quote closes. Inside a plain quote a
+    backslash escapes the next character."""
+    open_quote, pos = None, start
+    while pos < end:
+        char = text[pos]
+        if open_quote is None:
+            if char == "\\" and text[pos + 1:pos + 2] == "\"" and pos + 1 < end:
+                open_quote, pos = "\\\"", pos + 2
+                continue
+            if char in "\"'`":
+                open_quote = char
+        elif open_quote == "\\\"":
+            if text[pos:pos + 2] == "\\\\":
+                pos += 2
+                continue
+            if text[pos:pos + 2] == "\\\"":
+                open_quote, pos = None, pos + 2
+                continue
+        elif char == "\\":
+            pos += 2
+            continue
+        elif char == open_quote:
+            open_quote = None
+        pos += 1
+    return open_quote
+
+
+def _quote_close(text, quote, pos):
+    """Just past the quote that closes `quote` at or after `pos`, across real newlines and
+    `\\n` escapes, or the end of the text when none does."""
+    while pos < len(text):
+        if quote == "\\\"":
+            if text[pos:pos + 2] == "\\\\":
+                pos += 2
+                continue
+            if text[pos:pos + 2] == "\\\"":
+                return pos + 2
+        elif text[pos] == "\\":
+            pos += 2
+            continue
+        elif text[pos] == quote:
+            return pos + 1
+        pos += 1
+    return len(text)
+
+
+def _heredoc_end(text, opened, pos):
+    """Just past the terminator line of the heredoc `opened` found, searched from `pos`, or
+    the end of the text when it never comes."""
+    indent = r"[ \t]*" if opened.group(1) else ""
+    terminator = re.compile(r"(?:\n|\\n)%s%s[ \t]*(?=\r?\n|\\n|\)|\Z)"
+                            % (indent, re.escape(opened.group(2))))
+    closed = terminator.search(text, pos)
+    return closed.end() if closed else len(text)
+
+
+def _key_end(text, found, breaks):
+    """Where a key name's span ends; `breaks` is where every line after the first starts."""
+    at = bisect.bisect_right(breaks, found.start())
+    line_start = breaks[at - 1] if at else 0
+    key_indent = _indent(text, line_start, found.start())[0]
+    line_end, next_start = _line_break(text, found.end())
+    while _continued(text, found.end(), line_end) and next_start < len(text):
+        line_end, next_start = _line_break(text, next_start)
+    rest = text[found.end():line_end]
+    heredoc = _HEREDOC.search(rest)
+    if heredoc is not None:
+        return _heredoc_end(text, heredoc, line_end)
+    quote = _open_quote(text, line_start, line_end)
+    if quote is not None:
+        return _quote_close(text, quote, line_end)
+    if _NO_VALUE.match(rest) is None:
+        return line_end
+    seen_value = False
+    while next_start < len(text):
+        end, following = _line_break(text, next_start)
+        indent, blank = _indent(text, next_start, end)
+        if not blank and seen_value and indent <= key_indent:
+            break
+        if not blank and not seen_value:
+            quote = _open_quote(text, next_start, end)
+            if quote is not None:
+                return _quote_close(text, quote, end)
+        seen_value = seen_value or not blank
+        line_end = end
+        while _continued(text, next_start, line_end) and following < len(text):
+            line_end, following = _line_break(text, following)
+        next_start = following
+    return line_end
+
 
 #: A `find` argument that narrows the search, or consumes the result. One of these present
 #: and the call is not the unfiltered walk this detector is looking for.
