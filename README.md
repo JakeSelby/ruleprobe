@@ -467,6 +467,25 @@ Four promises are not names:
 - The wheel carries the corpus at `ruleprobe/corpus/`, beside `ruleprobe.__file__`. A caller
   importing from a zip unpacks it, or points `RULEPROBE_CORPUS` at a copy.
 
+## Versioning
+
+0.2.0 versions the contract: the declared API above, the row schema (`schema_version` on each
+row and on the `report_data` result) and the detector-entry schema (`schema_version` on an entry,
+`version` on a detectors file). [CHANGELOG.md](CHANGELOG.md) lists every part of that break and
+its migration.
+
+- **Within a minor series, nothing declared breaks.** No declared name, call shape, row schema
+  or entry schema changes incompatibly between 0.2.0 and any 0.2.x. A patch may add; it may not
+  remove or reshape. A detector renamed in a patch ships its fold entry, so rows stored under
+  the old id still count under the new one, and a test fails when a shipped id is neither
+  registered nor folded. The release preflight refuses a patch release whose contract test no
+  longer declares a name its series' `.0` tag declared.
+- **A later 0.x minor may break the declared surface, with notice.** Its changelog section opens
+  with a **Breaking** heading naming the migration, and the contract test changes in the same
+  release. A tool pinning a minor should treat each minor bump as a possible break: read that
+  heading and re-run its own contract tests before bumping.
+- **From 1.0, a break is a major.**
+
 ## Development
 
 ```sh

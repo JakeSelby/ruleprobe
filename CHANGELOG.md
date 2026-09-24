@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Breaking
 
+0.2.0 versions the contract, and takes its break here, in six parts, each with its migration below:
+the undecided rule for `not` and `absent`; schema versions on detector entries and rows; the
+persisted fold map for renamed detector ids; the declared public API; the coverage block's move
+from stderr into `report --json`; and section rules. From 0.2.0, nothing declared breaks within a
+minor series, and a later 0.x minor may break only with a Breaking heading like this one; the
+README's Versioning section states the policy.
+
 - A declarative matcher no longer counts a Bash command the shell parse skipped - empty or
   missing, longer than 16,384 characters, or one that does not tokenize or parse - as a match
   for `not` or `absent` ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a

@@ -28,11 +28,29 @@ CHANGELOG = """# Changelog
 """
 
 
+SERIES_DECLARED = {"ruleprobe": ("report", "run"), "ruleprobe.shell": ("Parsed",)}
+
+
+def write_contract(root, declared):
+    """A contract test holding `declared` as its `DECLARED` literal, beside other code."""
+    (root / "tests").mkdir(exist_ok=True)
+    (root / "tests" / "test_contract.py").write_text(
+        '"""Doc."""\nimport unittest\n\nDECLARED = {!r}\n\n\nclass T(unittest.TestCase):\n'
+        '    pass\n'.format(declared))
+
+
 def make_root(temp, version="1.2.3", heading="1.2.3 (2026-01-02)", unreleased=""):
+    """A repository whose `v1.2.0` tag declared `SERIES_DECLARED`, and whose tree still does."""
     root = Path(temp)
     (root / "ruleprobe").mkdir()
     (root / "ruleprobe" / "__init__.py").write_text('"""Doc."""\n__version__ = "{}"\n'.format(version))
     (root / "CHANGELOG.md").write_text(CHANGELOG.format(heading=heading, unreleased=unreleased))
+    write_contract(root, SERIES_DECLARED)
+    git(root, "init", "-q")
+    git(root, "add", "-A")
+    git(root, "-c", "user.email=test@example.invalid", "-c", "user.name=Test", "-c", "commit.gpgsign=false",
+        "-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "series")
+    git(root, "tag", "v1.2.0")
     return root
 
 
@@ -164,6 +182,102 @@ class PreflightTests(unittest.TestCase):
             base.write_text('"""Doc."""\n')
             with self.assertRaises(ValueError):
                 release_preflight.release_tag(root, None, str(base))
+
+
+class SeriesContractTests(unittest.TestCase):
+    """A patch release keeps every name its series' opening tag declared."""
+
+    run_main = PreflightTests.run_main
+
+    def test_the_series_tag_is_the_minor_opening_one(self):
+        self.assertIsNone(release_preflight.series_tag("0.2.0"))
+        self.assertEqual(release_preflight.series_tag("0.2.1"), "v0.2.0")
+        self.assertEqual(release_preflight.series_tag("1.10.12"), "v1.10.0")
+
+    def test_a_patch_release_keeping_every_name_passes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            write_contract(root, dict(SERIES_DECLARED, **{"ruleprobe.events": ("hit",)}))
+            self.assertEqual(release_preflight.errors(root, tag="v1.2.3"), [])
+
+    def test_a_patch_release_that_drops_a_name_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            write_contract(root, {"ruleprobe": ("run",), "ruleprobe.shell": ("Parsed",)})
+            found = release_preflight.errors(root, tag="v1.2.3")
+        self.assertEqual(found, ["tests/test_contract.py no longer declares ruleprobe.report, "
+                                 "which v1.2.0 declared"])
+
+    def test_a_name_moved_to_another_module_is_dropped_from_its_path(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            write_contract(root, {"ruleprobe": ("report", "run", "Parsed")})
+            found = release_preflight.errors(root, tag="v1.2.3")
+        self.assertEqual(found, ["tests/test_contract.py no longer declares ruleprobe.shell.Parsed, "
+                                 "which v1.2.0 declared"])
+
+    def test_a_release_candidate_from_the_base_is_checked(self):
+        # A release PR in CI passes --base-init, not --tag, and must be refused the same way.
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            write_contract(root, {"ruleprobe": ("report", "run")})
+            base = Path(temp) / "base_init.py"
+            base.write_text('"""Doc."""\n__version__ = "1.2.2"\n')
+            code, err = self.run_main(root, ["--base-init", str(base)], {})
+        self.assertEqual(code, 1)
+        self.assertIn("no longer declares ruleprobe.shell.Parsed", err)
+
+    def test_a_drop_between_releases_waits_for_the_release(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            write_contract(root, {"ruleprobe": ("run",)})
+            self.assertEqual(release_preflight.errors(root), [])
+
+    def test_a_new_minor_may_drop_a_name(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, version="1.3.0", heading="1.3.0 (2026-02-01)")
+            write_contract(root, {"ruleprobe": ("run",)})
+            self.assertEqual(release_preflight.errors(root, tag="v1.3.0"), [])
+
+    def test_a_series_before_the_contract_is_not_checked(self):
+        # v0.1.0 carries no contract test, so a 0.1 patch has no declared names to keep.
+        with tempfile.TemporaryDirectory() as temp:
+            self.assertEqual(release_preflight.contract_errors(Path(temp), "0.1.1"), [])
+            self.assertTrue(release_preflight.contract_errors(Path(temp), "0.2.1")[0].startswith(
+                "cannot read the names v0.2.0 declared"))
+
+    def test_a_missing_series_tag_is_an_error_not_a_pass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            git(root, "tag", "-d", "v1.2.0")
+            found = release_preflight.errors(root, tag="v1.2.3")
+        self.assertEqual(len(found), 1)
+        self.assertTrue(found[0].startswith("cannot read the names v1.2.0 declared"), found)
+
+    def test_a_contract_test_without_the_literal_is_an_error(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp)
+            for text in ('"""Doc."""\n', "DECLARED = dict(ruleprobe=('run',))\n", "DECLARED = ['run']\n"):
+                with self.subTest(text=text):
+                    (root / "tests" / "test_contract.py").write_text(text)
+                    found = release_preflight.errors(root, tag="v1.2.3")
+                    self.assertEqual(len(found), 1)
+                    self.assertTrue(found[0].startswith("cannot read the names tests/test_contract.py"),
+                                    found)
+            (root / "tests" / "test_contract.py").unlink()
+            found = release_preflight.errors(root, tag="v1.2.3")
+        self.assertTrue(found[0].startswith("cannot read the names tests/test_contract.py"), found)
+
+    def test_the_repository_contract_test_reads_as_its_declared_list(self):
+        tests = str(Path(__file__).resolve().parent)
+        if tests not in sys.path:
+            sys.path.insert(0, tests)
+        import test_contract
+        root = Path(release_preflight.ROOT)
+        text = (root / release_preflight.CONTRACT_TEST).read_text(encoding="utf-8")
+        self.assertEqual(release_preflight.declared_names(text),
+                         {(module, name) for module, names in test_contract.DECLARED.items()
+                          for name in names})
 
 
 class NotesTests(unittest.TestCase):

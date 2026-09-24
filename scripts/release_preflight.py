@@ -9,15 +9,26 @@ when `__version__` differs from the version declared there, the run checks as a 
 version, as if `--tag v<version>` were given. CI runs it so on every pull request, so a version bump
 that leaves Unreleased entries fails before the tag. It checks only what a file in this repository can prove; the test suite and the corpus floor
 are separate gates.
+
+A release of a patch version, `X.Y.Z` with `Z` above 0, is also held to the contract its series
+opened with: every name `DECLARED` held in `tests/test_contract.py` at the tag `vX.Y.0` must still
+be there, at the same import path. The tag is read from the local repository, so it must have been
+fetched; an unreadable tag is an error, never a pass. A new minor may drop names, with notice, so
+`X.Y.0` is not checked, and neither is a 0.1 patch: the contract was first declared in 0.2.0.
 """
 import argparse
+import ast
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+CONTRACT_TEST = "tests/test_contract.py"
+#: The first minor series whose opening tag carries a contract test; an earlier one declared none.
+FIRST_CONTRACT_SERIES = (0, 2)
 
 
 def package_version(root=ROOT, init=None):
@@ -60,6 +71,49 @@ def version_section(sections, version):
     return None, None
 
 
+def series_tag(version):
+    """The tag that opened `version`'s minor series, or None when `version` opens one itself."""
+    major, minor, patch = version.split(".")
+    return None if int(patch) == 0 else "v{}.{}.0".format(major, minor)
+
+
+def declared_names(source):
+    """The `(module, name)` pairs of the `DECLARED = {...}` literal in a contract test's source."""
+    for node in ast.parse(source).body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and node.targets[0].id == "DECLARED"):
+            value = ast.literal_eval(node.value)
+            return {(module, name) for module, names in value.items() for name in names}
+    raise ValueError("{} assigns no DECLARED literal".format(CONTRACT_TEST))
+
+
+def source_at(root, tag):
+    """The contract test's text at `tag` in the git repository at `root`."""
+    result = subprocess.run(
+        ["git", "-C", str(root), "show", "refs/tags/{}:{}".format(tag, CONTRACT_TEST)],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+    if result.returncode:
+        raise ValueError(result.stderr.strip() or "git show exited {}".format(result.returncode))
+    return result.stdout
+
+
+def contract_errors(root, version):
+    """A line for each name the series' opening tag declared that the contract test no longer does."""
+    base = series_tag(version)
+    if base is None or tuple(int(part) for part in version.split(".")[:2]) < FIRST_CONTRACT_SERIES:
+        return []
+    try:
+        before = declared_names(source_at(root, base))
+    except (OSError, ValueError, SyntaxError, TypeError, AttributeError) as exc:
+        return ["cannot read the names {} declared in {}: {}".format(base, CONTRACT_TEST, exc)]
+    try:
+        now = declared_names((root / CONTRACT_TEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError, SyntaxError, TypeError, AttributeError) as exc:
+        return ["cannot read the names {} declares: {}".format(CONTRACT_TEST, exc)]
+    return ["{} no longer declares {}.{}, which {} declared".format(CONTRACT_TEST, module, name, base)
+            for module, name in sorted(before - now)]
+
+
 def errors(root=ROOT, tag=None):
     found = []
     version = package_version(root)
@@ -75,6 +129,8 @@ def errors(root=ROOT, tag=None):
         found.append("CHANGELOG.md still has Unreleased entries; fold them into the version section")
     if tag is not None and tag != "v" + version:
         found.append("tag {} does not match __version__ {}".format(tag, version))
+    if tag is not None and SEMVER.fullmatch(version):
+        found.extend(contract_errors(Path(root), version))
     return found
 
 
