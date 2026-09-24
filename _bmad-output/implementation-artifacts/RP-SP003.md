@@ -2,13 +2,13 @@
 bmad_id: "RP-SP003"
 type: "spike"
 title: "spike(readers): choose the third runtime, Cursor or Gemini CLI"
-lifecycle: "active"
+lifecycle: "completed"
 provenance: "authored"
 github_issue: 54
 github_issue_url: "https://github.com/JakeSelby/ruleprobe/issues/54"
 parent_bmad_id: "RP-E007"
 parent_github_issue: 26
-updated: "2026-09-23"
+updated: "2026-09-24"
 ---
 
 # RP-SP003 — spike(readers): choose the third runtime, Cursor or Gemini CLI
@@ -16,7 +16,7 @@ updated: "2026-09-23"
 <!-- bmad-sync:begin -->
 - **GitHub issue:** [#54](https://github.com/JakeSelby/ruleprobe/issues/54)
 - **Primary parent:** [RP-E007](https://github.com/JakeSelby/ruleprobe/issues/26)
-- **State:** active
+- **State:** completed
 
 The issue carries the summary, discussion and acceptance evidence; this file carries the design.
 
