@@ -324,7 +324,7 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
   - It lands with a labelled corpus session from that runtime, near-misses included, and a README
     note of what that runtime's transcripts do not record.
 
-### AD-11: Opportunity and compliance travel beside hits, never inside them [PROPOSED]
+### AD-11: Opportunity and compliance travel beside hits, never inside them [ADOPTED; implemented under #41, #42 and #43, ships in v0.2.0]
 
 - **Binds:** FR-9, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-28, FR-30.
 - **Prevents:** matchers, Python detectors and the report each inventing their own opportunity shape,

@@ -8,51 +8,61 @@ All notable changes to this project are documented here. The format follows
 
 ### Breaking
 
-0.2.0 versions the contract and takes its break here, in six parts: the undecided rule for `not`
-and `absent`; schema versions, on detector entries (below) and on rows and the `report_data`
-result (under Added); the persisted fold map for renamed detector ids; the declared public API;
-the coverage block, which now also appears in `report --json` as `coverage`; and section rules.
-Each part has its entry below, the row schema's under Added. From 0.2.0 nothing declared breaks
-within a minor series, and a later 0.x minor may break only under a Breaking heading like this
-one; the README's Versioning section states the policy.
+0.2.0 versions the contract and takes its break here, in seven parts: the undecided rule for `not`
+and `absent`; schema versions, on detector entries (below) and on rows and the `report_data` result
+(under Added); the persisted fold map for renamed detector ids; the declared public API; the
+coverage block, which now also appears in `report --json` as `coverage`; section rules; and the
+report's `frequent` marker, with its threshold renamed. Each part has its entry below, the row
+schema's under Added. From 0.2.0 nothing declared breaks within a minor series, and a later 0.x
+minor may break only under a Breaking heading like this one; the README's Versioning section states
+the policy.
 
-- A declarative matcher no longer counts a Bash command the shell parse skipped - empty or
-  missing, longer than 16,384 characters, or one that does not tokenize or parse - as a match for
-  `not` or `absent` ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a command
-  every `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text`
-  read of `source: heredocs` is undecided; `not`, `any` and `all` pass undecided through, and an
-  undecided `when`, an `order` endpoint or an `absent` candidate is no hit. A detector file using
-  `not` or `absent` may count fewer hits; no edit is needed, and a rule that wants those commands
-  asks for `command: {unparsed: true}`. A predicate from `compile_matcher` may now return a falsy
-  undecided value: a Python caller who negates a predicate itself reads it as false and can
-  over-count, and should test it with `is_undecided` or compose through the declarative `not`,
-  `any` and `all` instead. - A detector file's top-level `version`, ignored in 0.1, is now read as
-  its entries' schema version, and an entry may carry its own `schema_version`, which wins
-  ([#32](https://github.com/JakeSelby/ruleprobe/issues/32)). A schema version this release does
-  not know - above 2, `0`, negative or not an integer - is a finding, and only the entries that
-  would read it are skipped; a top-level `schema_version` is a finding too, since the file-level
-  key is `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses the
-  entries without a key of their own until it is corrected. - `report --rules` prints the measured
-  share in the coverage block, as in `rules: 2 measured, 1 dark, 1 unmeasured (50% measured)`,
-  floored so a file with a rule unmeasured never shows 100%
+- A declarative matcher no longer counts a Bash command the shell parse skipped - empty or missing,
+  longer than 16,384 characters, or one that does not tokenize or parse - as a match for `not` or
+  `absent` ([#19](https://github.com/JakeSelby/ruleprobe/issues/19)). Over such a command every
+  `command` key but `regex` and `unparsed`, every `git` key, every `env` key and a `text` read of
+  `source: heredocs` is undecided; `not`, `any` and `all` pass undecided through, and an undecided
+  `when`, an `order` endpoint or an `absent` candidate is no hit. A detector file using `not` or
+  `absent` may count fewer hits; no edit is needed, and a rule that wants those commands asks for
+  `command: {unparsed: true}`. A predicate from `compile_matcher` may now return a falsy undecided
+  value: a Python caller who negates a predicate itself reads it as false and can over-count, and
+  should test it with `is_undecided` or compose through the declarative `not`, `any` and `all`
+  instead.
+- A detector file's top-level `version`, ignored in 0.1, is now read as its entries' schema version,
+  and an entry may carry its own `schema_version`, which wins
+  ([#32](https://github.com/JakeSelby/ruleprobe/issues/32)). A schema version this release does not
+  know - above 2, `0`, negative or not an integer - is a finding, and only the entries that would
+  read it are skipped; a top-level `schema_version` is a finding too, since the file-level key is
+  `version`. A 0.1 detector file whose top-level `version` is anything but 1 or 2 loses the entries
+  without a key of their own until it is corrected.
+- `report --rules` prints the measured share in the coverage block, as in `rules: 2 measured, 1
+  dark, 1 unmeasured (50% measured)`, floored so a file with a rule unmeasured never shows 100%
   ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and `report --json` now carries the
   block as a top-level `coverage` key, where it was printed to stderr only. The key counts rules,
-  not sessions. - The README declares the public API: every name, call shape and non-name promise
-  a downstream tool may pin, each held by a contract test that CI also runs against the built
-  wheel imported as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name
-  outside that list is importable but may change in any release. - A retired detector id folds
-  onto its current id through one fold map: the renames the package ships, with a consumer's own
-  `Registry(renamed=)` laid over them ([#34](https://github.com/JakeSelby/ruleprobe/issues/34)).
-  Chains resolve to their end, and a cycle raises `ValueError` when a `Registry` is built or a
-  rename would close one. `report_data` and `--json` carry the effective map as `renamed`, and
-  corpus labels fold the same way. A test fails when a detector id any release shipped is neither
-  registered nor folded. - An unbound rule file with headings now splits into one rule per
-  section, with the id `<path>#<heading-slug>` and an ordinal suffix for a repeated slug, so the
-  coverage block counts rules, not files
-  ([#48](https://github.com/JakeSelby/ruleprobe/issues/48)). A section holding only a heading, a
-  fenced or indented code block, a table, a quote or a comment is not a rule. A file with no
-  heading, a file bound in its front matter, and a headed file with no rule section stay one rule
-  with their 0.1.0 id. The findings line now reads `findings: N (everything else still loaded)`.
+  not sessions.
+- The README declares the public API: every name, call shape and non-name promise a downstream tool
+  may pin, each held by a contract test that CI also runs against the built wheel imported as a zip
+  ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name outside that list is importable
+  but may change in any release.
+- A retired detector id folds onto its current id through one fold map: the renames the package
+  ships, with a consumer's own `Registry(renamed=)` laid over them
+  ([#34](https://github.com/JakeSelby/ruleprobe/issues/34)). Chains resolve to their end, and a
+  cycle raises `ValueError` when a `Registry` is built or a rename would close one. `report_data`
+  and `--json` carry the effective map as `renamed`, and corpus labels fold the same way. A test
+  fails when a detector id any release shipped is neither registered nor folded.
+- An unbound rule file with headings now splits into one rule per section, with the id
+  `<path>#<heading-slug>` and an ordinal suffix for a repeated slug, so the coverage block counts
+  rules, not files ([#48](https://github.com/JakeSelby/ruleprobe/issues/48)). A section holding only
+  a heading, a fenced or indented code block, a table, a quote or a comment is not a rule. A file
+  with no heading, a file bound in its front matter, and a headed file with no rule section stay one
+  rule with their 0.1.0 id. The findings line now reads `findings: N (everything else still
+  loaded)`.
+- The `report` table marks a detector whose share of measured sessions passes the threshold
+  `frequent`, where 0.1 printed `promote?`, and the marker advises nothing about the rule
+  ([#43](https://github.com/JakeSelby/ruleprobe/issues/43)). The threshold is renamed with it:
+  `frequent_share=` on `report` and `report_data`, the `--frequent-share` option, the
+  `frequent_share` key in `report_data` and `--json`, and the `RULE_FREQUENT_SHARE` constant, where
+  0.1 had `promote_share`, `--promote-share` and `RULE_PROMOTE_SHARE`.
 
 ### Added
 
@@ -80,6 +90,16 @@ one; the README's Versioning section states the policy.
   nothing and writes nothing. Every line it prints passes through `redact` in
   `ruleprobe.detectors.common`, which hides the shipped secret shapes and a set of common
   credential forms; other credentials can still print, so read the output before sharing it.
+- `report` and `report_data` carry compliance beside hits for every detector a row has a tally
+  for: `opportunities`, `followed`, `undecided` and `compliance_rate`, which is `followed /
+  opportunities` and null below `min_opportunities`
+  ([#43](https://github.com/JakeSelby/ruleprobe/issues/43)). They group under `--by repo` and
+  `--by stance` as hits do, and the table prints them as four columns only when some row carries
+  compliance. `--min-opportunities`, defaulting to `RULE_MIN_OPPORTUNITIES` (20), is the fewest
+  opportunities a rate is printed for. `report_data` also counts `opportunity_errors`,
+  `malformed_compliance` and `unreadable_compliance`, and `report` notes each: a detector whose
+  `opportunities` raised, a tally that cannot be read, or a compliance map that names no
+  detector. Each costs only compliance figures for those sessions; hits stand.
 
 ### Changed
 
@@ -87,6 +107,8 @@ one; the README's Versioning section states the policy.
   file, in place of the deprecated table form and classifier
   ([#6](https://github.com/JakeSelby/ruleprobe/issues/6)). Building ruleprobe from source now
   needs setuptools 77 or newer.
+- The `report` table's share header is one column wider, so the note and validity columns start
+  under their headers ([#43](https://github.com/JakeSelby/ruleprobe/issues/43)).
 
 ## 0.1.0 (2026-09-22)
 
