@@ -82,6 +82,10 @@ LATER = [
     ("password" + ":\n  # below\n  " + "commb" + "M" * 8, "commb" + "M" * 8),
     ("password" + ":\n\n  " + "blank" + "K" * 8, "blank" + "K" * 8),
     ("pwd" + ': "multi\n' + "line" + "W" * 8 + '"', "line" + "W" * 8),
+    ("pwd" + ": 'multi\n" + "single" + "W" * 8 + "'", "single" + "W" * 8),
+    ("pwd" + ": `multi\n" + "tick" + "W" * 8 + "`", "tick" + "W" * 8),
+    ("password" + ': \\"a\\n' + "jsonq" + "W" * 8 + '\\"', "jsonq" + "W" * 8),
+    ("password" + ': "a\n\n' + "blankq" + "W" * 8 + '" x', "blankq" + "W" * 8),
     ("sk-ant-" + "api03-" + "a" * 20, "api03-" + "a" * 20),
     ("sk-proj-" + "p" * 20, "sk-proj-" + "p" * 20),
     ("github_pat_" + "1" * 22, "github_pat_" + "1" * 22),
@@ -172,6 +176,15 @@ class RedactTests(unittest.TestCase):
             with self.subTest(first=first[:8]):
                 dumped = json.dumps({"content": first + "\n" + PEM, "file_path": "k"})
                 self.assertNotIn(PEM_BODY, redact(dumped))
+
+    def test_a_quote_left_open_runs_to_its_close_in_a_json_dumped_input(self):
+        value = "spans" + "V" * 8
+        for opener in ('"', "'", "`"):
+            with self.subTest(opener=opener):
+                content = "password" + ": " + opener + "a\n" + value + opener + " x\nnext: ok"
+                dumped = json.dumps({"content": content, "file_path": "k"})
+                self.assertNotIn(value, redact(dumped))
+        self.assertEqual(redact("pwd" + ': "never closes\n' + value), REDACTED)
 
     def test_a_url_keeps_its_host_and_near_misses_pass(self):
         self.assertEqual(redact("https://u:" + "pw" + "@example.invalid/x"),

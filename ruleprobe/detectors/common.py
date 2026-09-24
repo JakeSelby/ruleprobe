@@ -70,8 +70,9 @@ def redact(text):
     real newlines and `\\n` escapes, or to the end of the text. A key name widens through the
     end of its line, through each backslash continuation, and - when the rest of its line holds
     no value - through the following lines that are blank or indented deeper than it, and at
-    least the next non-blank one; an unclosed quote on its line (an escaped one aside) widens it
-    to the line holding the closing quote. Any other shape widens to the end of its token.
+    least the next non-blank one; a quote its line leaves open - `"`, `'`, a backtick or a
+    JSON-escaped `\\"` - widens it to the closing quote, across real newlines and `\\n`
+    escapes, or to the end of the text. Any other shape widens to the end of its token.
     Over-redacting is the safe side. Anything but a string is returned as the empty string.
     """
     if not isinstance(text, str):
@@ -142,6 +143,54 @@ def _indent(text, line_start, line_end):
     return pos - line_start, pos == line_end
 
 
+def _open_quote(text, start, end):
+    """The quote left open at `end` by `text[start:end]`: a `"`, `'` or backtick, or `\\"`,
+    the JSON-escaped double quote; None when every quote closes. Inside a plain quote a
+    backslash escapes the next character."""
+    open_quote, pos = None, start
+    while pos < end:
+        char = text[pos]
+        if open_quote is None:
+            if char == "\\" and text[pos + 1:pos + 2] == "\"" and pos + 1 < end:
+                open_quote, pos = "\\\"", pos + 2
+                continue
+            if char in "\"'`":
+                open_quote = char
+        elif open_quote == "\\\"":
+            if text[pos:pos + 2] == "\\\\":
+                pos += 2
+                continue
+            if text[pos:pos + 2] == "\\\"":
+                open_quote, pos = None, pos + 2
+                continue
+        elif char == "\\":
+            pos += 2
+            continue
+        elif char == open_quote:
+            open_quote = None
+        pos += 1
+    return open_quote
+
+
+def _quote_close(text, quote, pos):
+    """Just past the quote that closes `quote` at or after `pos`, across real newlines and
+    `\\n` escapes, or the end of the text when none does."""
+    while pos < len(text):
+        if quote == "\\\"":
+            if text[pos:pos + 2] == "\\\\":
+                pos += 2
+                continue
+            if text[pos:pos + 2] == "\\\"":
+                return pos + 2
+        elif text[pos] == "\\":
+            pos += 2
+            continue
+        elif text[pos] == quote:
+            return pos + 1
+        pos += 1
+    return len(text)
+
+
 def _key_end(text, found):
     escaped = text.rfind("\\n", 0, found.start())
     line_start = max(text.rfind("\n", 0, found.start()) + 1,
@@ -151,14 +200,9 @@ def _key_end(text, found):
     while _continued(text, found.end(), line_end) and next_start < len(text):
         line_end, next_start = _line_break(text, next_start)
     rest = text[found.end():line_end]
-    line = text[line_start:line_end]
-    for quote in ("\"", "'"):
-        if (line.count(quote) - line.count("\\" + quote)) % 2:
-            close = text.find(quote, line_end)
-            if close < 0:
-                return len(text)
-            line_end, next_start = _line_break(text, close + 1)
-            return line_end
+    quote = _open_quote(text, line_start, line_end)
+    if quote is not None:
+        return _quote_close(text, quote, line_end)
     if _NO_VALUE.match(rest) is None:
         return line_end
     seen_value = False
