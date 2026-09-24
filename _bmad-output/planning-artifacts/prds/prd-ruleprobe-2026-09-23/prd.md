@@ -212,6 +212,8 @@ The CLI and library read Codex rollouts under `~/.codex/sessions/`. **Status:** 
 **Consequences (testable):**
 - Codex `exec_command` reaches a detector as `Bash`, and `spawn_agent` as `Agent`.
 - A subagent thread's inherited `session_meta` does not change the rollout's own session id.
+- Rollouts carrying one session id are one session, chosen as FR-1 chooses among Claude Code
+  files (implemented under #87, unreleased, shipping in v0.2.0).
 
 #### FR-3: One event schema
 Every reader emits the five event kinds with the fields `ruleprobe/events.py` documents. **Status:**
@@ -223,12 +225,15 @@ implemented (0.1.0).
 - `input_of` and `text_of` return an empty value, not an exception, for a malformed field.
 
 #### FR-4: Reader contract
-A contributor adds a runtime by adding one module with `ROOT`, `transcripts(root)` and `read(path)`, and
-one entry in `RUNTIMES`. **Status:** implemented (0.1.0).
+A contributor adds a runtime by adding one module with `ROOT`, `transcripts(root)`, `read(path)` and
+`session_key(path)`, and one entry in `RUNTIMES`. **Status:** implemented (0.1.0); `session_key`
+implemented under #87, unreleased, shipping in v0.2.0.
 
 **Consequences (testable):**
 - `--runtime NAME` accepts every key in `RUNTIMES`, and `auto` reads all of them.
 - A reader whose `ROOT` does not exist yields no sessions and no error.
+- `session_key(path)` returns the id `read(path)` gives, or None when the file names no session
+  id; a reader without it is an error in `iter_sessions`, not a runtime read without grouping.
 
 ### 4.2 The shell parse
 

@@ -145,12 +145,14 @@ def read(path, empty=False):
 
 
 def session_key(path):
-    """The id `read(path)` gives its session, or None when the file cannot be opened.
+    """The id `read(path)` gives its session, or None when the file cannot be opened or names
+    neither a `sessionId` nor an agent id, since a file known only by its stem is not known
+    to be another file's copy.
 
     It reads only as far as decides the id: to the first `sessionId` and the first line that
     shows the file is not a subagent's own, which in a parent's file is its opening lines. A
     subagent's own file is read to the end, since only its last line can rule that out. A
-    file that `read` finds no session in still has a key; it is simply never kept.
+    file that `read` finds no session in may still have a key; it is simply never kept.
     """
     try:
         handle = open(path, encoding="utf-8", errors="replace")
@@ -158,12 +160,17 @@ def session_key(path):
         return None
     with handle:
         session_id, agent_id = _identity(_parsed(handle))
+    if not session_id and not agent_id:
+        return None
     return _key(session_id, agent_id, path)
 
 
 def _key(session_id, agent_id, path):
     """A session's id: `<parent session id>/<agent id>` for a subagent's own file, the
-    `sessionId` otherwise, and the file's stem when the file names neither."""
+    `sessionId` otherwise, and the file's stem when the file names neither. A `sessionId`
+    that is not a string, a list say, is its `str()`, so the id is always a string."""
+    if session_id and not isinstance(session_id, str):
+        session_id = str(session_id)
     if agent_id:
         session_id = "%s/%s" % (session_id, agent_id) if session_id else agent_id
     return session_id or os.path.basename(path)[:-6]

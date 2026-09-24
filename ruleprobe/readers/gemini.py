@@ -92,28 +92,13 @@ def read(path, empty=False):
     A line that is not JSON, or not an object, is skipped: a session is written by a live
     process and its tail may be half a line.
     """
-    try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            body = handle.read()
-    except OSError:
+    body = _body(path)
+    if body is None:
         return None
-    records = None
-    if path.endswith(".json"):
-        try:
-            records = [json.loads(body)]
-        except ValueError:
-            records = None
-    if records is None:
-        records = []
-        for line in body.splitlines():
-            try:
-                records.append(json.loads(line))
-            except ValueError:
-                continue
     session_id = ""
     stamps = []
     messages = {}
-    for record in records:
+    for record in _records(body, path):
         if not isinstance(record, dict):
             continue
         if "$rewindTo" in record:
@@ -127,7 +112,7 @@ def read(path, empty=False):
             _keep(messages, record)
             continue
         if isinstance(record.get("sessionId"), str):
-            session_id = session_id or record["sessionId"]
+            session_id = session_id or _meta_id(record)
             for key in ("startTime", "lastUpdated"):
                 if isinstance(record.get(key), str):
                     stamps.append(record[key])
@@ -136,19 +121,71 @@ def read(path, empty=False):
             for message in listed if isinstance(listed, list) else []:
                 if isinstance(message, dict) and isinstance(message.get("id"), str):
                     _keep(messages, message)
-    chats, nested = _chats(path)
+    chats, _nested = _chats(path)
     project_root = _project_root(chats)
     events = _events(list(messages.values()), project_root)
     stamps.extend(m["timestamp"] for m in messages.values()
                   if isinstance(m.get("timestamp"), str) and m["timestamp"])
     if not events and not (empty and session_id):
         return None
-    own = session_id or os.path.splitext(os.path.basename(path))[0]
-    return Session(id="/".join(nested + [own]),
+    return Session(id=_key(path, session_id),
                    repo=_basename(project_root),
                    runtime="gemini", events=events, path=path,
                    started=min(stamps) if stamps else "",
                    ended=max(stamps) if stamps else "")
+
+
+def session_key(path):
+    """The id `read(path)` gives its session - the parent session ids of the folders it is
+    nested in, then its own - or None when the file cannot be opened or names no session
+    id. A JSONL file is parsed only to its metadata line, its first; a legacy `.json` is one
+    object and is parsed whole."""
+    body = _body(path)
+    if body is None:
+        return None
+    for record in _records(body, path):
+        if isinstance(record, dict) and "$rewindTo" not in record and "$set" not in record \
+                and not isinstance(record.get("id"), str) and _meta_id(record):
+            return _key(path, _meta_id(record))
+    return None
+
+
+def _key(path, session_id):
+    """A session's id: the parent ids of the folders between `chats` and the file, then its
+    own `sessionId`, or its file stem when it names none."""
+    own = session_id or os.path.splitext(os.path.basename(path))[0]
+    return "/".join(_chats(path)[1] + [own])
+
+
+def _meta_id(record):
+    """The `sessionId` a metadata record names, or the empty string."""
+    value = record.get("sessionId")
+    return value if isinstance(value, str) else ""
+
+
+def _body(path):
+    """The text of `path`, or None when it cannot be opened."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return None
+
+
+def _records(body, path):
+    """The parsed records of `body`, lazily: a legacy `.json` file's one object, else each
+    line that parses, in order."""
+    if path.endswith(".json"):
+        try:
+            yield json.loads(body)
+            return
+        except ValueError:
+            pass
+    for line in body.splitlines():
+        try:
+            yield json.loads(line)
+        except ValueError:
+            continue
 
 
 def _keep(messages, record):

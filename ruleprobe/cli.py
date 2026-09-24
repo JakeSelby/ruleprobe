@@ -312,7 +312,9 @@ def cmd_report(args, out):
                            frequent_share=args.frequent_share, registry=registry,
                            validity=scores, min_opportunities=args.min_opportunities)
         data["rows"] = rows
-        data["read_errors"] = read_errors
+        # A copy set aside is not a transcript that failed, so it has a key of its own.
+        data["read_errors"] = [e for e in read_errors if e["error"] != COPY]
+        data["copies"] = [e for e in read_errors if e["error"] == COPY]
         data["coverage"] = bundle.coverage()
         summary = bundle.summary()
         if summary:
@@ -438,7 +440,7 @@ def cmd_label(args, out):
     It refuses, says why on stderr and exits 2, leaving every file as it found it, for a
     session hit, which one event cannot reproduce; a name that is not a plain file stem; a
     corpus directory that does not exist; a session file that already exists or is already
-    labelled; no session, or more than one, at the address; no hit at the key, or not one
+    labelled; no session at the address; no hit at the key, or not one
     event behind it; a detector that is gated, since the corpus runs no stances; a written
     event the detector no longer hits, because redaction changed what it matched or the hit
     needs more than one event, since that negative would pass trivially; a written event
@@ -559,30 +561,29 @@ def _label_name(name):
 def _labelled_event(args, registry, detector_id, key, read_errors):
     """The one event behind `detector_id`'s hit at `key`, rerun from the transcripts.
 
-    `iter_sessions` reads one session per runtime and id, copies set aside, so an address
-    names one session at most; more than one with the hit would still be refused as
-    ambiguous rather than guessed between."""
-    matches, hits, found = 0, 0, None
+    `iter_sessions` reads one session per runtime and id, so an address names one session at
+    most. When that session has no hit at `key` and copies of it were set aside, a copy may
+    hold the hit, so they are named with their folders for `--root` to point at."""
+    found = None
     for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since,
                                  errors=read_errors):
-        if session_address(session.runtime, session.id) != args.session:
-            continue
-        matches += 1
-        if key in _hit_keys(session.events, registry, detector_id, args.session):
-            hits += 1
-            if found is None:
-                found = session
-    if not matches:
+        if found is None and session_address(session.runtime, session.id) == args.session:
+            found = session
+    if found is None:
         unread = _read_errors_line(read_errors)
         raise _Refused("no session %s among the transcripts read%s"
                        % (args.session, "; " + unread if unread else ""))
-    if not hits:
-        raise _Refused("%s has no hit at %s in %s%s; ruleprobe explain lists its hits"
-                       % (detector_id, key, args.session,
-                          "" if matches == 1 else " (%d sessions at it)" % matches))
-    if hits > 1:
-        raise _Refused("%d sessions at %s have a hit at %s; narrow --root or --since to one"
-                       % (hits, args.session, key))
+    if key not in _hit_keys(found.events, registry, detector_id, args.session):
+        copies = [e["path"] for e in read_errors
+                  if e["error"] == COPY and e["kept"] == found.path]
+        aside = ""
+        if copies:
+            aside = ("; it was read from %s, and %d copy(ies) of it were set aside: %s; point "
+                     "--root at the one with the hit"
+                     % (_folder_and_name(found.path), len(copies),
+                        ", ".join(_folder_and_name(p) for p in copies)))
+        raise _Refused("%s has no hit at %s in %s; ruleprobe explain lists its hits%s"
+                       % (detector_id, key, args.session, aside))
     events = [e for e in found.events if isinstance(e, dict) and e.get("kind") == "tool_use"
               and event_key(e) == key]
     if len(events) != 1:

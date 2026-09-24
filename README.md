@@ -527,8 +527,12 @@ as before plus one entry. It takes `report`'s `--root`, `--runtime` and `--since
 no `--plugins`, because `ruleprobe corpus` loads none to score the negative with. A Claude Code
 subagent's own transcript is its own session, keyed as `<parent session id>/<agent id>`, and a
 transcript that yields no event is no session at all. Transcripts that share a session id, as
-copies do, are one session in every command: the one with the most events is read, the first
-in path order on a tie, and the rest are reported as copies set aside. It prints the
+copies do, are one session in `report`, `explain` and `label`: the one with the most events is
+read, the first in path order on a tie, and the rest are reported as copies set aside. When
+the session read has no hit at the key and copies of it were set aside, the refusal names
+them with their folders, so `--root` can point at the one that holds the hit. `ruleprobe
+corpus` is the exception: a label names its session by file, so it reads each labelled file
+as its own session, copies included. It prints the
 `ruleprobe corpus` command that scores the new negative, with the same `--rules`, `--detectors`
 and `--no-config` it was given. The new negative scores as a false positive until the detector
 stops firing on it, which is the point.
@@ -602,6 +606,8 @@ Measuring and reporting:
 
 ```python
 iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(.id .repo .events)
+                                          # one per runtime and id; errors also holds each copy
+                                          # set aside: error == readers.COPY, with kept
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
 Registry([Detector, ...]); Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")

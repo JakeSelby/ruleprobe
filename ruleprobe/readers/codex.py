@@ -122,7 +122,8 @@ def read(path, empty=False):
 
 def session_key(path):
     """The id `read(path)` gives its session, from the rollout's own `session_meta`, or None
-    when the file cannot be opened. It stops at that line, a rollout's first."""
+    when the file cannot be opened or that line names no id. It stops at that line, a
+    rollout's first."""
     try:
         handle = open(path, encoding="utf-8", errors="replace")
     except OSError:
@@ -130,13 +131,17 @@ def session_key(path):
     with handle:
         for item, payload in _items(handle):
             if item.get("type") == "session_meta" and payload:
-                return _key(payload, path)
-    return _key({}, path)
+                return _key(payload, path) if payload.get("id", "") else None
+    return None
 
 
 def _key(meta, path):
-    """A rollout's session id: its own `session_meta`'s id, else the file's stem."""
-    return meta.get("id", "") or os.path.basename(path)[:-6]
+    """A rollout's session id: its own `session_meta`'s id, as a string, else the file's
+    stem."""
+    value = meta.get("id", "")
+    if value and not isinstance(value, str):
+        value = str(value)
+    return value or os.path.basename(path)[:-6]
 
 
 def _items(lines):

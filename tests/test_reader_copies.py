@@ -16,7 +16,8 @@ from unittest import mock
 
 from ruleprobe import iter_sessions, run
 from ruleprobe.cli import main
-from ruleprobe.readers import COPY, claude_code, codex, iter_file_sessions
+from ruleprobe import readers
+from ruleprobe.readers import COPY, claude_code, codex, gemini, iter_file_sessions
 from ruleprobe.validity import CorpusError, load_corpus
 
 SESSION = "sess-copied"
@@ -140,19 +141,85 @@ class ClaudeCodeCopyTests(_Files):
             "parent.jsonl": _transcript(NO_VERIFY),
             "late.jsonl": late_id,
             "sub.jsonl": _transcript(NO_VERIFY, isSidechain=True, agentId=AGENT),
-            "stem-only.jsonl": no_id,
             "two-agents.jsonl": [_prompt("a", isSidechain=True, agentId="one"),
                                  _prompt("b", isSidechain=True, agentId="two")],
             "torn.jsonl": _transcript(NO_VERIFY) + ['{"type": "assist'],
+            "list-id.jsonl": _transcript(NO_VERIFY, session=["a", 1]),
+            "object-id.jsonl": _transcript(NO_VERIFY, session={"id": "x"}),
         }
         for name, lines in sorted(cases.items()):
             with self.subTest(name=name):
                 path = self.write(name, lines)
                 self.assertEqual(claude_code.session_key(path),
                                  claude_code.read(path, empty=True).id)
-        self.assertEqual(claude_code.session_key(os.path.join(self.root, "stem-only.jsonl")),
-                         "stem-only")
+        self.assertEqual(claude_code.session_key(os.path.join(self.root, "list-id.jsonl")),
+                         "['a', 1]")
+        # Known only by its stem, a file is nobody's copy: it has no key.
+        stem = self.write("stem-only.jsonl", no_id)
+        self.assertIsNone(claude_code.session_key(stem))
+        self.assertEqual(claude_code.read(stem).id, "stem-only")
         self.assertIsNone(claude_code.session_key(os.path.join(self.root, "absent.jsonl")))
+
+    def test_a_session_id_that_is_a_list_or_object_does_not_stop_the_read(self):
+        for n, session in enumerate((["a", 1], {"id": "x"})):
+            with self.subTest(session=session):
+                first = self.write("%d/a/t.jsonl" % n, _transcript(NO_VERIFY, session=session))
+                second = self.write("%d/b/t.jsonl" % n, _transcript(NO_VERIFY, session=session))
+                errors = []
+                sessions = list(iter_sessions(root=os.path.join(self.root, str(n)),
+                                              errors=errors))
+                self.assertEqual([(s.id, s.path) for s in sessions], [(str(session), first)])
+                self.assertEqual(_notes(errors), [(second, COPY, first)])
+
+    def test_files_known_only_by_one_stem_are_not_copies(self):
+        no_id = [dict(line, sessionId="") for line in _transcript(NO_VERIFY)]
+        first = self.write("proj-a/session.jsonl", no_id)
+        second = self.write("proj-b/session.jsonl", no_id)
+        sessions, errors = self.read()
+        self.assertEqual([(s.id, s.path) for s in sessions],
+                         [("session", first), ("session", second)])
+        self.assertEqual(errors, [])
+
+    def test_copy_notes_come_in_path_order(self):
+        a = self.write("a/%s.jsonl" % SESSION, _transcript(LONGER))
+        b = self.write("b/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        c = self.write("c/%s.jsonl" % SESSION, _transcript(LONGER + [("toolu_3", "pwd")]))
+        sessions, errors = self.read()
+        self.assertEqual([s.path for s in sessions], [c])
+        self.assertEqual(_notes(errors), [(a, COPY, c), (b, COPY, c)])
+
+    def test_a_file_whose_id_changed_after_the_key_pass_is_its_own_session(self):
+        # The key pass saw `other.jsonl` as this session; by the read it names another.
+        first = self.write("a/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        moved = self.write("b/other.jsonl", _transcript(LONGER, session="other"))
+        key = claude_code.session_key
+        stale = {moved: SESSION}
+        with mock.patch.object(claude_code, "session_key",
+                               lambda path: stale.get(path) or key(path)):
+            sessions, errors = self.read()
+        self.assertEqual([(s.id, s.path) for s in sessions],
+                         [(SESSION, first), ("other", moved)])
+        self.assertEqual(errors, [])
+
+    def test_an_address_is_yielded_once_and_the_first_stands(self):
+        # Two groups meet at one address only when the key pass and the read disagree. The
+        # first session yielded stands, although the later one has more events.
+        first = self.write("a/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        later = self.write("b/%s.jsonl" % SESSION, _transcript(LONGER))
+        key = claude_code.session_key
+        stale = {later: "stale"}
+        with mock.patch.object(claude_code, "session_key",
+                               lambda path: stale.get(path) or key(path)):
+            sessions, errors = self.read()
+        self.assertEqual([s.path for s in sessions], [first])
+        self.assertEqual(_notes(errors), [(later, COPY, first)])
+
+    def test_a_reader_without_session_key_is_an_error(self):
+        self.write("a/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        with mock.patch.object(claude_code, "session_key", None):
+            del claude_code.session_key
+            with self.assertRaises(AttributeError):
+                self.read()
 
     def test_a_copy_with_no_event_is_no_session_not_a_copy(self):
         full = self.write("proj-a/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
@@ -179,24 +246,22 @@ class ClaudeCodeCopyTests(_Files):
                          [(SESSION, kept), ("other", os.path.join(self.root, "b",
                                                                   "other.jsonl"))])
 
-    def test_the_result_does_not_depend_on_walk_order(self):
+    def test_the_result_does_not_depend_on_the_order_files_are_found(self):
         self.write("proj-b/%s.jsonl" % SESSION, _transcript([("toolu_1", "pwd")]))
         self.write("proj-a/%s.jsonl" % SESSION, _transcript([("toolu_1", "ls")]))
         self.write("proj-c/other.jsonl", _transcript(LONGER, session="other"))
         self.write("proj-a/other.jsonl", _transcript(NO_VERIFY, session="other"))
-        walk = os.walk
-
-        def reversed_walk(*args, **kwargs):
-            for directory, dirs, files in reversed(list(walk(*args, **kwargs))):
-                yield directory, dirs, list(reversed(files))
+        found = readers._paths
 
         def shape():
             sessions, errors = self.read()
             return [(s.id, s.path, len(s.events)) for s in sessions], _notes(errors)
 
         expected = shape()
-        with mock.patch("ruleprobe.readers.os.walk", reversed_walk):
+        with mock.patch.object(readers, "_paths",
+                               lambda *a: list(reversed(found(*a)))) as reversed_paths:
             self.assertEqual(shape(), expected)
+        self.assertNotEqual(found(self.root, "auto"), reversed_paths(self.root, "auto"))
         self.assertEqual([path for path, _e, _k in expected[1]],
                          [os.path.join(self.root, "proj-a", "other.jsonl"),
                           os.path.join(self.root, "proj-b", "%s.jsonl" % SESSION)])
@@ -217,8 +282,42 @@ class CodexCopyTests(_Files):
         self.assertEqual(codex.session_key(path), "child")
         self.assertEqual(codex.session_key(path), codex.read(path).id)
         stem = self.write("rollout-stem.jsonl", _rollout("", ["ls"]))
-        self.assertEqual(codex.session_key(stem), codex.read(stem).id)
-        self.assertEqual(codex.session_key(stem), "rollout-stem")
+        self.assertIsNone(codex.session_key(stem))
+        self.assertEqual(codex.read(stem).id, "rollout-stem")
+        listed = self.write("rollout-list.jsonl", _rollout(["r", 1], ["ls"]))
+        self.assertEqual(codex.session_key(listed), codex.read(listed).id)
+
+
+class GeminiCopyTests(_Files):
+    def gemini(self, relative, session_id, prompts):
+        project, name = relative.split("/", 1)
+        os.makedirs(os.path.join(self.root, project), exist_ok=True)
+        with open(os.path.join(self.root, project, ".project_root"), "w") as handle:
+            handle.write("/work/demo-repo")
+        records = [{"sessionId": session_id, "projectHash": "demo",
+                    "startTime": "2026-09-20T10:00:00.000Z",
+                    "lastUpdated": "2026-09-20T10:00:00.000Z"}]
+        for n, text in enumerate(prompts):
+            records.append({"id": "m%d" % n, "timestamp": "2026-09-20T10:%02d:00.000Z" % n,
+                            "type": "user", "content": [{"text": text}]})
+        return self.write(os.path.join(project, "chats", name), records)
+
+    def test_a_copied_gemini_session_is_one_session(self):
+        shorter = self.gemini("proj-a/session-1.jsonl", "g-1", ["Go."])
+        longer = self.gemini("proj-b/session-1.jsonl", "g-1", ["Go.", "And on."])
+        other = self.gemini("proj-b/session-2.jsonl", "g-2", ["Go."])
+        sessions, errors = self.read(runtime="gemini")
+        self.assertEqual([(s.id, s.path) for s in sessions], [("g-1", longer), ("g-2", other)])
+        self.assertEqual(_notes(errors), [(shorter, COPY, longer)])
+
+    def test_session_key_is_the_id_read_gives_nested_parts_included(self):
+        nested = self.gemini("proj-a/g-parent/session-sub.jsonl", "g-sub", ["Go."])
+        self.assertEqual(gemini.session_key(nested), "g-parent/g-sub")
+        self.assertEqual(gemini.session_key(nested), gemini.read(nested).id)
+        bare = self.gemini("proj-a/session-bare.jsonl", "", ["Go."])
+        self.assertIsNone(gemini.session_key(bare))
+        self.assertEqual(gemini.read(bare).id, "session-bare")
+
 
 
 class NoteTests(_Files):
@@ -239,6 +338,30 @@ class NoteTests(_Files):
         self.assertTrue(err.getvalue().startswith(
             "1 transcript(s) produced no session: empty.jsonl (no session in it); "
             "1 transcript(s) set aside as copies"), err.getvalue())
+
+
+    def test_the_note_names_three_copies_then_counts_the_rest(self):
+        for folder in "abcde":
+            self.write("%s/%s.jsonl" % (folder, SESSION), _transcript(NO_VERIFY))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            main(["report", "--root", self.root, "--no-config"], out=io.StringIO())
+        self.assertEqual(err.getvalue().splitlines()[0],
+                         "4 transcript(s) set aside as copies of a session read from another "
+                         "file: b/{0}.jsonl (kept a/{0}.jsonl), c/{0}.jsonl (kept a/{0}.jsonl), "
+                         "d/{0}.jsonl (kept a/{0}.jsonl), and 1 more".format(SESSION))
+
+    def test_report_json_keeps_copies_out_of_read_errors(self):
+        first = self.write("proj-a/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        second = self.write("proj-b/%s.jsonl" % SESSION, _transcript(NO_VERIFY))
+        empty = self.write("proj-c/empty.jsonl", [{"type": "summary", "summary": "x"}])
+        out = io.StringIO()
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = main(["report", "--root", self.root, "--no-config", "--json"], out=out)
+        self.assertEqual(code, 0)
+        data = json.loads(out.getvalue())
+        self.assertEqual(data["read_errors"], [{"path": empty, "error": "no session in it"}])
+        self.assertEqual(data["copies"], [{"path": second, "error": COPY, "kept": first}])
 
 
 class CorpusTests(_Files):

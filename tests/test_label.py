@@ -350,6 +350,20 @@ class LabelTests(unittest.TestCase):
         os.remove(os.path.join(self.root, "t.jsonl"))
         self.assertRefused("has no hit at 1:toolu_1 in claude-code:sess-1;", name="other")
 
+    def test_a_hit_only_in_the_shorter_copy_is_refused_naming_the_copies(self):
+        for folder in ("proj-a", "proj-b"):
+            os.mkdir(os.path.join(self.root, folder))
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})],
+                        name="proj-a/s.jsonl")
+        self.transcript([("toolu_1", "Bash", {"command": "ls"}),
+                         ("toolu_2", "Bash", {"command": "pwd"})], name="proj-b/s.jsonl")
+        self.assertRefused(r"has no hit at 1:toolu_1 in claude-code:sess-1; ruleprobe explain "
+                           r"lists its hits; it was read from proj-b/s.jsonl, and 1 copy\(ies\) "
+                           r"of it were set aside: proj-a/s.jsonl; point --root at the one "
+                           r"with the hit")
+        code, _text, err = self.label("--root", os.path.join(self.root, "proj-a"))
+        self.assertEqual(code, 0, err)
+
     def test_copies_with_no_hit_are_one_session_without_it(self):
         use = [("toolu_1", "Bash", {"command": "ls"})]
         self.transcript(use)

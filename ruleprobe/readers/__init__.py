@@ -16,7 +16,8 @@ from . import claude_code, codex, gemini
 
 RUNTIMES = {"claude-code": claude_code, "codex": codex, "gemini": gemini}
 
-__all__ = ["iter_sessions", "RUNTIMES", "claude_code", "codex", "gemini"]
+__all__ = ["iter_sessions", "iter_file_sessions", "COPY", "RUNTIMES", "claude_code", "codex",
+           "gemini"]
 
 #: The `error` of an `errors` entry for a transcript set aside because another file carries
 #: the same session: a copy, not a failure. The entry's `kept` names the file that was read.
@@ -95,7 +96,15 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
     first in path order on a tie, and the rest are set aside as copies. A file older than
     `since`, or with no event, is dropped or noted as it would be alone and is no candidate.
     Each group is yielded where its first file falls in path order, so the result does not
-    depend on the order a directory lists its files in.
+    depend on the order a directory lists its files in. A file whose session key cannot be
+    read, or names no session id, is a session of its own, never compared: two files known
+    only by one file stem are not known to be one session.
+
+    The key pass and the read can disagree only when a file changes between them. A file
+    read under another id than its key is not the group's: it is yielded under its own id,
+    after the group's session. Each `(runtime, id)` is still yielded once: a stream cannot
+    take a session back, so the first one yielded stands and a later one at its address is
+    set aside as its copy, whatever its event count.
 
     A cheap pass reads each file's session id first, through its reader's `session_key`, and
     only then are sessions read, one group at a time. Holding every session until the last
@@ -122,47 +131,58 @@ def _sessions(root, runtime, since, errors, by_id):
     stamp = _since_stamp(since)
     groups = {}
     order = []
-    for path, reader in _paths(root, runtime):
-        key = _group_key(path, reader) if by_id else path
+    # Sorted here too, so the grouping depends on the paths alone, not the order found.
+    for path, reader in sorted(_paths(root, runtime), key=lambda pair: pair[0]):
+        key = _group_key(path, reader) if by_id else ("", path)
         if key not in groups:
             groups[key] = []
             order.append(key)
         groups[key].append((path, reader))
-    # Each address yielded, to its file. A file written between the two passes could carry
-    # an id its key did not predict; its session is still yielded once.
+    # Each address yielded, to its file: see the docstring for when two groups meet here.
     yielded = {}
     for key in order:
-        kept, copies = _pick(groups.pop(key), stamp, errors)
-        if kept is None:
-            continue
-        address = (kept.runtime, kept.id) if by_id else kept.path
-        if address in yielded:
-            copies.append(kept.path)
-        if errors is not None:
-            for path in copies:
-                errors.append({"path": path, "error": COPY,
-                               "kept": yielded.get(address, kept.path)})
-        if address not in yielded:
-            yielded[address] = kept.path
-            yield kept
+        expected = key[1] if key[0] else None
+        kept, copies, strays = _pick(groups.pop(key), expected, stamp, errors)
+        for session, set_aside in ([(kept, copies)] if kept else []) + [(s, []) for s in strays]:
+            # A file with no key is known by its path alone, so it is nobody's copy.
+            address = (session.runtime, session.id) if expected is not None else session.path
+            first = yielded.get(address)
+            if errors is not None:
+                for path in set_aside:
+                    errors.append({"path": path, "error": COPY, "kept": first or session.path})
+                if first is not None:
+                    errors.append({"path": session.path, "error": COPY, "kept": first})
+            if first is None:
+                yielded[address] = session.path
+                yield session
 
 
 def _group_key(path, reader):
-    """What groups `path` with the other files carrying its session: its reader and its
-    session key, or the path itself when the key cannot be read, so the read reports it."""
+    """What groups `path` with the other files carrying its session: its reader's name and
+    its session key, or `("", path)` when the key cannot be read or names no session id,
+    so the file is a group of its own and its read reports what is wrong with it. Every
+    reader has `session_key`; one without it is an error, not a file of its own."""
+    session_key = reader.session_key
     try:
-        key = reader.session_key(path)
+        key = session_key(path)
     except Exception:
         key = None
-    return (reader.__name__, key) if key is not None else ("", path)
+    if not isinstance(key, str):
+        return ("", path)
+    return (reader.__name__, key)
 
 
-def _pick(members, stamp, errors):
-    """The session to keep from `members`, the `(path, reader)` pairs of one group in path
-    order, and the paths of the copies set aside for it. Every other file is noted in `errors`
-    or dropped by `stamp` as `iter_sessions` describes. Two sessions are held at most."""
+def _pick(members, expected, stamp, errors):
+    """What to yield from one group: `members`, its `(path, reader)` pairs in path order,
+    read under `expected`, the group's session id, or `None` for a group of one file.
+
+    Returns the session kept, the paths of its copies in path order, and the sessions read
+    under another id than `expected`, in path order. Every other file is noted in `errors`
+    or dropped by `stamp` as `iter_sessions` describes. Two group sessions are held at
+    most, besides a stray, which only a file changing between the passes makes."""
     kept = None
-    copies = []
+    copies = set()
+    strays = []
     for path, reader in members:
         try:
             session = reader.read(path, empty=True)
@@ -180,11 +200,14 @@ def _pick(members, stamp, errors):
             if errors is not None:
                 errors.append({"path": path, "error": "no session in it"})
             continue
+        if expected is not None and session.id != expected:
+            strays.append(session)
+            continue
         if kept is None or len(session.events) > len(kept.events):
             session, kept = kept, session
         if session is not None:
-            copies.append(session.path)
-    return kept, copies
+            copies.add(session.path)
+    return kept, [path for path, _reader in members if path in copies], strays
 
 
 def _walk(base):
