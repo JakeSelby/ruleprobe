@@ -1,12 +1,15 @@
 # SPDX-License-Identifier: MIT
 """The report: the denominator, the notes, and the three groupings."""
+import json
 import unittest
+from unittest import mock
 
-from ruleprobe import Detector, Registry, measure, report
+from ruleprobe import Detector, Registry, contract_data, measure, report
 from ruleprobe.readers import claude_code
-from ruleprobe.report import (KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, folded_rules,
-                              report_data)
+from ruleprobe.report import (KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, errored_detectors,
+                              folded_rules, report_data)
 from test_readers import CLAUDE
+from test_registry import traced_file_reads
 
 
 def row(hits, repo="demo", stances=None, **extra):
@@ -201,6 +204,120 @@ class SchemaVersionTests(unittest.TestCase):
                 self.assertEqual(report_data([row({"a/one": 1})], by=by,
                                              registry=REGISTRY)["schema_version"], 2)
         self.assertEqual(report_data([], registry=REGISTRY)["schema_version"], 2)
+
+
+def line_for(text, detector_id):
+    return [x for x in text.split("\n") if x.split() and x.split()[0] == detector_id]
+
+
+class PersistedFoldTests(unittest.TestCase):
+    """Rows stored under a retired id count under the current one, however it was retired."""
+
+    def test_a_shipped_rename_folds_with_no_map_of_your_own(self):
+        rows = [row({"a/gone": 2, "a/one": 1}), row({"a/gone": 4})]
+        with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/one"}):
+            data = report_data(rows, registry=REGISTRY)
+            text = report(rows, registry=REGISTRY)
+            self.assertEqual(folded_rules(rows[0], REGISTRY.fold_map()), {"a/one": 3})
+        entry = [d for d in data["detectors"] if d["detector"] == "a/one"][0]
+        self.assertEqual((entry["hits"], entry["sessions"], entry["of"]), (7, 2, 2))
+        self.assertNotIn("a/gone", [d["detector"] for d in data["detectors"]])
+        self.assertEqual(line_for(text, "a/one")[0].split()[1:3], ["7", "2"])
+        self.assertEqual(line_for(text, "a/gone"), [])
+
+    def test_a_chain_of_renames_folds_to_its_end(self):
+        registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
+        rows = [row({"a/older": 1}), row({"a/old": 2}), row({"a/one": 4})]
+        self.assertEqual(folded_rules(rows[0], registry.fold_map()), {"a/one": 1})
+        data = report_data(rows, registry=registry)
+        self.assertEqual([(d["detector"], d["hits"], d["sessions"]) for d in data["detectors"]],
+                         [("a/one", 7, 3), ("a/two", 0, 0)])
+
+    def test_a_chain_across_the_shipped_and_the_consumer_map_folds_to_its_end(self):
+        rows = [row({"a/gone": 1}, repo="r"), row({"a/old": 2}, repo="r")]
+        with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/old"}):
+            registry = REGISTRY.copy().rename("a/old", "a/one")
+            data = report_data(rows, by="repo", registry=registry)
+        self.assertEqual(data["groups"][0]["top"], [["a/one", 3]])
+
+    def test_a_raw_chained_map_folds_to_its_end_without_the_shipped_map(self):
+        raw = {"a/older": "a/old", "a/old": "a/one"}
+        errored = row({}, rules_errors=[{"detector": "a/older", "error": "KeyError"}])
+        with mock.patch.dict(contract_data.RENAMED, {"a/one": "a/two"}):
+            self.assertEqual(folded_rules(row({"a/older": 1, "a/old": 2}), raw), {"a/one": 3})
+            self.assertEqual(errored_detectors(errored, raw), {"a/one"})
+
+    def test_an_error_under_a_retired_id_is_charged_to_the_current_one(self):
+        registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
+        errored = row({"a/two": 1}, rules_errors=[{"detector": "a/older", "error": "KeyError"}])
+        self.assertEqual(errored_detectors(errored, registry.fold_map()), {"a/one"})
+        data = report_data([row({"a/one": 1}), errored], registry=registry)
+        self.assertEqual(data["errors"], {"a/one": 1})
+        entry = [d for d in data["detectors"] if d["detector"] == "a/one"][0]
+        self.assertEqual(entry["of"], 1)
+
+
+class EmittedFoldMapTests(unittest.TestCase):
+    def test_the_result_carries_the_effective_fold_map(self):
+        registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
+        with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/two"}):
+            for by in ("rule", "repo", "stance"):
+                with self.subTest(by=by):
+                    data = report_data([row({"a/one": 1})], by=by, registry=registry)
+                    self.assertEqual(data["renamed"], {"a/gone": "a/two", "a/old": "a/one",
+                                                       "a/older": "a/one"})
+            self.assertEqual(report_data([], registry=registry)["renamed"]["a/older"], "a/one")
+
+    def test_a_stored_result_folds_a_retired_id_with_no_registry(self):
+        registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
+        stored = json.dumps(report_data([row({"a/one": 1})], registry=registry))
+        # A reader with no registry and no ruleprobe: the saved map is the whole fold.
+        renamed = json.loads(stored)["renamed"]
+        stored_row = {"a/older": 2, "a/one": 1}
+        folded = {}
+        for did, n in stored_row.items():
+            folded[renamed.get(did, did)] = folded.get(renamed.get(did, did), 0) + n
+        self.assertEqual(folded, {"a/one": 3})
+
+    def test_a_consumer_undo_of_a_shipped_rename_holds_through_report_data(self):
+        registry = Registry(list(REGISTRY), renamed={"a/old": "a/old"})
+        rows = [row({"a/old": 2, "a/one": 1}), row({"a/old": 1})]
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
+            data = report_data(rows, registry=registry)
+        hits = dict((d["detector"], d["hits"]) for d in data["detectors"])
+        self.assertEqual(hits, {"a/old": 3, "a/one": 1, "a/two": 0})
+        # The emitted map shows the override, and applied as it stands it moves nothing.
+        self.assertEqual(data["renamed"], {"a/old": "a/old"})
+        self.assertEqual(folded_rules(rows[0], data["renamed"]), {"a/old": 2, "a/one": 1})
+
+    def test_the_emitted_map_agrees_with_the_counts_under_a_shipped_chain(self):
+        registry = REGISTRY.copy().rename("a/old", "a/one")
+        rows = [row({"a/gone": 2}), row({"a/old": 1})]
+        with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/old"}):
+            data = report_data(rows, registry=registry)
+        self.assertEqual(data["renamed"], {"a/gone": "a/one", "a/old": "a/one"})
+        stored = {}
+        for r in rows:
+            for did, n in r["rules"].items():
+                key = data["renamed"].get(did, did)
+                stored[key] = stored.get(key, 0) + n
+        hits = dict((d["detector"], d["hits"]) for d in data["detectors"] if d["hits"])
+        self.assertEqual(hits, stored)
+
+    def test_no_rename_emits_an_empty_map(self):
+        self.assertEqual(report_data([row({"a/one": 1})], registry=REGISTRY)["renamed"], {})
+
+
+class NoFileReadTests(unittest.TestCase):
+    def test_report_data_reads_no_file(self):
+        registry = REGISTRY.copy().rename("a/old", "a/one")
+        rows = [row({"a/old": 1}), row({"a/one": 2}, schema_version=2),
+                row({}, rules_errors=[{"detector": "a/old", "error": "KeyError"}])]
+        with traced_file_reads() as seen:
+            for by in ("rule", "repo", "stance"):
+                report_data(rows, by=by, registry=registry)
+            report(rows, registry=registry)
+        self.assertEqual(seen, [])
 
 
 if __name__ == "__main__":

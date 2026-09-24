@@ -55,3 +55,9 @@ the story's review findings hold the full reasoning.
   undecided rule) with schema-2 rows and says nothing about the mix. AC 2 keeps schema-1 rows counted
   as today; a note such as "N session(s) at schema 1" would be a new output, so it is the maintainer's
   call.
+
+## Deferred from: code review of RP-S009.md (2026-09-23)
+
+- A consumer detector registered under an id that a shipped rename retires has its hits counted under
+  the successor, and its own report line stays empty; validity moves its labels away. Refusing such
+  an id in `Registry.add` would change how entry-point plugins load, so it is the maintainer's call.

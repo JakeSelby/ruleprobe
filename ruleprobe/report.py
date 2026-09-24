@@ -59,12 +59,26 @@ def measure(session, stances=None, registry=DEFAULT):
     return row
 
 
+def _current(detector_id, renamed):
+    """`detector_id` followed to the end of its chain in `renamed`, and in nothing else: on
+    a map `Registry.fold_map()` returned this is one lookup."""
+    seen = {detector_id}
+    while renamed.get(detector_id, detector_id) != detector_id:
+        detector_id = renamed[detector_id]
+        if detector_id in seen:
+            raise ValueError("the fold map has a cycle through %r" % detector_id)
+        seen.add(detector_id)
+    return detector_id
+
+
 def folded_rules(row, renamed):
     """One row's hits, with a renamed detector counted under its successor.
 
     A rename would otherwise split one measurement across two lines, and the older half
     would look like a detector that stopped firing. A stored row is never rewritten for it:
-    the fold is done on every read instead.
+    the fold is done on every read instead. Each id follows its chain within `renamed` and
+    nowhere else: the shipped renames apply only when `renamed` is `Registry.fold_map()`,
+    and are never merged in here, so an override in that map stands.
     """
     out = {}
     for did, n in (row.get("rules") or {}).items():
@@ -74,7 +88,7 @@ def folded_rules(row, renamed):
             count = int(n or 0)
         except (TypeError, ValueError):
             count = 0
-        key = renamed.get(did, did)
+        key = _current(did, renamed)
         out[key] = out.get(key, 0) + count
     return out
 
@@ -84,12 +98,12 @@ def errored_detectors(row, renamed):
 
     A session an entry names is subtracted from that detector's denominator and from no
     other's, which is the whole difference between "this detector has no evidence here" and
-    "this session has no evidence at all".
+    "this session has no evidence at all". `renamed` is read as `folded_rules` reads it.
     """
     out = set()
     for entry in (row.get("rules_errors") or ()):
         if isinstance(entry, dict) and isinstance(entry.get("detector"), str):
-            out.add(renamed.get(entry["detector"], entry["detector"]))
+            out.add(_current(entry["detector"], renamed))
     return out
 
 
@@ -108,13 +122,15 @@ def _is_known_schema(row):
             and version in KNOWN_SCHEMA_VERSIONS)
 
 
-def rule_ids(rows, registry):
+def rule_ids(rows, registry, folds=None):
     """Every detector id to report on: the registry's, so a detector with no hit is still a
     line, plus any id a row carries that the registry no longer defines - under its current
-    name when the registry says it was renamed."""
+    name when the registry says it was renamed. `folds` is the resolved fold map to use, by
+    default `registry.fold_map()`."""
+    folds = registry.fold_map() if folds is None else folds
     ids = set(registry.ids())
     for row in rows:
-        ids.update(registry.renamed.get(k, k) for k in (row.get("rules") or {})
+        ids.update(folds.get(k, k) for k in (row.get("rules") or {})
                    if isinstance(k, str))
     return sorted(ids)
 
@@ -130,6 +146,10 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     - `by`, `measured`, `unmeasured`, `unknown_schema`, `unattributed`, `errors`,
       `min_sessions`, `promote_share` - what was counted and under which settings.
     - `notes` - the preamble lines, in order.
+    - `renamed` - the effective fold map the counts were read through, `{retired_id:
+      current_id}`, resolved once for this call. It is complete: a stored result folds a
+      retired id by applying it as it stands, and it is never re-merged with the shipped map
+      of a later release, which would undo a consumer's override.
     - `detectors` - one entry per detector when `by="rule"`: `detector`, `hits`,
       `sessions`, `of`, `share`, `note`, and `validity` when scores were passed.
     - `groups` - one entry per repository or stance otherwise: `key`, `sessions`, `hits`,
@@ -138,7 +158,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     if by not in BY:
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
     rows = [r for r in rows if isinstance(r, dict)]
-    renamed = registry.renamed
+    renamed = registry.fold_map()
     measured, unmeasured, unknown_schema, unattributed = [], 0, 0, 0
     for row in rows:
         if not _is_known_schema(row):
@@ -178,7 +198,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
             "unmeasured": unmeasured, "unknown_schema": unknown_schema,
             "unattributed": unattributed, "errors": dict(errors),
             "min_sessions": min_sessions, "promote_share": promote_share,
-            "notes": notes, "detectors": [], "groups": []}
+            "notes": notes, "renamed": dict(renamed), "detectors": [], "groups": []}
     if not measured:
         notes.append("no measured sessions")
         return data
@@ -186,7 +206,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
                for r in measured]
 
     if by == "rule":
-        for did in rule_ids(measured, registry):
+        for did in rule_ids(measured, registry, renamed):
             rows_for = [(h, e) for _r, h, e in counted if did not in e]
             total = len(rows_for)
             hits = sum(h.get(did, 0) for h, _e in rows_for)

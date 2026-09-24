@@ -6,7 +6,9 @@ import os
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
+from ruleprobe import contract_data
 from ruleprobe.cli import main
 from test_readers import FIXTURES
 
@@ -50,6 +52,14 @@ class ReportCommandTests(unittest.TestCase):
         data = json.loads(text)
         self.assertEqual(data["schema_version"], 2)
         self.assertEqual([r["schema_version"] for r in data["rows"]], [2, 2])
+
+    def test_json_carries_the_effective_fold_map_beside_the_rows(self):
+        retired = {"verification/old-no-verify": "verification/no-verify"}
+        with mock.patch.dict(contract_data.RENAMED, retired):
+            _, text = run_cli("report", "--root", FIXTURES, "--no-config", "--json")
+        data = json.loads(text)
+        self.assertEqual(len(data["rows"]), 2)
+        self.assertEqual(data["renamed"], retired)
 
     def test_json_is_byte_identical_across_two_runs(self):
         # Separate processes under different hash seeds, so an order that depends on set or

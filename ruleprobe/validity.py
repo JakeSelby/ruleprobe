@@ -28,7 +28,7 @@ import os
 from .declarative import DeclarativeError, load
 from .events import Hit  # noqa: F401  - named in the docstring's contract
 from .readers import iter_sessions
-from .registry import DEFAULT, run
+from .registry import DEFAULT, fold_map, run
 
 __all__ = ["CorpusError", "Score", "DEFAULT_FLOOR", "corpus_dir", "load_corpus",
            "score_corpus", "score_examples", "validity", "validity_table",
@@ -244,14 +244,35 @@ def score_corpus(registry=DEFAULT, directory=None, corpus=None):
     so the gap is visible in the table; scoring it anyway would call every hit it produced a
     false positive, which would punish a detector of yours for firing on a session written
     before it existed.
+
+    A label naming a retired detector id counts under its current id, folded through
+    `registry`'s fold map as a report folds a stored row.
     """
     corpus = load_corpus(directory) if corpus is None else corpus
     scores = dict((d.id, Score(d.id)) for d in registry)
+    folds = (registry.fold_map() if hasattr(registry, "fold_map")
+             else fold_map(getattr(registry, "renamed", None)))
+    labels = []
+    for labelled in corpus:
+        fire, near = _folded(labelled.fire, folds), _folded(labelled.near, folds)
+        # A label may already give one id both lists at one key; only an overlap the fold
+        # made is refused.
+        before = set((folds.get(did, did), key)
+                     for did in set(labelled.fire) & set(labelled.near)
+                     for key in labelled.fire[did] & labelled.near[did])
+        for detector_id in sorted(set(fire) & set(near)):
+            both = set(key for key in fire[detector_id] & near[detector_id]
+                       if (detector_id, key) not in before)
+            if both:
+                raise CorpusError(
+                    "%s is labelled both fire and near at %s in %s once renamed ids are folded"
+                    % (detector_id, ", ".join(sorted(both)), labelled.name))
+        labels.append((labelled, fire, near))
     named = set()
-    for labelled in corpus:
-        named.update(labelled.fire)
-        named.update(labelled.near)
-    for labelled in corpus:
+    for _labelled, fire, near in labels:
+        named.update(fire)
+        named.update(near)
+    for labelled, fire, near in labels:
         hits = run(labelled.session.events, registry=registry, strict=True)
         for detector_id, score in scores.items():
             if detector_id not in named:
@@ -262,13 +283,22 @@ def score_corpus(registry=DEFAULT, directory=None, corpus=None):
                     "%s fires twice at one key in %s; give the events separate turns"
                     % (detector_id, labelled.name))
             found = set(found)
-            wanted = labelled.fire.get(detector_id, set())
+            wanted = fire.get(detector_id, set())
             score.positives += len(wanted)
-            score.negatives += len(labelled.near.get(detector_id, set()))
+            score.negatives += len(near.get(detector_id, set()))
             score.tp += len(found & wanted)
             score.fp += len(found - wanted)
             score.fn += len(wanted - found)
     return scores
+
+
+def _folded(labels, folds):
+    """`{detector_id: keys}` with each retired id's keys merged under its current id. A new
+    mapping, so a corpus passed in is not changed by scoring it."""
+    out = {}
+    for detector_id, keys in labels.items():
+        out.setdefault(folds.get(detector_id, detector_id), set()).update(keys)
+    return out
 
 
 def score_examples(detectors):
