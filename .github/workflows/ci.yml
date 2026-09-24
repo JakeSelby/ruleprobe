@@ -1,7 +1,7 @@
 # The gate. Each job name is a required check on `main`, so renaming one is a ruleset change.
 # In the order a failure is cheapest to read: the package compiles and its tests pass on the
 # newest Python, the same suite passes on the 3.9 floor the package claims, every detector is
-# still over the corpus floor, and the wheel builds and runs from an install.
+# still over the corpus floor, and the wheel builds, runs from an install and imports as a zip.
 name: ci
 
 on:
@@ -88,3 +88,13 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/venv/bin/ruleprobe" detectors
           "$RUNNER_TEMP/venv/bin/ruleprobe" corpus --no-config --floor 0.9
+      - name: The declared API holds from the built wheel imported as a zip
+        run: |
+          version="$(python -c 'import ruleprobe; print(ruleprobe.__version__)')"
+          wheel="dist/ruleprobe-$version-py3-none-any.whl"
+          set -- dist/*.whl
+          if [ "$#" -ne 1 ] || [ "$1" != "$wheel" ]; then
+            echo "expected exactly $wheel, found: $*" >&2
+            exit 1
+          fi
+          RULEPROBE_WHEEL="$wheel" python -m unittest discover -s tests -p test_contract.py -v

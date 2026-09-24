@@ -74,8 +74,8 @@ child, else undecided on any undecided one. An undecided `when` is no hit, an `o
 needs `first` and `then` both true, and an `absent` scope holding an undecided candidate is
 no hit - so a negation never turns a command nobody could read into a count. A predicate
 from `compile_matcher` returns that undecided value, which is falsy: a Python caller who
-negates a predicate itself reads it as false and can over-count, so compose through the
-declarative `not`, `any` and `all` instead.
+negates a predicate itself reads it as false and can over-count. Either compose through the
+declarative `not`, `any` and `all`, or test the result with `is_undecided` before negating it.
 
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
@@ -91,7 +91,7 @@ from .registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, Detector, register_
 from .shell import git_calls, has_redirect, operands, split_assignments
 
 __all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
-           "compile_matcher"]
+           "compile_matcher", "is_undecided"]
 
 #: The cases a detector states about itself: `fire` and `skip`, each a list of
 #: `(note, events)`. Scored by `ruleprobe.validity`, never at report time.
@@ -122,6 +122,14 @@ class _Undecided(object):
 
 
 _UNDECIDED = _Undecided()
+
+
+def is_undecided(value):
+    """Whether `value` is the undecided result a `compile_matcher` predicate returns.
+
+    Undecided is falsy, so `not predicate(event, env)` reads it as a decided false; a Python
+    caller negating a predicate itself asks this first and treats undecided as no hit."""
+    return isinstance(value, _Undecided)
 
 
 def _not3(value):
@@ -755,7 +763,7 @@ def compile_matcher(spec, where, allow_aggregate=False):
     The predicate returns true, false, or a falsy undecided value, so its truth is "matched"
     and its falsehood is "not known to match". A Python caller who negates it with its own
     `not` reads undecided as false and can over-count; compose with the declarative `not`,
-    `any` and `all` instead."""
+    `any` and `all`, or test the result with `is_undecided` before negating it."""
     if not isinstance(spec, dict):
         where.fail("a matcher is a mapping, not %s" % type(spec).__name__)
     if not spec:

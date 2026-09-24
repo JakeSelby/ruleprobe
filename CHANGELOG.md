@@ -16,8 +16,8 @@ All notable changes to this project are documented here. The format follows
   candidate is no hit. A detector file using `not` or `absent` may count fewer hits; no edit is
   needed, and a rule that wants those commands asks for `command: {unparsed: true}`. A predicate
   from `compile_matcher` may now return a falsy undecided value: a Python caller who negates a
-  predicate itself reads it as false and can over-count, and should compose through the
-  declarative `not`, `any` and `all` instead.
+  predicate itself reads it as false and can over-count, and should test it with
+  `is_undecided` or compose through the declarative `not`, `any` and `all` instead.
 - A detector file's top-level `version`, ignored in 0.1, is now read as its entries' schema
   version, and an entry may carry its own `schema_version`, which wins
   ([#32](https://github.com/JakeSelby/ruleprobe/issues/32)). A schema version this release does
@@ -30,6 +30,10 @@ All notable changes to this project are documented here. The format follows
   unmeasured never shows 100% ([#47](https://github.com/JakeSelby/ruleprobe/issues/47)); and
   `report --json` now carries the block as a top-level `coverage` key, where it was printed to
   stderr only. The key counts rule files, not sessions.
+- The README declares the public API: every name, call shape and non-name promise a downstream
+  tool may pin, each held by a contract test that CI also runs against the built wheel imported
+  as a zip ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)). A name outside that list is
+  importable but may change in any release.
 
 ### Added
 
@@ -37,6 +41,9 @@ All notable changes to this project are documented here. The format follows
   ([#33](https://github.com/JakeSelby/ruleprobe/issues/33)). A row with no version, or a null one,
   reads as 1; a row with a version this release does not know is left out of every count, tallied
   in `unknown_schema`, and noted by `report`.
+- `is_undecided(value)`, exported from the package root, tells the undecided result of a
+  `compile_matcher` predicate from a false one
+  ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)).
 
 ### Changed
 

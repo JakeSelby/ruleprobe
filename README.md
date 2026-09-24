@@ -258,6 +258,12 @@ DEFAULT.add(Detector("house-style/sudo-install", "house-style", "bash", sudo_ins
 print(report([measure(s) for s in iter_sessions(since=30)]))
 ```
 
+`measure`, `DEFAULT`, `Detector` imported from the root, and `Parsed`'s `.turn`, `.id` and
+`.pipelines` are importable but not declared (see [the public API](#the-public-api)). A tool
+pinning a version has declared alternatives for some: `Detector` from `ruleprobe.registry`,
+`hit(p.event)` for `(p.turn, p.id)`, and `pipelines(p.command)` for `p.pipelines`. No declared
+function yet produces a row, so `measure` has none.
+
 The two are the same engine: `ruleprobe/detectors/common.yaml` is the shipped six written as
 data, and a test asserts it produces hit-for-hit what the Python in
 `ruleprobe/detectors/common.py` produces over the corpus. Python remains the escape hatch,
@@ -373,24 +379,79 @@ over it: an unmeasured detector is a gap to see, not a failure to fix.
 - `ruleprobe/report.py` - rows in, text out. A row is a small dict, so a report can be taken
   over rows you stored months ago rather than over transcripts you still have.
 
-The public API is six names:
+## The public API
+
+The declared API is these names, at these import paths. `tests/test_contract.py` imports and
+exercises every one, so removing a name or changing a call shape below fails the suite, and a
+name joins the list only with its test. Every other name in `ruleprobe.__all__` is importable
+but not declared, so it may change in any release.
+
+- `ruleprobe`: `Registry`, `analyse`, `compile_detector`, `counts`, `is_undecided`,
+  `iter_sessions`, `load_bundle`, `report`, `report_data`, `run`, `validity`
+- `ruleprobe.declarative`: `load`
+- `ruleprobe.detectors.common`: `DETECTORS`, `SECRET_PATTERNS`
+- `ruleprobe.events`: `hit`, `input_of`, `text_of`
+- `ruleprobe.registry`: `Detector`, `Registry`
+- `ruleprobe.shell`: `Context`, `MARKER_RE`, `MAX_COMMAND`, `Parsed`, `SUB_PLACEHOLDER`,
+  `git_calls`, `has_redirect`, `normalise`, `operands`, `pipelines`, `strip_heredocs`
+- `ruleprobe.validity`: `CorpusError`, `DEFAULT_FLOOR`, `Score`, `below_floor`, `score_corpus`,
+  `scores_as_dict`, `validity_table`
+
+Measuring and reporting:
 
 ```python
 iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(.id .repo .events)
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
-Registry.add(Detector(id, rule, event, fn, gate=None))
+Registry([Detector, ...]); Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
 report(rows, by="rule", min_sessions=20, promote_share=0.30)
 report_data(rows, by="rule", ...)                       # the same numbers as a dict; --json prints it
-validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall .f1)}
-```
-
-plus two for the declarative half:
-
-```python
+validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall)}
 load_bundle(paths=None, rules_dir=None, cwd=None, config=True)  # -> Bundle(.detectors .rules .findings)
 compile_detector(spec, path="<spec>", lines=None)               # -> Detector
 ```
+
+Writing a detector in Python:
+
+```python
+Detector(id, rule, event, fn, gate)       # positional; a subclass may add __slots__ = ()
+fn(events, ctx)                           # -> [(turn, tool_use_id), ...]
+ctx.events, ctx.bash, ctx.finals          # a Context: every event, each Bash call as a
+                                          # Parsed(.event .command .heredocs), final messages
+hit(event); hit(event, tool_use_id=False) # -> (turn, tool_use_id or None)
+git_calls(parsed, ("commit",))            # yields (segment, subcommand, args)
+MARKER_RE.match(token).group(1)           # an index into parsed.heredocs
+input_of(event); text_of(value); normalise(command)
+```
+
+A `gate` is `None` or a `(dimension, variants_or_None)` pair. A detector reads the event
+fields `kind`, `turn`, `id`, `name`, `input`, `text`, `final`, `tool_use_id` and `tool_name`,
+each on the kinds `ruleprobe/events.py` documents it for.
+
+Scoring against the corpus:
+
+```python
+score_corpus(registry=DEFAULT, directory=None)  # -> {detector_id: Score}; raises CorpusError
+Score(detector_id)                              # .detector .scored .precision .recall .add(other)
+below_floor(scores, floor); scores_as_dict(scores, floor); validity_table(scores, floor)
+declarative.load(path)                          # -> (document, lines)
+```
+
+A predicate from `compile_matcher` returns true, false, or a falsy undecided value when it
+could not read its input. A Python caller who negates one itself reads undecided as false and
+can over-count: compose through the declarative `not`, `any` and `all`, or test the result
+with `is_undecided(value)` before negating it. `compile_matcher` itself is not declared: it
+needs arguments the package does not declare, so it is not yet a declared way to build a
+predicate, and `is_undecided` is declared ahead of it.
+
+Four promises are not names:
+
+- `SECRET_PATTERNS` stays a plain module-level assignment of a literal list in
+  `ruleprobe/detectors/common.py`, so it can be read by syntax tree without importing.
+- The wheel is pure Python and named `ruleprobe-<version>-py3-none-any.whl`.
+- The package imports and runs from that wheel placed on `sys.path` as a zip, uninstalled.
+- The wheel carries the corpus at `ruleprobe/corpus/`, beside `ruleprobe.__file__`. A caller
+  importing from a zip unpacks it, or points `RULEPROBE_CORPUS` at a copy.
 
 ## Development
 
