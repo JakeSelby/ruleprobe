@@ -9,6 +9,7 @@ fold map, or a ledger written under that release loses the history stored under 
 import ast
 import inspect
 import unittest
+from unittest import mock
 
 from ruleprobe import DEFAULT, contract_data
 from ruleprobe.registry import fold_map
@@ -28,7 +29,7 @@ def non_literal(source):
             try:
                 ast.literal_eval(node.value)
                 continue
-            except ValueError:
+            except (ValueError, TypeError, SyntaxError, RecursionError):
                 pass
         bad.append(node.lineno)
     return bad
@@ -38,6 +39,11 @@ def unaccounted(shipped_ids, registry, renamed):
     """The shipped ids that are neither registered in `registry` nor folded by `renamed`."""
     folds = fold_map(renamed)
     return [did for did in shipped_ids if did not in registry and did not in folds]
+
+
+def still_registered(registry):
+    """The retired ids of the shipped fold map that `registry` still registers."""
+    return sorted(old for old in fold_map(contract_data.RENAMED) if old in registry)
 
 
 class LiteralTests(unittest.TestCase):
@@ -85,6 +91,14 @@ class ShippedIdTests(unittest.TestCase):
     def test_every_default_detector_is_on_the_shipped_list(self):
         self.assertEqual([did for did in DEFAULT.ids()
                           if did not in contract_data.SHIPPED_IDS], [])
+
+    def test_no_retired_id_is_still_registered_in_default(self):
+        self.assertEqual(still_registered(DEFAULT), [])
+
+    def test_the_check_fails_a_rename_that_left_its_old_id_registered(self):
+        kept = DEFAULT.ids()[0]
+        with mock.patch.dict(contract_data.RENAMED, {kept: "x/successor"}):
+            self.assertEqual(still_registered(DEFAULT), [kept])
 
     def test_every_shipped_rename_lands_on_a_registered_detector(self):
         self.assertEqual([new for new in fold_map(contract_data.RENAMED).values()

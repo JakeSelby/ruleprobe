@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
 """The registry: what it accepts, what it refuses, how a gate reads, and the two seams
 third-party detectors arrive through."""
-import builtins
 import contextlib
-import io
+import importlib.util
 import os
+import sys
 import unittest
 from unittest import mock
 
@@ -128,24 +128,32 @@ class DeclarativeSeamTests(unittest.TestCase):
         self.assertIn("a/b", run([say("anything")], registry=registry))
 
 
+#: The recorders of the `traced_file_reads` blocks now open. An audit hook cannot be removed,
+#: so one is installed on first use and records only while a block is open.
+_RECORDERS = []
+_AUDITED = ("open", "os.listdir", "os.scandir")
+_HOOK = []
+
+
+def _audit(event, args):
+    if _RECORDERS and event in _AUDITED:
+        _RECORDERS[-1].append((event, args[0] if args else None))
+
+
 @contextlib.contextmanager
 def traced_file_reads():
-    """Record every file or directory the block opens or lists, and let each go through."""
+    """Record every file the block opens and every directory it lists, through the
+    interpreter's audit events: the import system, `importlib.resources` and zipimport
+    raise `open` as `open()` does."""
+    if not _HOOK:
+        sys.addaudithook(_audit)
+        _HOOK.append(_audit)
     seen = []
-    patches = []
-    for owner, name in ((builtins, "open"), (io, "open"), (io, "open_code"), (io, "FileIO"),
-                        (os, "open"), (os, "listdir"), (os, "scandir")):
-        real = getattr(owner, name)
-
-        def traced(*args, _real=real, _name=name, **kwargs):
-            seen.append((_name, args[0] if args else None))
-            return _real(*args, **kwargs)
-
-        patches.append(mock.patch.object(owner, name, traced))
-    with contextlib.ExitStack() as stack:
-        for patch in patches:
-            stack.enter_context(patch)
+    _RECORDERS.append(seen)
+    try:
         yield seen
+    finally:
+        _RECORDERS.remove(seen)
 
 
 class FoldMapTests(unittest.TestCase):
@@ -194,10 +202,6 @@ class FoldMapTests(unittest.TestCase):
         with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
             self.assertEqual(Registry(renamed={"a/old": "a/old"}).fold_map(), {})
 
-    def test_a_resolved_map_resolves_to_itself(self):
-        folds = fold_map({"a/w": "a/x", "a/x": "a/y"})
-        self.assertEqual(fold_map(folds), folds)
-
     def test_the_default_registry_folds_the_shipped_map_and_holds_no_map_of_its_own(self):
         self.assertEqual(DEFAULT.renamed, {})
         self.assertEqual(DEFAULT.fold_map(), fold_map(contract_data.RENAMED))
@@ -217,7 +221,10 @@ class NoFileReadTests(unittest.TestCase):
             with open(__file__, encoding="utf-8") as handle:
                 handle.readline()
             os.listdir(os.path.dirname(__file__))
-        self.assertEqual([name for name, _path in seen], ["open", "listdir"])
+            spec = importlib.util.spec_from_file_location("_traced_probe", __file__)
+            spec.loader.get_data(__file__)
+        self.assertEqual([name for name, _path in seen], ["open", "os.listdir", "open"])
+        self.assertEqual(seen[-1][1], __file__)
 
 
 if __name__ == "__main__":

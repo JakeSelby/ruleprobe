@@ -614,6 +614,18 @@ class FoldTests(Temp):
                            {"case.jsonl": cc_lines(CASE_EVENTS)})
         self.assertFalse(score_corpus(Registry([compile_detector(CAT)]), path)["x/cat"].scored)
 
+    def test_fire_and_near_meeting_at_one_key_once_folded_is_fatal(self):
+        labels = ("version: 1\nsessions:\n  - session: case.jsonl\n    labels:\n"
+                  '      - at: "1:tu-a"\n        fire: [x/old-cat]\n        near: [x/cat]\n')
+        path = self.corpus(labels, {"case.jsonl": cc_lines(CASE_EVENTS)})
+        registry = Registry([compile_detector(CAT)], {"x/old-cat": "x/cat"})
+        with self.assertRaises(CorpusError) as caught:
+            score_corpus(registry, path)
+        self.assertIn("x/cat", str(caught.exception))
+        self.assertIn("1:tu-a", str(caught.exception))
+        # The near miss: without the fold they are two detectors and the corpus scores.
+        self.assertTrue(score_corpus(Registry([compile_detector(CAT)]), path)["x/cat"].scored)
+
     def test_scoring_a_corpus_under_a_fold_leaves_the_corpus_as_loaded(self):
         path = self.corpus(self.labels_under("x/old-cat", "x/old-cat"),
                            {"case.jsonl": cc_lines(CASE_EVENTS)})

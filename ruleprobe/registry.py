@@ -16,7 +16,8 @@ from .shell import analyse
 SCHEMA_VERSION = 2
 KNOWN_SCHEMA_VERSIONS = (1, 2)
 
-__all__ = ["Detector", "Registry", "DEFAULT", "run", "register_compiler", "from_spec"]
+__all__ = ["Detector", "Registry", "DEFAULT", "run", "register_compiler", "from_spec",
+           "fold_map"]
 
 #: The shapes of transcript a detector reads. A registry entry naming anything else is a
 #: typo, not a new kind, so `Registry.add` refuses it.
@@ -74,8 +75,9 @@ def fold_map(renamed=None):
     no rename and is left out. A cycle raises `ValueError`, since no id in it is current.
 
     The report, `report_data` and validity all fold through this, and `report_data` emits its
-    result, so a stored JSON report folds with no registry at hand. Passing a map this has
-    already returned gives the same map back.
+    result, so a stored JSON report folds with no registry at hand. The result is complete and
+    is applied as it stands: passing it back in merges the shipped map again, which undoes a
+    consumer's override of a shipped rename, so resolve once and look ids up in the result.
     """
     merged = dict(SHIPPED_RENAMED)
     merged.update(renamed or {})

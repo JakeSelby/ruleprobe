@@ -218,7 +218,7 @@ class PersistedFoldTests(unittest.TestCase):
         with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/one"}):
             data = report_data(rows, registry=REGISTRY)
             text = report(rows, registry=REGISTRY)
-            self.assertEqual(folded_rules(rows[0], {}), {"a/one": 3})
+            self.assertEqual(folded_rules(rows[0], REGISTRY.fold_map()), {"a/one": 3})
         entry = [d for d in data["detectors"] if d["detector"] == "a/one"][0]
         self.assertEqual((entry["hits"], entry["sessions"], entry["of"]), (7, 2, 2))
         self.assertNotIn("a/gone", [d["detector"] for d in data["detectors"]])
@@ -228,7 +228,7 @@ class PersistedFoldTests(unittest.TestCase):
     def test_a_chain_of_renames_folds_to_its_end(self):
         registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
         rows = [row({"a/older": 1}), row({"a/old": 2}), row({"a/one": 4})]
-        self.assertEqual(folded_rules(rows[0], registry.renamed), {"a/one": 1})
+        self.assertEqual(folded_rules(rows[0], registry.fold_map()), {"a/one": 1})
         data = report_data(rows, registry=registry)
         self.assertEqual([(d["detector"], d["hits"], d["sessions"]) for d in data["detectors"]],
                          [("a/one", 7, 3), ("a/two", 0, 0)])
@@ -243,7 +243,7 @@ class PersistedFoldTests(unittest.TestCase):
     def test_an_error_under_a_retired_id_is_charged_to_the_current_one(self):
         registry = REGISTRY.copy().rename("a/older", "a/old").rename("a/old", "a/one")
         errored = row({"a/two": 1}, rules_errors=[{"detector": "a/older", "error": "KeyError"}])
-        self.assertEqual(errored_detectors(errored, registry.renamed), {"a/one"})
+        self.assertEqual(errored_detectors(errored, registry.fold_map()), {"a/one"})
         data = report_data([row({"a/one": 1}), errored], registry=registry)
         self.assertEqual(data["errors"], {"a/one": 1})
         entry = [d for d in data["detectors"] if d["detector"] == "a/one"][0]
@@ -271,6 +271,30 @@ class EmittedFoldMapTests(unittest.TestCase):
         for did, n in stored_row.items():
             folded[renamed.get(did, did)] = folded.get(renamed.get(did, did), 0) + n
         self.assertEqual(folded, {"a/one": 3})
+
+    def test_a_consumer_undo_of_a_shipped_rename_holds_through_report_data(self):
+        registry = Registry(list(REGISTRY), renamed={"a/old": "a/old"})
+        rows = [row({"a/old": 2, "a/one": 1}), row({"a/old": 1})]
+        with mock.patch.dict(contract_data.RENAMED, {"a/old": "a/one"}):
+            data = report_data(rows, registry=registry)
+        hits = dict((d["detector"], d["hits"]) for d in data["detectors"])
+        self.assertEqual(hits, {"a/old": 3, "a/one": 1, "a/two": 0})
+        # The emitted map agrees with the counts: applied as it stands, it moves nothing.
+        self.assertEqual(data["renamed"], {})
+
+    def test_the_emitted_map_agrees_with_the_counts_under_a_shipped_chain(self):
+        registry = REGISTRY.copy().rename("a/old", "a/one")
+        rows = [row({"a/gone": 2}), row({"a/old": 1})]
+        with mock.patch.dict(contract_data.RENAMED, {"a/gone": "a/old"}):
+            data = report_data(rows, registry=registry)
+        self.assertEqual(data["renamed"], {"a/gone": "a/one", "a/old": "a/one"})
+        stored = {}
+        for r in rows:
+            for did, n in r["rules"].items():
+                key = data["renamed"].get(did, did)
+                stored[key] = stored.get(key, 0) + n
+        hits = dict((d["detector"], d["hits"]) for d in data["detectors"] if d["hits"])
+        self.assertEqual(hits, stored)
 
     def test_no_rename_emits_an_empty_map(self):
         self.assertEqual(report_data([row({"a/one": 1})], registry=REGISTRY)["renamed"], {})

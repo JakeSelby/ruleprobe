@@ -55,7 +55,10 @@ uvx ruleprobe report --json                    # the same numbers as data, rows 
 ```
 
 Each row and the `--json` result carry `schema_version`, and a row with a version this release
-does not know is left out of every count and tallied in `unknown_schema`.
+does not know is left out of every count and tallied in `unknown_schema`. The result also
+carries `renamed`, the effective fold map of retired detector id to current id that its counts
+were read through. It is complete, so a saved result folds a retired id by applying it as it
+stands, never by merging it again with a later release's shipped map.
 The result also carries `coverage`, on every run: `measured`, `dark` and `unmeasured` count
 rule files, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
 measured share of them. With no rule files read, the counts are zero and `share` is `null`.

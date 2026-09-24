@@ -251,8 +251,16 @@ def score_corpus(registry=DEFAULT, directory=None, corpus=None):
     corpus = load_corpus(directory) if corpus is None else corpus
     scores = dict((d.id, Score(d.id)) for d in registry)
     folds = fold_map(getattr(registry, "renamed", None))
-    labels = [(labelled, _folded(labelled.fire, folds), _folded(labelled.near, folds))
-              for labelled in corpus]
+    labels = []
+    for labelled in corpus:
+        fire, near = _folded(labelled.fire, folds), _folded(labelled.near, folds)
+        for detector_id in sorted(set(fire) & set(near)):
+            both = fire[detector_id] & near[detector_id]
+            if both:
+                raise CorpusError(
+                    "%s is labelled both fire and near at %s in %s once renamed ids are folded"
+                    % (detector_id, ", ".join(sorted(both)), labelled.name))
+        labels.append((labelled, fire, near))
     named = set()
     for _labelled, fire, near in labels:
         named.update(fire)
