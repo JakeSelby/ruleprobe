@@ -143,6 +143,31 @@ class IdTests(unittest.TestCase):
         self.assertEqual(self.ids(path), ["x.md#testing"])
 
 
+class CoverageBlockTests(unittest.TestCase):
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def test_a_long_section_id_prints_whole_and_the_column_widens_to_it(self):
+        long_id = "team/CLAUDE.md#read-credentials-from-the-environment-never-inline"
+        bundle = Bundle(rules=[RuleEntry("short", "a.md", "unmeasured", "", []),
+                               RuleEntry(long_id, "b.md", "unmeasured", "", [])])
+        rows = bundle.summary(relative_to=os.getcwd()).split("\n")[1:]
+        self.assertIn("  unmeasured %s b.md" % long_id, rows)
+        self.assertEqual(rows[0].index("a.md"), rows[1].index("b.md"))
+
+    def test_short_ids_keep_the_old_column(self):
+        bundle = Bundle(rules=[RuleEntry("short", "a.md", "dark", "", [])])
+        self.assertEqual(bundle.summary(relative_to=os.getcwd()).split("\n")[1],
+                         "  dark       short                       a.md")
+
+    def test_the_readme_quotes_every_line_of_the_example_coverage_block(self):
+        bundle = load_bundle(rules_dir=os.path.join(self.ROOT, "docs", "rules"), config=False)
+        printed = bundle.summary(relative_to=self.ROOT).split("\n")
+        with open(os.path.join(self.ROOT, "README.md"), encoding="utf-8") as handle:
+            readme = handle.read().split("\n")
+        start = readme.index(printed[0])
+        self.assertEqual(readme[start:start + len(printed)], printed)
+
+
 class BoundFileTests(unittest.TestCase):
     def test_a_file_bound_in_front_matter_keeps_one_rule_with_its_old_id_and_state(self):
         detectors, entries, findings = read_rule_file(fixture("bound.md"), root=RULES)

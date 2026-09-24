@@ -200,7 +200,7 @@ class RuleBindingTests(Temp):
         self.assertEqual(bundle.counts(), {"measured": 1, "dark": 1, "unmeasured": 1})
         summary = bundle.summary(relative_to=self.dir)
         self.assertIn("rules: 1 measured, 1 dark, 1 unmeasured", summary)
-        self.assertIn("unmeasured working-style.md#working-st", summary)
+        self.assertIn("unmeasured working-style.md#working-style ", summary)
         self.assertNotIn(self.dir, summary)
 
     def test_the_rule_name_defaults_to_the_file_name(self):
@@ -314,7 +314,7 @@ class CliTests(Temp):
         self.assertEqual(code, 0)
         self.assertIn("transcript-hygiene/sed-range", text)
         self.assertIn("rules: 1 measured, 0 dark, 1 unmeasured", text)
-        self.assertIn("unmeasured working-style.md#working-st", text)
+        self.assertIn("unmeasured working-style.md#working-style ", text)
 
     def test_a_detector_file_named_on_the_command_line_is_loaded(self):
         path = self.write("d.json", json.dumps(SUDO))

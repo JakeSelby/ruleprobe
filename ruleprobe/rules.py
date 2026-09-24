@@ -87,10 +87,12 @@ class Bundle(object):
             lines.append("rules: %d measured, %d dark, %d unmeasured%s"
                          % (coverage["measured"], coverage["dark"], coverage["unmeasured"],
                             _percent(coverage)))
+            # Every id prints whole: a section id cut short names a different rule, or none.
+            width = max([28] + [len(entry.rule) + 1 for entry in self.rules])
             for entry in self.rules:
                 note = ": " + entry.reason if entry.reason else ""
-                lines.append("  %-11s%-28s%s%s"
-                             % (entry.state, entry.rule[:27],
+                lines.append("  %-11s%-*s%s%s"
+                             % (entry.state, width, entry.rule,
                                 _short(entry.path, relative_to), note))
         if self.findings:
             lines.append("detector findings: %d (each entry skipped, the rest still ran)"

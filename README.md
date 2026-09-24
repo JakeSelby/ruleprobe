@@ -110,10 +110,10 @@ verification/no-test-run                    1         1     1     100%
 verification/no-verify                      0         0     1       0%
 
 rules: 2 measured, 1 dark, 1 unmeasured (50% measured)
-  measured   house-style                 docs/rules/house-style.md
-  dark       secrets                     docs/rules/secrets.md: a credential that never reaches a file leaves no shape in a transcript
-  measured   verification                docs/rules/verification.md
-  unmeasured working-style.md#working-st docs/rules/working-style.md
+  measured   house-style                    docs/rules/house-style.md
+  dark       secrets                        docs/rules/secrets.md: a credential that never reaches a file leaves no shape in a transcript
+  measured   verification                   docs/rules/verification.md
+  unmeasured working-style.md#working-style docs/rules/working-style.md
 ```
 
 Three lines of that report are the point. `house-style/sudo-install` is a rule of the
