@@ -115,7 +115,8 @@ force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 One row reads the other way round. Every other row counts violations, so fewer hits is
 better; `testing/test-after-change` counts compliance - a hit is a file change that a later
 test run followed - so more is better, and its opportunities and followed count are the
-measure.
+measure. Its errors run low: a test run it does not recognise leaves the change counted as not
+followed, so read its followed share as a floor. Its description lists the runners it misses.
 
 The binding under-counts on purpose. A section matching none, or more than one, stays
 unmeasured, and the coverage block names the entries when it matched several. A pattern
