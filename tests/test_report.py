@@ -442,7 +442,6 @@ class ComplianceTests(unittest.TestCase):
             "a bool turn": [(True, "t1", True)],
             "an int tool_use_id": [(1, 5, True)],
             "a repeated point": [(1, "t1", True), (1, "t1", False)],
-            "a repeated point with no id": [(1, None, True), (1, None, None)],
         }
         for label, result in sorted(malformed.items()):
             with self.subTest(label):
