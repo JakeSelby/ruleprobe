@@ -34,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover
     from collections import Mapping
 
-from corpus import bash, compact, prompt, say, tool_result, tool_use
+from corpus import FAKE_KEY, bash, compact, prompt, say, tool_result, tool_use
 
 import ruleprobe
 from ruleprobe import (Registry, analyse, compile_detector, counts, is_undecided,
@@ -84,6 +84,9 @@ GENERIC = ("cache-hygiene/compact", "cache-hygiene/model-switch", "secrets/secre
 
 #: The `event` values a consumer registers its own detectors under.
 CONSUMER_EVENTS = ("agent-brief", "assistant-final", "bash", "session", "write")
+
+#: Every `event` value `Registry.add` accepts: the five above and the two raw event kinds.
+EVENT_VALUES = CONSUMER_EVENTS + ("assistant_text", "tool_use")
 
 
 def _session():
@@ -213,14 +216,18 @@ class DetectorFunctionTests(unittest.TestCase):
             run(_session(), None, registry=registry, strict=True, errors=None)
 
     # Covers: `analyse(events)` from the root, the parsed view `run` hands a detector; one
-    # `Parsed` per Bash call, in order, each carrying the event it was parsed from.
+    # `Parsed` per Bash call, in order, each holding the very event object it was parsed
+    # from, so a caller can key parses by `id(p.event)`.
     def test_analyse_returns_the_context_run_uses(self):
         ctx = analyse(_session())
         self.assertIsInstance(ctx, Context)
         self.assertEqual(len(ctx.bash), 1)
         self.assertEqual(len(ctx.finals), 1)
         events = [bash("git status", id="tu1"), bash("cat a.md", id="tu2")]
-        self.assertEqual([p.event for p in analyse(events).bash], events)
+        parsed = analyse(events).bash
+        self.assertEqual(len(parsed), len(events))
+        for one, event in zip(parsed, events):
+            self.assertIs(one.event, event)
 
     # Covers: `run` returning `{detector_id: [hit, ...]}` with the detectors that found
     # nothing omitted, each hit a 3-sequence `(id, turn, tool_use_id)` with those attributes;
@@ -252,12 +259,17 @@ class DetectorFunctionTests(unittest.TestCase):
             compact(turn=2),
             bash("find .", turn=2, id="tu2"),
             bash("git push --no-verify", turn=2, id="tu3"),
+            tool_use("Write", {"file_path": "a.py", "content": "KEY = '%s'\n" % FAKE_KEY},
+                     turn=2, id="tu4"),
+            bash("cat > .env <<EOF\nAWS_ACCESS_KEY_ID=%s\nEOF" % FAKE_KEY, turn=2, id="tu5"),
             {"kind": "assistant_text", "turn": 2, "text": "Done.", "final": True,
-             "model": "model-a"},
+             "model": "model-b"},
         ]
         hits = run(session, None, registry=Registry(common.DETECTORS), strict=True)
         self.assertEqual(dict((k, [tuple(h)[1:] for h in v]) for k, v in hits.items()), {
             "cache-hygiene/compact": [(2, None)],
+            "cache-hygiene/model-switch": [(2, None)],
+            "secrets/secret-in-write": [(2, "tu4"), (2, "tu5")],
             "transcript-hygiene/unfiltered-find": [(2, "tu2")],
             "transcript-hygiene/whole-file-cat": [(1, "tu1")],
             "verification/no-verify": [(2, "tu3")],
@@ -319,9 +331,13 @@ class DetectorTypeTests(unittest.TestCase):
         self.assertEqual(sorted(run([bash("cat a.md")], None, registry=registry)),
                          ["transcript-hygiene/whole-file-cat"])
 
-    # Covers: every `event` value a consumer registers a detector under is accepted.
+    # Covers: all seven declared `event` values are accepted, the five a consumer registers
+    # under among them, and any other is refused.
     def test_the_event_kinds_a_consumer_registers_under(self):
-        for event in CONSUMER_EVENTS:
+        self.assertTrue(set(CONSUMER_EVENTS) <= set(EVENT_VALUES))
+        with self.assertRaises(ValueError):
+            Registry([Detector("contract/ev", "contract", "tool-use", lambda e, c: [])])
+        for event in EVENT_VALUES:
             with self.subTest(event=event):
                 registry = Registry([Detector("contract/ev", "contract", event,
                                               lambda e, c: [])])
@@ -517,7 +533,7 @@ class ShellTests(unittest.TestCase):
                                         for t in s])
 
     # Covers: `pipelines(command)` as a list of pipelines, each a list of segments, each a
-    # list of tokens, `[]` when the command does not parse; `operands(segment)` dropping flags
+    # list of tokens, `[]` for an unterminated quote; `operands(segment)` dropping flags
     # and a redirect target; `strip_heredocs(command)` returning `(text, bodies)`.
     def test_the_shell_helpers_return_the_nested_shapes(self):
         self.assertEqual(pipelines("cat a | head -20"), [[["cat", "a"], ["head", "-20"]]])
@@ -730,7 +746,7 @@ class SecretPatternsTests(unittest.TestCase):
 def _flow_labelled(text):
     """Every detector id in a `fire:` or `near:` flow list, read by pattern, not by YAML."""
     found = set()
-    for match in re.finditer(r"(?:fire|near):\s*\[([^\]]*)\]", text):
+    for match in re.finditer(r"\b(?:fire|near):\s*\[([^\]]*)\]", text):
         found.update(part.strip() for part in match.group(1).split(",") if part.strip())
     return found
 
@@ -742,7 +758,12 @@ class ShippedLabelsTests(unittest.TestCase):
         path = os.path.join(ROOT, "ruleprobe", "corpus", "labels.yaml")
         with open(path, encoding="utf-8") as handle:
             text = handle.read()
-        self.assertEqual(re.findall(r"^\s*(?:fire|near):\s*(?!\[)\S", text, re.M), [])
+        block = re.compile(r"^[ \t]*(?:-[ \t]+)?(?:fire|near):\s*(?!\[)\S", re.M)
+        self.assertEqual(block.findall(text), [])
+        for bad in ("  - at: x\n    fire:\n      - a/b\n", "  - fire:\n      - a/b\n"):
+            with self.subTest(bad=bad):
+                self.assertTrue(block.findall(bad))
+        self.assertEqual(_flow_labelled("misfire: [a/b]\nnear: [c/d]\n"), {"c/d"})
         document, _lines = declarative.load(path)
         loaded = set()
         for session in document["sessions"]:

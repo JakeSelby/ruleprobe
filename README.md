@@ -645,15 +645,16 @@ hit(event); hit(event, tool_use_id=False) # -> (turn, tool_use_id or None)
 git_calls(parsed, ("commit",))            # yields (segment, subcommand, args)
 MARKER_RE.match(token).group(1)           # an index into parsed.heredocs
 input_of(event); text_of(value); normalise(command)
-pipelines(command)                        # -> [[[token, ...], ...], ...]; [] if unparsed
+pipelines(command)                        # -> [[[token, ...], ...], ...]; [] on an
+                                          # unterminated quote
 operands(segment); has_redirect(segment); strip_heredocs(command)  # -> (text, bodies)
 ```
 
 A `gate` is `None` or a `(dimension, variants_or_None)` pair. A detector's `event` is one of
-`bash`, `write`, `agent-brief`, `assistant-final` or `session`; a command longer than
-`MAX_COMMAND` is `skipped` and never tokenized. A detector reads the event
-fields `kind`, `turn`, `id`, `name`, `input`, `text`, `final`, `tool_use_id` and `tool_name`,
-each on the kinds `ruleprobe/events.py` documents it for.
+`bash`, `write`, `agent-brief`, `assistant-final`, `session`, `tool_use` or `assistant_text`;
+a command longer than `MAX_COMMAND` is `skipped` and never tokenized. A detector reads the
+event fields `kind`, `turn`, `id`, `name`, `input`, `text`, `final`, `tool_use_id` and
+`tool_name`, each on the kinds `ruleprobe/events.py` documents it for.
 
 Scoring against the corpus:
 
