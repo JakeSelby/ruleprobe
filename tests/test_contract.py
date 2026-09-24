@@ -7,6 +7,9 @@ other test exercises one declared call shape, attribute or non-name dependency, 
 comment above it names the item it covers, so removing a name or changing a declared call
 shape fails here. A name joins `DECLARED` only with a test in this module.
 
+The list, the call shapes and the non-name dependencies were last re-derived from
+agent-harness `main` at `40cc0b7`; the tests pin ruleprobe's side and never import the harness.
+
 The wheel checks read a built wheel from `$RULEPROBE_WHEEL` when it is set, as CI's package
 job does; set but empty or naming no file is an error. That the built wheel is the one file
 `dist/ruleprobe-<version>-py3-none-any.whl` is checked by the package job's shell step, which
@@ -31,7 +34,7 @@ try:
 except ImportError:  # pragma: no cover
     from collections import Mapping
 
-from corpus import bash, compact, prompt, say, tool_result, tool_use
+from corpus import FAKE_KEY, bash, compact, prompt, say, tool_result, tool_use
 
 import ruleprobe
 from ruleprobe import (Registry, analyse, compile_detector, counts, is_undecided,
@@ -72,6 +75,18 @@ DECLARED = {
 #: The names the README declared in 0.1.0. Every one stays declared.
 DECLARED_IN_0_1 = ("iter_sessions", "run", "Registry", "report", "report_data", "validity",
                    "load_bundle", "compile_detector")
+
+#: The detectors `ruleprobe.detectors.common` ships. A consumer re-registers exactly these and
+#: counts them, so adding, removing or renaming one changes the declared surface.
+GENERIC = ("cache-hygiene/compact", "cache-hygiene/model-switch", "secrets/secret-in-write",
+           "transcript-hygiene/unfiltered-find", "transcript-hygiene/whole-file-cat",
+           "verification/no-verify")
+
+#: The `event` values a consumer registers its own detectors under.
+CONSUMER_EVENTS = ("agent-brief", "assistant-final", "bash", "session", "write")
+
+#: Every `event` value `Registry.add` accepts: the five above and the two raw event kinds.
+EVENT_VALUES = CONSUMER_EVENTS + ("assistant_text", "tool_use")
 
 
 def _session():
@@ -200,12 +215,65 @@ class DetectorFunctionTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             run(_session(), None, registry=registry, strict=True, errors=None)
 
-    # Covers: `analyse(events)` from the root, the parsed view `run` hands a detector.
+    # Covers: `analyse(events)` from the root, the parsed view `run` hands a detector; one
+    # `Parsed` per Bash call, in order, each holding the very event object it was parsed
+    # from, so a caller can key parses by `id(p.event)`.
     def test_analyse_returns_the_context_run_uses(self):
         ctx = analyse(_session())
         self.assertIsInstance(ctx, Context)
         self.assertEqual(len(ctx.bash), 1)
         self.assertEqual(len(ctx.finals), 1)
+        events = [bash("git status", id="tu1"), bash("cat a.md", id="tu2")]
+        parsed = analyse(events).bash
+        self.assertEqual(len(parsed), len(events))
+        for one, event in zip(parsed, events):
+            self.assertIs(one.event, event)
+
+    # Covers: `run` returning `{detector_id: [hit, ...]}` with the detectors that found
+    # nothing omitted, each hit a 3-sequence `(id, turn, tool_use_id)` with those attributes;
+    # a detector `fn` may return plain tuples.
+    def test_run_returns_three_field_hits_keyed_by_id_and_omits_the_empty(self):
+        registry = Registry([
+            Detector("contract/one", "contract", "bash", lambda e, c: [(2, "tu2"), (3, None)]),
+            Detector("contract/none", "contract", "session", lambda e, c: []),
+        ])
+        hits = run([], None, registry=registry, strict=True)
+        self.assertIsInstance(hits, dict)
+        self.assertEqual(list(hits), ["contract/one"])
+        self.assertEqual([tuple(h) for h in hits["contract/one"]],
+                         [("contract/one", 2, "tu2"), ("contract/one", 3, None)])
+        for one in hits["contract/one"]:
+            self.assertEqual(len(one), 3)
+            self.assertEqual((one.id, one.turn, one.tool_use_id), tuple(one))
+
+    # Covers: the shipped detectors over a session built by the caller rather than a reader,
+    # with no `stances`: the hits the harness pins in its own golden for the generic half.
+    def test_the_shipped_detectors_over_a_caller_built_session(self):
+        session = [
+            {"kind": "user_prompt", "turn": 1, "text": "go"},
+            {"kind": "assistant_text", "turn": 1, "text": "Looking.", "final": False,
+             "model": "model-a"},
+            bash("cat notes.txt", turn=1, id="tu1"),
+            tool_result("x", tool_name="Bash", tool_use_id="tu1", turn=1),
+            {"kind": "user_prompt", "turn": 2},
+            compact(turn=2),
+            bash("find .", turn=2, id="tu2"),
+            bash("git push --no-verify", turn=2, id="tu3"),
+            tool_use("Write", {"file_path": "a.py", "content": "KEY = '%s'\n" % FAKE_KEY},
+                     turn=2, id="tu4"),
+            bash("cat > .env <<EOF\nAWS_ACCESS_KEY_ID=%s\nEOF" % FAKE_KEY, turn=2, id="tu5"),
+            {"kind": "assistant_text", "turn": 2, "text": "Done.", "final": True,
+             "model": "model-b"},
+        ]
+        hits = run(session, None, registry=Registry(common.DETECTORS), strict=True)
+        self.assertEqual(dict((k, [tuple(h)[1:] for h in v]) for k, v in hits.items()), {
+            "cache-hygiene/compact": [(2, None)],
+            "cache-hygiene/model-switch": [(2, None)],
+            "secrets/secret-in-write": [(2, "tu4"), (2, "tu5")],
+            "transcript-hygiene/unfiltered-find": [(2, "tu2")],
+            "transcript-hygiene/whole-file-cat": [(1, "tu1")],
+            "verification/no-verify": [(2, "tu3")],
+        })
 
 
 class DetectorTypeTests(unittest.TestCase):
@@ -215,6 +283,19 @@ class DetectorTypeTests(unittest.TestCase):
     def test_positional_detector_and_a_slots_subclass(self):
         class HarnessDetector(Detector):
             __slots__ = ()
+
+            # A subclass renames two fields with read-only properties, so the base class
+            # defines neither name.
+            @property
+            def kind(self):
+                return self.event
+
+            @property
+            def stance(self):
+                return self.gate
+
+        self.assertFalse(hasattr(Detector, "kind"))
+        self.assertFalse(hasattr(Detector, "stance"))
 
         def fn(events, ctx):
             return [(1, None)]
@@ -229,6 +310,42 @@ class DetectorTypeTests(unittest.TestCase):
                 registry = Registry([detector])
                 self.assertEqual(list(run([], {"commits": "on"}, registry=registry)),
                                  ["contract/pos"])
+                if cls is HarnessDetector:
+                    self.assertEqual((detector.kind, detector.stance),
+                                     ("session", ("commits", None)))
+
+    # Covers: `Detector(id, rule, event, fn)` with the gate left out, which is always on, and
+    # each shipped detector re-registered positionally, ungated, under a subclass.
+    def test_four_positional_arguments_and_a_re_registered_shipped_detector(self):
+        class HarnessDetector(Detector):
+            __slots__ = ()
+
+        detector = HarnessDetector("contract/four", "contract", "session",
+                                   lambda e, c: [(1, None)])
+        self.assertIsNone(detector.gate)
+        self.assertEqual(list(run([], None, registry=Registry([detector]))),
+                         ["contract/four"])
+        copies = [HarnessDetector(d.id, d.rule, d.event, d.fn, None) for d in common.DETECTORS]
+        registry = Registry(copies)
+        self.assertEqual(sorted(d.id for d in copies), sorted(GENERIC))
+        self.assertEqual(sorted(run([bash("cat a.md")], None, registry=registry)),
+                         ["transcript-hygiene/whole-file-cat"])
+
+    # Covers: all seven declared `event` values are accepted, the five a consumer registers
+    # under among them, and any other is refused.
+    def test_the_event_kinds_a_consumer_registers_under(self):
+        self.assertTrue(set(CONSUMER_EVENTS) <= set(EVENT_VALUES))
+        with self.assertRaises(ValueError):
+            Registry([Detector("contract/ev", "contract", "tool-use", lambda e, c: [])])
+        for event in EVENT_VALUES:
+            with self.subTest(event=event):
+                registry = Registry([Detector("contract/ev", "contract", event,
+                                              lambda e, c: [])])
+                self.assertEqual(run([], None, registry=registry, strict=True), {})
+
+    # Covers: `common.DETECTORS` is exactly the six generic detectors, by id.
+    def test_the_shipped_detectors_are_the_six_generic_ones(self):
+        self.assertEqual(sorted(d.id for d in common.DETECTORS), list(GENERIC))
 
     # Covers: `opportunities`, set by keyword only, a callable over `(events, ctx)` returning
     # `(turn, tool_use_id, followed)` triples; `None` when not given; never called by `run()`;
@@ -415,6 +532,32 @@ class ShellTests(unittest.TestCase):
         self.assertIn(SUB_PLACEHOLDER, [t for p in pipelines("echo $(date)") for s in p
                                         for t in s])
 
+    # Covers: `pipelines(command)` as a list of pipelines, each a list of segments, each a
+    # list of tokens, `[]` for an unterminated quote; `operands(segment)` dropping flags
+    # and a redirect target; `strip_heredocs(command)` returning `(text, bodies)`.
+    def test_the_shell_helpers_return_the_nested_shapes(self):
+        self.assertEqual(pipelines("cat a | head -20"), [[["cat", "a"], ["head", "-20"]]])
+        self.assertEqual(pipelines("cd x && git status"), [[["cd", "x"]], [["git", "status"]]])
+        self.assertEqual(pipelines("git status\ngit diff"),
+                         [[["git", "status"]], [["git", "diff"]]])
+        self.assertEqual(pipelines("echo 'unterminated"), [])
+        self.assertEqual(operands(["cat", "-n", "a.txt", ">", "b.txt"]), ["a.txt"])
+        text, bodies = strip_heredocs("cat > a <<EOF\nline one\nline two\nEOF\nls")
+        self.assertEqual(bodies, ["line one\nline two"])
+        self.assertNotIn("line one", text)
+
+    # Covers: `Parsed.skipped` and `Parsed.pipelines`; a command over `MAX_COMMAND` is
+    # skipped, never tokenized, and still carries its event.
+    def test_parsed_skipped_and_pipelines(self):
+        parsed = analyse([bash("cat a | head -20")]).bash[0]
+        self.assertIs(parsed.skipped, False)
+        self.assertEqual(parsed.pipelines, [[["cat", "a"], ["head", "-20"]]])
+        event = bash("cat " + "x" * MAX_COMMAND)
+        parsed = analyse([event]).bash[0]
+        self.assertIs(parsed.skipped, True)
+        self.assertEqual(parsed.pipelines, [])
+        self.assertIs(parsed.event, event)
+
 
 class DeclarativeTests(unittest.TestCase):
     # Covers: `declarative.load(path)` returning `(document, lines)`.
@@ -506,6 +649,49 @@ class ValidityTests(unittest.TestCase):
         self.assertIn("below floor", validity_table(scores, 1.01))
         self.assertNotIn("below floor", validity_table(scores, 0.0))
 
+    # Covers: `score_corpus` over a consumer's own corpus directory: `labels.yaml` with a
+    # top-level `version` and a key the scorer does not read, session and label `note`s,
+    # `fire` and `near` flow lists, and a file beside it that is not a session; the result
+    # passes through `scores_as_dict`, extended by the caller, into JSON.
+    def test_score_corpus_over_a_consumer_corpus(self):
+        from test_validity import cc_lines
+
+        labels = ("version: 1\n"
+                  "known_below_floor:\n"
+                  "  - detector: contract/none\n"
+                  "    floor: 0.9\n"
+                  "sessions:\n"
+                  "  - session: consumer.jsonl\n"
+                  "    note: one whole-file read and one ranged read\n"
+                  "    labels:\n"
+                  "      - at: \"1:tu-a\"\n"
+                  "        fire: [transcript-hygiene/whole-file-cat]\n"
+                  "        note: a lone cat\n"
+                  "      - at: \"1:tu-b\"\n"
+                  "        near: [transcript-hygiene/whole-file-cat]\n")
+        with tempfile.TemporaryDirectory() as directory:
+            os.mkdir(os.path.join(directory, "sessions"))
+            with open(os.path.join(directory, "labels.yaml"), "w", encoding="utf-8") as handle:
+                handle.write(labels)
+            with open(os.path.join(directory, "build_sessions.py"), "w",
+                      encoding="utf-8") as handle:
+                handle.write("# writes the sessions\n")
+            with open(os.path.join(directory, "sessions", "consumer.jsonl"), "w",
+                      encoding="utf-8") as handle:
+                handle.write("\n".join(cc_lines([("prompt", None),
+                                                  ("bash", ("tu-a", "cat a.txt")),
+                                                  ("bash", ("tu-b", "sed -n 1,5p b.txt"))]))
+                             + "\n")
+            ungated = [Detector(d.id, d.rule, d.event, d.fn, None) for d in common.DETECTORS]
+            scores = score_corpus(registry=Registry(ungated), directory=directory)
+        score = scores["transcript-hygiene/whole-file-cat"]
+        self.assertTrue(score.scored)
+        self.assertEqual((score.precision, score.recall), (1.0, 1.0))
+        data = scores_as_dict(scores, DEFAULT_FLOOR)
+        self.assertIsInstance(data, dict)
+        data.update({"failed": [], "stale": []})
+        self.assertEqual(json.loads(json.dumps(data))["below_floor"], [])
+
     # Covers: the 0.1.0 names `validity`, `report` and `report_data`.
     def test_validity_report_and_report_data(self):
         scores = validity(registry=Registry(common.DETECTORS), directory=None)
@@ -549,6 +735,43 @@ class SecretPatternsTests(unittest.TestCase):
         value = ast.literal_eval(found[0].value)
         self.assertEqual(value, common.SECRET_PATTERNS)
         self.assertTrue(value and all(isinstance(p, str) for p in value))
+
+    # Covers: every pattern in `SECRET_PATTERNS` compiles with `re.compile` as it stands.
+    def test_every_secret_pattern_compiles(self):
+        for pattern in common.SECRET_PATTERNS:
+            with self.subTest(pattern=pattern):
+                re.compile(pattern)
+
+
+def _flow_labelled(text):
+    """Every detector id in a `fire:` or `near:` flow list, read by pattern, not by YAML."""
+    found = set()
+    for match in re.finditer(r"\b(?:fire|near):\s*\[([^\]]*)\]", text):
+        found.update(part.strip() for part in match.group(1).split(",") if part.strip())
+    return found
+
+
+class ShippedLabelsTests(unittest.TestCase):
+    # Covers: the shipped `labels.yaml` writes every `fire` and `near` as a flow list, so a
+    # caller reading it by pattern, without a YAML parser, sees every labelled id.
+    def test_every_fire_and_near_is_a_flow_list(self):
+        path = os.path.join(ROOT, "ruleprobe", "corpus", "labels.yaml")
+        with open(path, encoding="utf-8") as handle:
+            text = handle.read()
+        block = re.compile(r"^[ \t]*(?:-[ \t]+)?(?:fire|near):\s*(?!\[)\S", re.M)
+        self.assertEqual(block.findall(text), [])
+        for bad in ("  - at: x\n    fire:\n      - a/b\n", "  - fire:\n      - a/b\n"):
+            with self.subTest(bad=bad):
+                self.assertTrue(block.findall(bad))
+        self.assertEqual(_flow_labelled("misfire: [a/b]\nnear: [c/d]\n"), {"c/d"})
+        document, _lines = declarative.load(path)
+        loaded = set()
+        for session in document["sessions"]:
+            for label in session.get("labels") or []:
+                for key in ("fire", "near"):
+                    loaded.update(label.get(key) or [])
+        self.assertEqual(_flow_labelled(text), loaded)
+        self.assertTrue(set(GENERIC) <= loaded)
 
 
 _PROBE = r"""
@@ -652,6 +875,16 @@ class WheelTests(unittest.TestCase):
         self.assertIn("ruleprobe/corpus/labels.yaml", names)
         self.assertTrue(any(n.startswith("ruleprobe/corpus/sessions/") for n in names))
         self.assertFalse([n for n in names if n.endswith((".so", ".pyd"))])
+
+    # Covers: the wheel carries `ruleprobe/detectors/common.py` as source, and
+    # `SECRET_PATTERNS` read out of that member by syntax tree, without importing, is the list.
+    def test_secret_patterns_read_from_the_wheel_member(self):
+        with zipfile.ZipFile(self.wheel) as archive:
+            source = archive.read("ruleprobe/detectors/common.py").decode("utf-8")
+        found = [ast.literal_eval(node.value) for node in ast.parse(source).body
+                 if isinstance(node, ast.Assign)
+                 and any(getattr(t, "id", "") == "SECRET_PATTERNS" for t in node.targets)]
+        self.assertEqual(found, [common.SECRET_PATTERNS])
 
     def unpack_corpus(self):
         target = os.path.join(self.tmp.name, "unpacked")
