@@ -65,8 +65,17 @@ def _tally(triples):
     An undecided triple counts in `undecided` alone, never as an opportunity not followed.
     A malformed result - a `turn` that is not an integer, a `tool_use_id` neither a string
     nor `None`, a `followed` not exactly a bool or `None`, or one `(turn, tool_use_id)`
-    point twice - raises `MalformedOpportunities`: it is the detector's error, never a guess
-    at what it meant.
+    point twice with a non-empty `tool_use_id` - raises `MalformedOpportunities`: it is the
+    detector's error, never a guess at what it meant.
+
+    A repeated id-less point - `(turn, None)`, or `(turn, "")`, the id a reader gives a tool
+    use its transcript left without one - is several opportunities, not a malformed result.
+    A tool use id names one event, so two triples for it count one event twice; an id-less
+    point names no event, and a compiled `order` gives one per event its `first` opens on
+    that is not a tool use with an id. The trade-off: an id-less repeat counts from any
+    producer, a turn-scoped `absent` or a hand-written callable included, so one that
+    wrongly repeats `(turn, None)` over-counts with no error. It is accepted because two
+    id-less points cannot be told apart, and refusing them refuses a correct `order`.
     """
     if triples is None or isinstance(triples, (str, bytes, dict)):
         raise MalformedOpportunities("opportunities returned %s, not a list of triples"
@@ -88,10 +97,11 @@ def _tally(triples):
         if tool_use_id is not None and not isinstance(tool_use_id, str):
             raise MalformedOpportunities("tool_use_id is %r, not a string or None"
                                          % (tool_use_id,))
-        if (turn, tool_use_id) in points:
-            raise MalformedOpportunities("the point (%r, %r) is repeated"
-                                         % (turn, tool_use_id))
-        points.add((turn, tool_use_id))
+        if tool_use_id:
+            if (turn, tool_use_id) in points:
+                raise MalformedOpportunities("the point (%r, %r) is repeated"
+                                             % (turn, tool_use_id))
+            points.add((turn, tool_use_id))
         if followed is None:
             tally["undecided"] += 1
         elif followed is True or followed is False:

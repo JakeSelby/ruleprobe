@@ -157,6 +157,11 @@ the policy.
   Subagent tool calls are now measured. A transcript that yields no events, from either runtime,
   is no longer a session: it is counted apart as holding none, so an empty file no longer adds to
   a share's denominator.
+- A compiled `order` detector whose `first` opens on events with no tool-use id, such as tool
+  results, messages or prompts, keeps its compliance; its opportunities were refused as
+  `MalformedOpportunities` when two such events fell in one turn
+  ([#91](https://github.com/JakeSelby/ruleprobe/issues/91)). A repeated point with no id now counts
+  once per occurrence, while a repeated point with an id is still refused.
 
 ## 0.1.0 (2026-09-22)
 

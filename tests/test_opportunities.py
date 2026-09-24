@@ -4,10 +4,13 @@
 An `absent` hit is an opportunity not followed and an `order` hit is a followed one, so over
 any event list `hits == opportunities - followed` for `absent` and `hits == followed` for
 `order`, where `opportunities` leaves out the undecided ones. The sessions are the labelled
-corpus, the fixture transcripts and every compiled detector's own `examples:` cases. The
-detectors are `common.yaml` and the `docs/rules` files, loaded by the package's own loaders,
-and the ones below; each one's polarity is read from its spec's `when`, so a new `order` or
-turn-scoped `absent` entry in either file is checked with no change here.
+corpus, the fixture transcripts, every compiled detector's own `examples:` cases, `UNDECIDED`
+(the undecided cases) and `NO_ID` (one turn holding several events whose opportunity points
+name no tool use id). The detectors are `common.yaml`, the `docs/rules` files and the
+shipped catalog, loaded by the package's own loaders, and the ones below; each one's polarity
+is read from its spec's `when`, so a new `order` or turn-scoped `absent` entry in any of them
+is checked with no change here. Each result also goes through `measure()`, the consumer the
+report reads, so a compiled detector whose output it refuses as malformed fails here too.
 
 The identity is the real guard for `absent` only. An `order` that recorded an undecided
 opportunity as not followed would still have hits equal to followed; the exact-triple cases
@@ -18,10 +21,12 @@ Run: python3 -m unittest discover -s tests
 import os
 import unittest
 
-from corpus import bash
-from ruleprobe import Registry, analyse, iter_sessions, run
+from corpus import bash, tool_result
+from ruleprobe import Registry, analyse, iter_sessions, measure, run
 from ruleprobe.declarative import load, parse, split_front_matter
-from ruleprobe.rules import _markdown, load_file, read_rule_file
+from ruleprobe.detectors import catalog
+from ruleprobe.events import Session
+from ruleprobe.rules import _CATALOG, _markdown, load_file, read_rule_file
 from ruleprobe.matchers import compile_detector
 from ruleprobe.shell import MAX_COMMAND
 from ruleprobe.validity import load_corpus
@@ -51,6 +56,10 @@ SPECS = [
                                           {"kind": "tool_use", "name": "Bash", "id": "tu2",
                                            "input": {"command": "git log"}}],
                                "note": "the push nobody could read"}]}},
+    # Opens on events that carry no tool use id: several in one turn give one `(turn, None)`
+    # point each, which `measure()` must count rather than refuse.
+    {"id": "o/result-then-bash", "event": "session", "when": {"order": {
+        "first": {"kind": "tool_result"}, "then": {"tool": "Bash"}, "within": 2}}},
     {"id": "a/push-per-turn", "event": "session", "when": {"absent": {
         "of": {"git": {"subcommand": "push"}}, "scope": "turn"}}},
     {"id": "a/test-per-turn", "event": "session", "when": {"absent": {
@@ -67,6 +76,12 @@ UNDECIDED = [
     [bash(UNREAD, turn=1, id="tu1"), bash("git log", turn=1, id="tu2")],
     [bash("git commit -m a", turn=1, id="tu1"), bash(UNREAD, turn=1, id="tu2")],
     [bash(TOO_LONG, turn=1, id="tu1"), bash("ls", turn=2, id="tu2")],
+]
+
+#: Sessions in which one turn holds several events that carry no tool use id.
+NO_ID = [
+    [tool_result("a", tool_use_id="x1"), tool_result("b", tool_use_id="x2"),
+     bash("ls", id="tu3")],
 ]
 
 
@@ -93,8 +108,9 @@ def entries(path):
 
 
 def compiled():
-    """`(polarity or None, detector)` for every detector: the ones above, and each file's,
-    compiled by the loader that reads that file and paired with its entry by position."""
+    """`(polarity or None, detector)` for every detector: the ones above, each file's,
+    compiled by the loader that reads that file, and the shipped catalog's, as the rules
+    module compiled it; each paired with its entry by position."""
     out = [(polarity(spec), compile_detector(dict(spec, rule=spec["id"].split("/")[0]),
                                              "<test>")) for spec in SPECS]
     rules_dir = os.path.join(ROOT, "docs", "rules")
@@ -105,6 +121,9 @@ def compiled():
         specs = entries(path)
         assert len(specs) == len(detectors), path
         out.extend((polarity(spec), detector) for spec, detector in zip(specs, detectors))
+    assert len(catalog.ENTRIES) == len(_CATALOG)
+    out.extend((polarity(entry["detector"]), detector)
+               for entry, (_pattern, detector) in zip(catalog.ENTRIES, _CATALOG))
     return out
 
 
@@ -124,7 +143,7 @@ def sessions(detectors):
         if detector.examples:
             out.extend(events for _note, events in
                        list(detector.examples.fire) + list(detector.examples.skip))
-    return out + UNDECIDED
+    return out + UNDECIDED + NO_ID
 
 
 class IdentityTests(unittest.TestCase):
@@ -153,6 +172,12 @@ class IdentityTests(unittest.TestCase):
                         self.assertEqual(hits, opportunities - followed)
                     else:
                         self.assertEqual(hits, followed)
+                    row = measure(Session("s%d" % index, "", "", events, ""),
+                                  stances(detector), registry=one)
+                    self.assertEqual(row.get("rules_errors"), None)
+                    self.assertEqual(row["compliance"], {detector.id: {
+                        "opportunities": opportunities, "followed": followed,
+                        "undecided": undecided}})
                     for i, n in enumerate((opportunities, followed, undecided, hits)):
                         totals[kind][i] += n
         for kind, (opportunities, followed, undecided, hits) in totals.items():
