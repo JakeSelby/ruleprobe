@@ -13,7 +13,7 @@ import re
 
 from ..events import hit, input_of, text_of
 from ..registry import Detector
-from ..shell import git_calls, has_redirect, operands, split_assignments
+from ..shell import git_calls, git_config, has_redirect, operands, split_assignments
 
 # The `aws_secret` literal is split so a repository that greps its own tracked files for
 # secret shapes does not trip over this line.
@@ -273,6 +273,9 @@ FIND_FILTERS = frozenset((
 # An environment assignment that turns a hook off, and the two commands that read one.
 _HOOK_BYPASS_ASSIGNMENTS = ("SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG")
 _HOOK_AWARE = frozenset(("git", "pre-commit"))
+#: A `-c` value that turns hooks off: an empty `core.hooksPath` or `/dev/null`. Git config
+#: keys are case-insensitive; `common.yaml` and the catalog carry the same pattern.
+_HOOKS_OFF = re.compile(r"(?i)^core\.hookspath=(?:/dev/null)?$")
 
 
 def whole_file_cat(events, ctx):
@@ -312,9 +315,13 @@ def unfiltered_find(events, ctx):
 def no_verify(events, ctx):
     """A commit or push that walks past the repository's own hooks.
 
-    Three spellings: the flag, a `-c core.hooksPath=` override, and the environment
-    assignment pre-commit reads. Each has to be the command being run, never a string
-    argument to another one, which is what the parse into segments buys.
+    Three spellings: the flag, a `-c core.hooksPath=` override that turns hooks off, and
+    the environment assignment pre-commit reads. Each has to be the command being run, never
+    a string argument to another one, which is what the parse into segments buys.
+
+    Only an empty hooks path or `/dev/null` counts. Pointing it at a tracked directory such
+    as `.githooks` is how a repository turns its own hooks on, so every hook ran; a path
+    that happens to be empty on disk goes uncounted, the under-count the format prefers.
     """
     hits = []
     for parsed in ctx.bash:
@@ -322,7 +329,7 @@ def no_verify(events, ctx):
         for segment, sub, args in git_calls(parsed, ("commit", "push")):
             if "--no-verify" in args or (sub == "commit" and "-n" in args):
                 flagged = True
-            if any(t.startswith("core.hooksPath=") for t in segment):
+            if any(_HOOKS_OFF.search(v) for v in git_config(segment)):
                 flagged = True
         for pipe in parsed.pipelines:
             for segment in pipe:

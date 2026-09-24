@@ -356,7 +356,8 @@ class HostileInputTests(unittest.TestCase):
     LIMIT = 5.0
     #: Every key a catalog entry may hold a regular expression under: its binding pattern,
     #: and each matcher key `ruleprobe.matchers` compiles as one.
-    KEYS = ("pattern", "regex", "arg_regex", "message_regex", "program", "first_operand")
+    KEYS = ("pattern", "regex", "arg_regex", "config_regex", "message_regex", "program",
+            "first_operand")
 
     def regexes(self, value, found):
         if isinstance(value, dict):

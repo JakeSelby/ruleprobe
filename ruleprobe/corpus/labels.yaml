@@ -135,6 +135,9 @@ sessions:
       - at: "4:tu-w6"
         near: [verification/no-verify]
         note: an amend with no bypass
+      - at: "4:tu-w7"
+        near: [verification/no-verify]
+        note: the hooks path pointed at the repository's own hooks, which turns them on
 
   - session: secrets-writes.jsonl
     note: six credentials written to disk, then six ways of not writing one

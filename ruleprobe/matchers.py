@@ -30,9 +30,11 @@ The matchers, by the shape they read:
   `--cwd`, `-C`, `--prefix`, `--dir`, `-f` or `--file` given as the next word (`test` in
   `make -C src test`, and not in `yarn --cwd test install`).
 - `git` - `subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`,
-  `message_regex`: a `git` call, with its flags and `-C`/`-c` options already stepped over.
-  `arg_regex` is searched in each parsed argument after the subcommand on its own, so a
-  pattern never sees a neighbouring argument or segment. `message_regex` is searched in the
+  `config_regex`, `message_regex`: a `git` call, with its flags and `-C`/`-c` options
+  already stepped over. `arg_regex` is searched in each parsed argument after the subcommand
+  on its own, so a pattern never sees a neighbouring argument or segment. `config_regex` is
+  searched in the value of each `-c` given before the subcommand, on its own
+  (`core.hooksPath=` in `git -c core.hooksPath= commit`). `message_regex` is searched in the
   call's first message - the value of its first `-m`, `-m<text>`, `--message`,
   `--message=<text>`, or of an `m` behind a cluster of the valueless `-a`, `-e`, `-i`, `-n`,
   `-o`, `-p`, `-q`, `-s`, `-v` and `-z` (`-am`, `-sm`, `-amfoo`); a call with none has no
@@ -119,7 +121,8 @@ from collections import namedtuple
 from .declarative import DeclarativeError
 from .events import hit, input_of, text_of
 from .registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, Detector, register_compiler
-from .shell import MARKER_RE, SUB_PLACEHOLDER, git_calls, has_redirect, operands, split_assignments
+from .shell import (MARKER_RE, SUB_PLACEHOLDER, git_calls, git_config, has_redirect, operands,
+                    split_assignments)
 
 __all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
            "compile_matcher", "is_undecided"]
@@ -542,7 +545,7 @@ def _m_command(value, where, owner, key):
 def _m_git(value, where, owner, key):
     value = _allowed(_mapping(value, where, owner, key, "git"),
                      ("subcommand", "args_any", "args_none", "token_prefix", "arg_regex",
-                      "message_regex"), where, owner, key, "git")
+                      "config_regex", "message_regex"), where, owner, key, "git")
     subs = tuple(_strings(value.get("subcommand"), where, value, "subcommand",
                           "git subcommand"))
     if not subs:
@@ -554,6 +557,7 @@ def _m_git(value, where, owner, key):
     prefixes = _strings(value.get("token_prefix"), where, value, "token_prefix",
                         "git token_prefix")
     arg_regexes = _regexes(value.get("arg_regex"), where, value, "arg_regex")
+    config_regexes = _regexes(value.get("config_regex"), where, value, "config_regex")
     message_regexes = _regexes(value.get("message_regex"), where, value, "message_regex")
 
     def match(event, env):
@@ -573,6 +577,9 @@ def _m_git(value, where, owner, key):
             if prefixes and not any(t.startswith(p) for t in segment for p in prefixes):
                 continue
             if arg_regexes and not any(rx.search(arg) for arg in args for rx in arg_regexes):
+                continue
+            if config_regexes and not any(rx.search(v) for v in git_config(segment)
+                                          for rx in config_regexes):
                 continue
             if message_regexes:
                 message = _git_message(args)

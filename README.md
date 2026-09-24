@@ -282,7 +282,8 @@ can never fire.
 The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `path_glob`,
 `contains`, `equals`, `exists`), `command` (`name`, `starts_with`, `contains`, `none_of`,
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`, `program`, `first_operand`),
-`git` (`subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`, `message_regex`),
+`git` (`subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`, `config_regex`,
+`message_regex`),
 `env` (`name`, `command`), `text` (`source`, `regex`, `contains`), `message` (`role`,
 `final`, `regex`, `contains`), `kind`, and the three session matchers `order`, `absent` and
 `change`. `ruleprobe/matchers.py` documents each in one line. The shipped six in

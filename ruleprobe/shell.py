@@ -523,6 +523,17 @@ def git_calls(parsed, subcommands):
                 yield segment, rest[i], rest[i + 1:]
 
 
+def git_config(segment):
+    """The value of every `-c` given to `git` in one segment before its subcommand."""
+    words = split_assignments(segment)[1][1:]
+    values, i = [], 0
+    while i < len(words) and words[i].startswith("-"):
+        if words[i] == "-c" and i + 1 < len(words):
+            values.append(words[i + 1])
+        i += 2 if words[i] in ("-C", "-c") else 1
+    return values
+
+
 # --- the parsed view ---------------------------------------------------------------
 
 

@@ -143,13 +143,13 @@ ENTRIES = (
             "rule": "verification",
             "event": "tool_use",
             "description": "The shipped detector, written as data: a commit or push past the "
-                           "hooks by flag, hooksPath override or pre-commit's SKIP.",
+                           "hooks by flag, a hooksPath of nothing or pre-commit's SKIP.",
             "when": {
                 "any": [
                     {"git": {"subcommand": ["commit", "push"], "args_any": ["--no-verify"]}},
                     {"git": {"subcommand": ["commit"], "args_any": ["-n"]}},
                     {"git": {"subcommand": ["commit", "push"],
-                             "token_prefix": "core.hooksPath="}},
+                             "config_regex": r"(?i)^core\.hookspath=(?:/dev/null)?$"}},
                     {"env": {"name": ["SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG"],
                              "command": ["git", "pre-commit"]}},
                 ],
@@ -159,12 +159,16 @@ ENTRIES = (
                     {"bash": "git commit --no-verify -m 'fix: typo'"},
                     {"bash": "git commit -n -m 'fix: typo'", "note": "the short flag"},
                     {"bash": "SKIP=ruff git commit -m 'fix: typo'"},
+                    {"bash": "git -c core.hooksPath=/dev/null commit -m 'fix: typo'",
+                     "note": "the hooks path pointed at nothing"},
                 ],
                 "skip": [
                     {"bash": "git commit -m 'fix: typo'", "note": "the hooks ran"},
                     {"bash": "git log -n 5", "note": "-n on another subcommand"},
                     {"bash": "grep -rn -- --no-verify docs",
                      "note": "the flag as text, not passed to git"},
+                    {"bash": "git -c core.hooksPath=.githooks commit -m 'fix: typo'",
+                     "note": "the repository's own hooks turned on, not off"},
                 ],
             },
         },
