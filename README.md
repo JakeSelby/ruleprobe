@@ -427,6 +427,9 @@ Writing a detector in Python:
 ```python
 Detector(id, rule, event, fn, gate)       # positional; a subclass may add __slots__ = ()
 fn(events, ctx)                           # -> [(turn, tool_use_id), ...]
+Detector(..., opportunities=count)        # keyword only; count(events, ctx) ->
+                                          # [(turn, tool_use_id, followed), ...], followed
+                                          # True, False or None when undecided
 ctx.events, ctx.bash, ctx.finals          # a Context: every event, each Bash call as a
                                           # Parsed(.event .command .heredocs), final messages
 hit(event); hit(event, tool_use_id=False) # -> (turn, tool_use_id or None)

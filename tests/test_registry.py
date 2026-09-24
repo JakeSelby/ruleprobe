@@ -52,6 +52,33 @@ class DetectorTests(unittest.TestCase):
                                      registry=registry))
 
 
+class OpportunitiesAttributeTests(unittest.TestCase):
+    def test_five_positional_arguments_leave_opportunities_unset(self):
+        detector = Detector("a/b", "a", "session", always, ("commits", None))
+        self.assertIsNone(detector.opportunities)
+        self.assertIsNone(detector.examples)
+        self.assertEqual(run([bash("ls")], {"commits": "on"},
+                             registry=Registry([detector]))["a/b"][0].turn, 1)
+
+    def test_opportunities_is_set_by_keyword_only(self):
+        def found(events, ctx):
+            return [(1, None, True)]
+
+        detector = Detector("a/b", "a", "session", never, None, None, opportunities=found)
+        self.assertIs(detector.opportunities, found)
+        with self.assertRaises(TypeError):
+            Detector("a/b", "a", "session", never, None, None, found)
+
+    def test_run_neither_calls_nor_returns_opportunities(self):
+        def boom(events, ctx):
+            raise AssertionError("run() called opportunities")
+
+        detector = Detector("a/b", "a", "session", always, opportunities=boom)
+        self.assertEqual([tuple(h) for h in run([bash("ls")], registry=Registry([detector]),
+                                                 strict=True)["a/b"]],
+                         [("a/b", 1, None)])
+
+
 class RegistryTests(unittest.TestCase):
     def test_a_registered_detector_is_found_by_id(self):
         registry = Registry()

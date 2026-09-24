@@ -39,17 +39,24 @@ class Detector(object):
     - `examples` - optional, an `Examples(fire, skip)` of minimal cases the detector says
       it should and should not fire on, scored by `ruleprobe.validity`. A declarative
       detector fills this from its `examples:` block; `None` means nobody said.
+    - `opportunities` - optional and keyword-only, a callable over `(events, ctx)` returning
+      `[(turn, tool_use_id, followed), ...]`: each point at which the rule applied, and
+      whether it was followed - `True`, `False`, or `None` when that could not be decided.
+      It travels beside `fn` rather than inside its return, so `fn` keeps its shape. A
+      declarative `order`, or `absent` with `scope: turn`, fills it; `None` means the
+      detector counts hits only.
     """
 
-    __slots__ = ("id", "rule", "event", "fn", "gate", "examples")
+    __slots__ = ("id", "rule", "event", "fn", "gate", "examples", "opportunities")
 
-    def __init__(self, id, rule, event, fn, gate=None, examples=None):
+    def __init__(self, id, rule, event, fn, gate=None, examples=None, *, opportunities=None):
         self.id = id
         self.rule = rule
         self.event = event
         self.fn = fn
         self.gate = gate
         self.examples = examples
+        self.opportunities = opportunities
 
     def enabled(self, stances):
         if self.gate is None:
