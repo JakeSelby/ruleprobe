@@ -116,14 +116,23 @@ measure.
 
 The binding under-counts on purpose. A section matching none, or more than one, stays
 unmeasured, and the coverage block names the entries when it matched several. A pattern
-never reaches across a clause break (`;`, `,`, `:`, ` - `, a dash), except the comma of its
-own contrast ("use uv, not pip"), and a sentence carrying an exception or a permission -
-except, unless, other than, but, however, allowed, fine, okay, ok - binds nothing, so "Never
-force-push except to main" is left unmeasured rather than read as its opposite. A file with no
-heading, or none of whose sections is a rule, binds as one unit by its whole text. A catalog
-detector joins the report only when a rule binds it, a detector of your own with a catalog
-id replaces it, `ruleprobe corpus` scores every entry, and `ruleprobe detectors` lists every
-entry marked `catalog`.
+never reaches across a clause break (`;`, `,`, `:`, ` - `, ` -- `, a dash), except the comma
+of its own contrast ("use uv, not pip"), and a rule carrying an exception, a condition or a
+permission in any sentence, its heading included - except (excepted, exception), unless,
+other than, apart from, excluding, without, but, however, allowed, fine, okay, ok, if, when
+- binds nothing, so "Never force-push to main. Hotfixes excepted." is left unmeasured rather
+than read as a rule it is not. `only` is not a marker: it intensifies as often as it
+narrows. A catalog detector joins the report only when a rule binds it, a detector of your
+own with a catalog id replaces it, `ruleprobe corpus` scores every entry, and
+`ruleprobe detectors` lists every entry marked `catalog`.
+
+One place it over-counts, knowingly. A file with no heading, or none of whose sections is a
+rule, is one rule and binds by its whole text, so one matching sentence marks the whole file
+measured, whatever else it asks; the measured share counts it as one measured rule.
+
+A catalog entry measures the shape it names and no more. "Never commit secrets" binds
+`secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
+inline into a file or a command is not what it counts.
 
 Any other rule takes no Python either: write a detector beside it as data. This is a real
 run over the example transcript and the example rules in this repository, so it is
@@ -264,14 +273,15 @@ can never fire.
 
 The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `path_glob`,
 `contains`, `equals`, `exists`), `command` (`name`, `starts_with`, `contains`, `none_of`,
-`arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`), `git` (`subcommand`,
-`args_any`, `args_none`, `token_prefix`, `arg_regex`, `message_regex`), `env` (`name`, `command`), `text` (`source`,
-`regex`, `contains`), `message` (`role`, `final`, `regex`, `contains`), `kind`, and the three
-session matchers `order`, `absent` and `change`. `ruleprobe/matchers.py` documents each in
-one line. The shipped six in `ruleprobe/detectors/common.yaml` use ten of them - `tool`,
-`arg`, `command`, `git`, `env`, `text`, `kind`, `change`, `any` and `all` - because that is
-what those six observables need; `message`, `order`, `absent` and `not` are exercised by the
-examples on this page and in `tests/`, not by a shipped detector.
+`arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`, `program`, `first_operand`),
+`git` (`subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`, `message_regex`),
+`env` (`name`, `command`), `text` (`source`, `regex`, `contains`), `message` (`role`,
+`final`, `regex`, `contains`), `kind`, and the three session matchers `order`, `absent` and
+`change`. `ruleprobe/matchers.py` documents each in one line. The shipped six in
+`ruleprobe/detectors/common.yaml` use ten of them - `tool`, `arg`, `command`, `git`, `env`,
+`text`, `kind`, `change`, `any` and `all` - because that is what those six observables need;
+`message`, `order`, `absent` and `not` are exercised by the examples on this page and in
+`tests/`, not by a shipped detector.
 
 Three rules about the format worth knowing before you hit them. Every key inside one
 `command` block is read against the *same* pipeline segment, so two constraints on one
@@ -425,8 +435,8 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
 commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
-git-safety/force-push-default             6    6    6    0    0   1.00    1.00   1.00
-package-manager/pip-install               3    3    3    0    0   1.00    1.00   1.00
+git-safety/force-push-default             6    7    6    0    0   1.00    1.00   1.00
+package-manager/pip-install               4    4    4    0    0   1.00    1.00   1.00
 secrets/secret-file-add                   4    8    4    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
 testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
@@ -434,11 +444,13 @@ transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00  
 transcript-hygiene/whole-file-cat         7    9    7    0    0   1.00    1.00   1.00
 verification/no-verify                    9    9    9    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    59   76   59    0    0   1.00    1.00   1.00  floor 0.90
+total                                    60   78   60    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors are scored over the corpus, and each catalog entry by its own
-`examples:`; an entry restating a shipped detector adds its examples to that detector's row.
+`examples:`; an entry restating a shipped detector adds its examples to that detector's row,
+whose `source` in `--json` stays `corpus`. A row the corpus does not score at all is the
+examples' alone, and says `examples`.
 
 `pos` and `neg` are what the labels asked for; `tp`, `fp` and `fn` are what happened.
 `ruleprobe corpus --floor 0.9` exits non-zero when a scored detector falls under the floor,

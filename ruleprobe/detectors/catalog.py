@@ -12,7 +12,7 @@ Each entry is a mapping of three keys:
 - `shape` - the rule shape, in words, for a person reading the catalog.
 - `pattern` - one regular expression, anchored with `^`, matched case-insensitively at the
   start of each sentence of a rule's text. It never crosses a clause break (`;`, `,`, `:`,
-  ` - `, an en or em dash): where it needs words between two it spans a run of characters
+  ` - `, ` -- `, an en or em dash): where it needs words between two it spans a run of characters
   that stops at one, never `.*`, and the one comma it may cross is the one opening its own
   contrast, as in "use uv, not pip".
 - `detector` - a declarative detector entry, as a detector file holds one, carrying an
@@ -40,37 +40,44 @@ ENTRIES = (
     {
         "shape": "Run the tests before finishing",
         "pattern": r"^(?:always\s+)?run\s+(?:the\s+|all\s+(?:the\s+)?|your\s+)?(?:unit\s+)?"
-                   r"tests?\b(?:(?!\s-\s)[^;,:–—])*?\bbefore\b",
+                   r"tests?\b(?:(?!\s--?\s)[^;,:–—])*?\bbefore\b",
         "detector": {
             "id": "testing/test-after-change",
             "rule": "testing",
             "event": "session",
             "description": "Compliance, not violations: unlike every other catalog row, a hit "
-                           "is a rule followed. Each Write or Edit opens an opportunity, and a "
+                           "is a rule followed. Each Write, Edit, MultiEdit or Codex "
+                           "`apply_patch` opens an opportunity, and a "
                            "hit is one a later test run followed, so the detector's "
                            "opportunities, and how many were followed, say how often a change "
-                           "was tested. A test run is a pipeline segment opening with a known "
-                           "runner, a runner under `.venv/bin`, `node_modules/.bin` or "
-                           "`vendor/bin`, or a common wrapper around one; a runner behind an "
-                           "environment assignment or a flag, under another path or through "
-                           "another wrapper is missed.",
+                           "was tested. A test run is a pipeline segment whose program, by "
+                           "basename and past any `NAME=value`, is a known runner, or a build "
+                           "tool whose first operand is its test target (`go test`, "
+                           "`mvn -q test`), or a common wrapper around one. Missed: a runner "
+                           "behind `env` or `sudo`, a wrapper not listed, and a build tool "
+                           "whose option takes a value before the target (`make -C dir "
+                           "test`).",
             "when": {
                 "order": {
-                    "first": {"tool": {"name": ["Write", "Edit", "MultiEdit"]}},
+                    "first": {"tool": {"name": ["Write", "Edit", "MultiEdit",
+                                                "apply_patch"]}},
                     "then": {
                         "any": [
-                            {"command": {"name": [
-                                "pytest", "py.test", "tox", "nox", "jest", "vitest", "mocha",
-                                "rspec", "phpunit", "ctest", ".venv/bin/pytest",
-                                "venv/bin/pytest", "node_modules/.bin/jest",
-                                "./node_modules/.bin/jest", "node_modules/.bin/vitest",
-                                "./node_modules/.bin/vitest", "vendor/bin/phpunit",
-                                "./vendor/bin/phpunit", "bin/rspec"]}},
-                            {"command": {"starts_with": ["python", "-m", "pytest"]}},
-                            {"command": {"starts_with": ["python3", "-m", "pytest"]}},
-                            {"command": {"starts_with": ["python", "-m", "unittest"]}},
-                            {"command": {"starts_with": ["python3", "-m", "unittest"]}},
-                            {"command": {"starts_with": [".venv/bin/python", "-m", "pytest"]}},
+                            {"command": {"program": r"pytest|py\.test|tox|nox|jest|vitest|"
+                                                    r"mocha|rspec|phpunit|ctest"}},
+                            {"command": {"program": r"python[0-9.]*",
+                                         "first_operand": r"pytest|unittest"}},
+                            {"command": {"program": r"npm|pnpm|yarn|bun",
+                                         "first_operand": r"test"}},
+                            {"command": {"program": r"go|cargo", "first_operand": r"test"}},
+                            {"command": {"program": r"g?make", "first_operand": r"test|check"}},
+                            {"command": {"program": r"mvnw?|gradlew?",
+                                         "first_operand": r"test"}},
+                            {"command": {"starts_with": ["npm", "t"]}},
+                            {"command": {"starts_with": ["npm", "run", "test"]}},
+                            {"command": {"starts_with": ["pnpm", "run", "test"]}},
+                            {"command": {"starts_with": ["yarn", "run", "test"]}},
+                            {"command": {"starts_with": ["bun", "run", "test"]}},
                             {"command": {"starts_with": ["uv", "run", "pytest"]}},
                             {"command": {"starts_with": ["uv", "run", "tox"]}},
                             {"command": {"starts_with": ["uv", "run", "python", "-m",
@@ -85,23 +92,6 @@ ENTRIES = (
                             {"command": {"starts_with": ["npx", "vitest"]}},
                             {"command": {"starts_with": ["npx", "mocha"]}},
                             {"command": {"starts_with": ["bundle", "exec", "rspec"]}},
-                            {"command": {"starts_with": ["npm", "test"]}},
-                            {"command": {"starts_with": ["npm", "t"]}},
-                            {"command": {"starts_with": ["npm", "run", "test"]}},
-                            {"command": {"starts_with": ["pnpm", "test"]}},
-                            {"command": {"starts_with": ["pnpm", "run", "test"]}},
-                            {"command": {"starts_with": ["yarn", "test"]}},
-                            {"command": {"starts_with": ["yarn", "run", "test"]}},
-                            {"command": {"starts_with": ["bun", "test"]}},
-                            {"command": {"starts_with": ["bun", "run", "test"]}},
-                            {"command": {"starts_with": ["go", "test"]}},
-                            {"command": {"starts_with": ["cargo", "test"]}},
-                            {"command": {"starts_with": ["make", "test"]}},
-                            {"command": {"starts_with": ["make", "check"]}},
-                            {"command": {"starts_with": ["mvn", "test"]}},
-                            {"command": {"starts_with": ["./mvnw", "test"]}},
-                            {"command": {"starts_with": ["gradle", "test"]}},
-                            {"command": {"starts_with": ["./gradlew", "test"]}},
                         ],
                     },
                     "within": 100000,
@@ -177,7 +167,7 @@ ENTRIES = (
     {
         "shape": "Never force-push the default branch",
         "pattern": r"^(?:never|do\s+not|don't)\s+force[- ]?push\b"
-                   r"(?:(?!\s-\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
+                   r"(?:(?!\s--?\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
         "detector": {
             "id": "git-safety/force-push-default",
             "rule": "git-safety",
@@ -187,8 +177,9 @@ ENTRIES = (
                            "`--force` flag beside the branch as `main`, `HEAD:main`, "
                            "`main:main` or `refs/heads/main` in either place. A bare "
                            "`git push -f` from the default branch names none, and is missed; "
-                           "so are `feature:main`, a cluster such as `-uf`, and a branch "
-                           "given through a variable.",
+                           "so are `feature:main`, a cluster such as `-uf`, `--force` beside "
+                           "`--force-if-includes`, and a branch given through a variable. "
+                           "`--force-if-includes` alone forces nothing and is no hit.",
             "when": {
                 "any": [
                     {"git": {"subcommand": "push",
@@ -204,7 +195,15 @@ ENTRIES = (
                                           "HEAD:refs/heads/main", "HEAD:refs/heads/master",
                                           "main:main", "master:master",
                                           "main:refs/heads/main", "master:refs/heads/master"],
-                             "token_prefix": ["-f", "--force"]}},
+                             "token_prefix": ["-f", "--force-with-lease"]}},
+                    {"git": {"subcommand": "push",
+                             "args_any": ["main", "master", "HEAD:main", "HEAD:master",
+                                          "refs/heads/main", "refs/heads/master",
+                                          "HEAD:refs/heads/main", "HEAD:refs/heads/master",
+                                          "main:main", "master:master",
+                                          "main:refs/heads/main", "master:refs/heads/master"],
+                             "token_prefix": "--force",
+                             "args_none": ["--force-if-includes"]}},
                 ],
             },
             "examples": {
@@ -222,6 +221,8 @@ ENTRIES = (
                     {"bash": "git push origin main", "note": "not forced"},
                     {"bash": "git push --force origin feature-parser",
                      "note": "forced, to another branch"},
+                    {"bash": "git push --force-if-includes origin main",
+                     "note": "a safety flag that forces nothing on its own"},
                     {"bash": "git push -f origin feature:main-backup",
                      "note": "forced, to a branch whose name opens with main"},
                     {"bash": "git push -f origin feature && git push origin main",
@@ -236,17 +237,20 @@ ENTRIES = (
     {
         "shape": "Use the named package manager, not another: uv, not pip",
         "pattern": r"^(?:always\s+)?(?:use|install\s+(?:\w+\s+)?with)\s+uv\b"
-                   r"(?:(?!\s-\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
+                   r"(?:(?!\s--?\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
                    r"rather\s+than)\s+(?:with\s+)?(?:sudo\s+)?pip\b",
         "detector": {
             "id": "package-manager/pip-install",
             "rule": "package-manager",
             "event": "tool_use",
-            "description": "An install through pip rather than uv.",
+            "description": "An install through pip rather than uv: `pip install` by any "
+                           "path or version suffix (`.venv/bin/pip3.12 -q install`), "
+                           "`python -m pip install`, or `sudo pip install`. Missed: `-m pip` "
+                           "through a python by path or with a flag before `-m`, and pip "
+                           "behind `env` or another wrapper.",
             "when": {
                 "any": [
-                    {"command": {"starts_with": ["pip", "install"]}},
-                    {"command": {"starts_with": ["pip3", "install"]}},
+                    {"command": {"program": r"pip[0-9.]*", "first_operand": r"install"}},
                     {"command": {"starts_with": ["python", "-m", "pip", "install"]}},
                     {"command": {"starts_with": ["python3", "-m", "pip", "install"]}},
                     {"command": {"starts_with": ["sudo", "pip", "install"]}},
@@ -258,11 +262,14 @@ ENTRIES = (
                     {"bash": "pip install ruff"},
                     {"bash": "python3 -m pip install -r requirements.txt"},
                     {"bash": "sudo pip install ruff"},
+                    {"bash": ".venv/bin/pip3.12 -q install ruff",
+                     "note": "by path, version and a leading flag"},
                 ],
                 "skip": [
                     {"bash": "uv pip install ruff", "note": "pip's interface, through uv"},
                     {"bash": "pip --version", "note": "pip, installing nothing"},
                     {"bash": "pipx install ruff", "note": "another tool"},
+                    {"bash": "pip uninstall ruff", "note": "the opposite of an install"},
                 ],
             },
         },
@@ -304,14 +311,17 @@ ENTRIES = (
             "rule": "commits",
             "event": "tool_use",
             "description": "A `git commit` whose first message, read from the parsed "
-                           "arguments (`-m`, `--message`, `-am`, `-sm`), does not open "
-                           "`type:` or `type(scope):`. A message from a variable, a "
-                           "substitution, a heredoc, a file or the editor is not read, a merge "
-                           "or revert subject is passed over, and any word before the colon "
-                           "reads as a type, so `WIP: stuff` passes: an under-count.",
+                           "arguments (`-m`, `--message`, `-am`, `-sm`, `-amtext`), does not "
+                           "open `type:` or `type(scope):`. A message from a variable, a "
+                           "substitution, a heredoc, a file or the editor is not read, and "
+                           "nor is one holding a `$` at all, a single-quoted literal one "
+                           "included, since the parse keeps no quoting. Merge and Revert "
+                           "subjects and git's own `fixup! `, `squash! ` and `amend! ` are "
+                           "passed over, and any word before the colon reads as a type, so "
+                           "`WIP: stuff` passes. Each is an under-count.",
             "when": {
                 "git": {"subcommand": "commit",
-                        "message_regex": r"^(?=\S)(?!(?:Merge|Revert)\s)"
+                        "message_regex": r"^(?=\S)(?!(?:Merge|Revert)\s|(?:fixup|squash|amend)! )"
                                          r"(?![A-Za-z][\w-]*(?:\([^)\n]*\))?!?: \S)"},
             },
             "examples": {
@@ -350,7 +360,9 @@ ENTRIES = (
             "description": "A `git add` naming a secret-shaped path: `.env`, `.env.local`, "
                            "`.env.prod` or `.env.production`, a private SSH key, a `.key`, a "
                            "`.pem` named for a key and not a public one, a `.p12` or `.pfx`, "
-                           "or `credentials.json`. `git add -A` names none, and is missed.",
+                           "or `credentials.json`. `git add -A` names none, and is missed. A "
+                           "rule such as \"Never commit secrets\" is measured only by these "
+                           "adds, never by a secret written inline into a file or a command.",
             "when": {
                 "git": {"subcommand": "add",
                         "arg_regex": r"^(?:[^/]*/)*(?:\.env(?:\.(?:local|production|prod))?|"

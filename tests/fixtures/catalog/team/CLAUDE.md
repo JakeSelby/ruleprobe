@@ -7,7 +7,7 @@ Run the tests before you say a change works.
 
 ## Hooks
 
-Never skip the pre-commit hooks. When a hook fails, fix what it found.
+Never skip the pre-commit hooks. Fix what a failing hook found.
 
 ## Pushing
 

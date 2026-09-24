@@ -25,11 +25,14 @@ entry's anchored pattern, and the rule binds the one entry that matches, as a me
 whose source is `catalog`. None matching, or more than one, leaves it unmeasured and listed,
 so the gap is visible rather than assumed; under-counting is the point, since a loose binding
 would lift the measured share on rules nobody would recognise. For the same reason a pattern
-never spans a clause break (see `ruleprobe.detectors.catalog`), and a sentence carrying an
-exception or a permission - except, unless, other than, but, however, allowed, fine, okay,
-ok - binds nothing, so "Never force-push except to main" is no force-push rule. A rule bound
-in its front matter is `own`, and so is a catalog-bound one whose detector id a detector
-file of the user's replaced.
+never spans a clause break (see `ruleprobe.detectors.catalog`), and a rule carrying an
+exception, a condition or a permission in any sentence, heading included, binds nothing:
+except (excepted, exception), unless, other than, apart from, excluding, without, but,
+however, allowed, fine, okay, ok, if, when. So "Never force-push to main. Hotfixes excepted."
+is no force-push rule. `only` is left out, since it intensifies as often as it narrows
+("use only uv"), and so are `instead` and `rather than`, which the pip shape itself uses. A
+rule bound in its front matter is `own`,
+and so is a catalog-bound one whose detector id a detector file of the user's replaced.
 """
 import os
 import re
@@ -40,8 +43,8 @@ from .detectors import catalog as _catalog
 from .matchers import compile_detector, schema_version_error
 from .registry import DEFAULT, Registry, fold_map
 
-__all__ = ["Bundle", "Finding", "RuleEntry", "discover", "load_bundle", "load_file",
-           "load_rules_dir"]
+__all__ = ["Bundle", "Finding", "RuleEntry", "catalog_detectors", "discover", "load_bundle",
+           "load_file", "load_rules_dir"]
 
 #: The sidecar a repository keeps its own detectors in, in preference order.
 REPO_DIR = ".ruleprobe"
@@ -89,7 +92,8 @@ def _is_catalog(detector):
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
-    __slots__ = ("detectors", "rules", "findings", "sources", "_binding", "_labelled")
+    __slots__ = ("detectors", "rules", "findings", "sources", "_binding", "_labelled",
+                 "_labelled_items")
 
     def __init__(self, detectors=None, rules=None, findings=None, sources=None):
         self.detectors = list(detectors or [])
@@ -99,6 +103,7 @@ class Bundle(object):
         # The rules as bound, and as the last `registry()` call labelled them.
         self._binding = None
         self._labelled = None
+        self._labelled_items = None
 
     def registry(self, base=DEFAULT, whole_catalog=False):
         """`base`, then the catalog detectors a rule bound, then everything loaded. A
@@ -117,23 +122,34 @@ class Bundle(object):
         and one whose id it does not hold at all is unmeasured. The labels are computed from
         the rules as `load_bundle` bound them, never from an earlier call's, so each call
         answers for its own `base` alone; before any call, `rules`, `coverage()` and
-        `summary()` read as `load_bundle` left them. Rules assigned after a call are taken as
-        a new binding."""
+        `summary()` read as `load_bundle` left them. Rules added, removed or assigned after a
+        call are read with the ones that call labelled put back as they were bound, and a
+        catalog detector no rule binds any more does not join."""
         registry = base.copy() if base is not None else Registry()
         fold = registry.fold_map()
-        if self._labelled is None or self.rules != self._labelled:
+        if self._labelled is None:
             self._binding = list(self.rules)
+        elif self.rules is not self._labelled or len(self.rules) != len(self._binding) \
+                or any(a is not b for a, b in zip(self.rules, self._labelled_items)):
+            # Changed since the last call, in place or replaced: an entry that call
+            # labelled goes back to how it was bound, and any other is taken as bound.
+            originals = dict((id(labelled), bound) for labelled, bound
+                             in zip(self._labelled_items, self._binding))
+            self._binding = [originals.get(id(entry), entry) for entry in self.rules]
         bound = set(did for entry in self._binding if entry.source == "catalog"
                     for did in entry.detectors)
         for detector in catalog_detectors(fold):
             if (whole_catalog or detector.id in bound) and detector.id not in registry:
                 registry.add(detector)
         for detector in self.detectors:
-            if _is_catalog(detector) and (detector.id in registry or detector.id in fold):
+            # A catalog detector `load_bundle` put here for a rule joins only while a rule
+            # still binds it.
+            if _is_catalog(detector) and (detector.id in registry or detector.id in fold
+                                          or not (whole_catalog or detector.id in bound)):
                 continue
             registry.add(detector)
-        self.rules = _sourced(self._binding, registry, fold)
-        self._labelled = list(self.rules)
+        self.rules = self._labelled = _sourced(self._binding, registry, fold)
+        self._labelled_items = list(self.rules)
         return registry
 
     def counts(self):
@@ -513,7 +529,8 @@ def _file_prose(body):
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 #: An exception or a permission: a sentence carrying one binds nothing, since "never X
 #: except Y" and "X is fine" are not the rule a catalog pattern reads.
-_EXCEPTION = re.compile(r"\b(?:except|unless|other\s+than|but|however|allowed|fine|okay|ok)\b",
+_EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|unless|other\s+than|apart\s+from|"
+                        r"excluding|without|but|however|allowed|fine|okay|ok|if|when)\b",
                         re.IGNORECASE)
 _MARKUP = re.compile(r"[`*]+")
 _TASK = re.compile(r"^\[[ xX]\][ \t]+")
@@ -534,12 +551,28 @@ def _sentences(heading, paragraphs):
     return out
 
 
+def _exception(heading, paragraphs):
+    """The first exception, condition or permission word (`_EXCEPTION`) in any sentence of
+    the rule, heading included, or None. A rule carrying one binds nothing: "Never
+    force-push to main. Hotfixes excepted." is not the rule the pattern reads."""
+    for sentence in _sentences(heading, paragraphs):
+        found = _EXCEPTION.search(sentence)
+        if found:
+            return found.group(0).lower()
+    return None
+
+
 def _catalog_matches(heading, paragraphs):
-    """The catalog detectors whose pattern matches the start of any sentence of the rule
-    that carries no exception or permission (`_EXCEPTION`), in catalog order. Binding reads
-    text and nothing else, against the shipped fold map: a consumer's own renames are
+    """The catalog detectors whose pattern matches the start of any sentence of the rule,
+    in catalog order, or none when the rule carries an exception (`_exception`). Binding
+    reads text and nothing else, against the shipped fold map: a consumer's own renames are
     applied when `Bundle.registry` is built."""
-    sentences = [s for s in _sentences(heading, paragraphs) if not _EXCEPTION.search(s)]
+    if _exception(heading, paragraphs):
+        return []
+    return _pattern_matches(_sentences(heading, paragraphs))
+
+
+def _pattern_matches(sentences):
     retired = fold_map()
     return [detector for pattern, detector in _CATALOG if detector.id not in retired
             and any(pattern.match(sentence) for sentence in sentences)]
@@ -549,6 +582,10 @@ def _bind(rule, path, heading, paragraphs, reason=""):
     """A rule's entry: measured and catalog-bound when exactly one entry matches, else
     unmeasured, with the entries named when more than one did, or else with `reason`."""
     matched = _catalog_matches(heading, paragraphs)
+    marker = _exception(heading, paragraphs)
+    if marker and _pattern_matches(_sentences(heading, paragraphs)):
+        return RuleEntry(rule, path, "unmeasured",
+                         "a catalog shape with an exception or condition (%s)" % marker, [])
     if len(matched) == 1:
         return RuleEntry(rule, path, "measured", "", [matched[0].id], "catalog")
     if matched:

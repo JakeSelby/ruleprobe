@@ -58,6 +58,22 @@ class MessageRegexTests(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertEqual(count(self.WHEN, command), 1)
 
+    def test_every_valueless_flag_may_lead_the_m_and_text_may_follow_it(self):
+        for flag in "aeinopqsvz":
+            with self.subTest(flag=flag):
+                self.assertEqual(count(self.WHEN, "git commit -%sm wip" % flag), 1)
+        self.assertEqual(count(self.WHEN, "git commit -amwip"), 1)
+        self.assertEqual(count(self.WHEN, "git commit -amfeat"), 0)
+        self.assertEqual(count(self.WHEN, "git commit -Fm wip"), 0)
+
+    def test_a_heredoc_marker_inside_a_message_is_unreadable(self):
+        command = "git commit -m \"wip $(cat <<'EOF'\nbody\nEOF\n)\""
+        self.assertEqual(count(self.WHEN, command), 0)
+
+    def test_a_single_quoted_dollar_is_an_unread_message(self):
+        # A stated under-count: the parse keeps no quoting, so `$` is unreadable anywhere.
+        self.assertEqual(count(self.WHEN, "git commit -m 'wip costs $5'"), 0)
+
     def test_a_later_message_or_a_quoted_flag_is_not_the_subject(self):
         for command in ("git commit -m 'feat: x' -m wip", "git commit --author='A -m wip'",
                         "git commit --author='A' -m 'feat: -m wip'",

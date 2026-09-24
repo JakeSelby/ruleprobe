@@ -23,7 +23,7 @@ import unittest
 import zipfile
 from unittest import mock
 
-from corpus import bash, say, tool_use
+from corpus import bash, say, tool_result, tool_use
 from ruleprobe import DEFAULT, Registry, analyse, contract_data, run
 from ruleprobe.cli import main
 from ruleprobe.declarative import load
@@ -152,15 +152,17 @@ class DetectorTests(unittest.TestCase):
                         "npm test", "yarn run test", "bun test", "python -m pytest",
                         "mvn test", "./gradlew test", "bundle exec rspec", "go test ./...",
                         "cargo test", "make check", "cd api; make test",
-                        "npm test && echo 'a; b' | tee log"):
+                        "npm test && echo 'a; b' | tee log", "mvn -q test", "CI=1 pytest",
+                        "/usr/local/bin/pytest -x", "~/.local/bin/tox -e py39",
+                        "node_modules/.bin/vitest run", "python3.12 -m pytest"):
             with self.subTest(command=command):
                 self.assertTrue(self.hits("testing/test-after-change",
                                           [edit, bash(command, turn=2, id="t1")]))
-        # The last two are stated under-counts: a flag before the target, and a runner
-        # behind an environment assignment.
+        # The last two are stated under-counts: a runner behind `env`, and a build tool
+        # option taking a value before the target.
         for command in ("pytest-watch --help", "npm install", "go build ./...",
-                        "make lint", "echo pytest", "echo 'x; pytest'", "mvn -q test",
-                        "CI=1 pytest"):
+                        "make lint", "echo pytest", "echo 'x; pytest'", "cat bin/pytest",
+                        "python3 pytest_plugin.py", "env CI=1 pytest", "make -C api test"):
             with self.subTest(command=command):
                 self.assertEqual(self.hits("testing/test-after-change",
                                            [edit, bash(command, turn=2, id="t1")]), [])
@@ -223,6 +225,50 @@ class DetectorTests(unittest.TestCase):
                 self.assertEqual(self.hits("git-safety/force-push-default",
                                            [bash(command)]), [])
 
+    def test_force_if_includes_alone_is_not_a_force_push(self):
+        did = "git-safety/force-push-default"
+        self.assertEqual(self.hits(did, [bash("git push --force-if-includes origin main")]), [])
+        self.assertTrue(self.hits(did, [bash(
+            "git push --force-with-lease --force-if-includes origin main")]))
+        self.assertTrue(self.hits(did, [bash("git push --force origin main")]))
+
+    def test_pip_is_read_by_basename_version_and_past_leading_flags(self):
+        did = "package-manager/pip-install"
+        for command in (".venv/bin/pip install ruff", "pip3.12 install ruff",
+                        "pip -q install ruff", "PIP_INDEX_URL=x pip install ruff",
+                        "/usr/bin/pip3 install --user ruff"):
+            with self.subTest(command=command):
+                self.assertTrue(self.hits(did, [bash(command)]))
+        for command in ("pip uninstall ruff", "pipx install ruff", "pip download ruff",
+                        "uv pip install ruff", "pip-compile requirements.in"):
+            with self.subTest(command=command):
+                self.assertEqual(self.hits(did, [bash(command)]), [])
+
+    def test_a_codex_apply_patch_opens_an_opportunity(self):
+        rollout = os.path.join(tempfile.mkdtemp(prefix="ruleprobe-"), "rollout-x.jsonl")
+        self.addCleanup(shutil.rmtree, os.path.dirname(rollout), True)
+        lines = [
+            {"type": "session_meta", "payload": {"id": "rollout-x", "cwd": "/tmp/r"}},
+            {"type": "turn_context", "payload": {"model": "gpt-5-codex"}},
+            {"type": "response_item", "payload": {
+                "type": "custom_tool_call", "call_id": "c1", "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Update File: a.py\n*** End Patch\n"}},
+            {"type": "response_item", "payload": {
+                "type": "custom_tool_call_output", "call_id": "c1", "output": "Done"}},
+            {"type": "response_item", "payload": {
+                "type": "function_call", "call_id": "c2", "name": "exec_command",
+                "arguments": json.dumps({"cmd": "pytest -q"})}},
+            {"type": "response_item", "payload": {
+                "type": "custom_tool_call", "call_id": "c3", "name": "apply_patch",
+                "input": "*** Begin Patch\n*** Update File: b.py\n*** End Patch\n"}}]
+        with open(rollout, "w") as handle:
+            handle.write("\n".join(json.dumps(line) for line in lines) + "\n")
+        from ruleprobe.readers import codex
+        events = codex.read(rollout).events
+        detector = dict((d.id, d) for _p, d in _CATALOG)["testing/test-after-change"]
+        self.assertEqual(detector.opportunities(events, analyse(events)),
+                         [(1, "c1", True), (1, "c3", False)])
+
     def test_a_public_key_pem_is_not_secret_shaped(self):
         for path in ("certs/public-key.pem", "keys/pubkey.pem", "tls/key.pub.pem"):
             with self.subTest(path=path):
@@ -239,6 +285,12 @@ class DetectorTests(unittest.TestCase):
         self.assertTrue(self.hits(did, [bash("git commit -sm 'fixed it'")]))
         self.assertTrue(self.hits(did, [bash("git commit -asm 'fixed it'")]))
         self.assertEqual(self.hits(did, [bash("git commit -sm 'fix: it'")]), [])
+        for subject in ("fixup! feat: x", "squash! fix: y", "amend! docs: z"):
+            with self.subTest(subject=subject):
+                self.assertEqual(self.hits(did, [bash("git commit -m '%s'" % subject)]), [])
+        self.assertTrue(self.hits(did, [bash("git commit -m 'fixup the parser'")]))
+        self.assertTrue(self.hits(did, [bash("git commit -pm 'fixed it'")]))
+        self.assertTrue(self.hits(did, [bash("git commit -amfixed")]))
         # A stated under-count: any word before the colon reads as a type.
         self.assertEqual(self.hits(did, [bash("git commit -m 'WIP: stuff'")]), [])
 
@@ -257,9 +309,14 @@ HOSTILE = ("cd a && " * 2000 + "echo done",
 
 
 class HostileInputTests(unittest.TestCase):
-    """Every catalog pattern and detector stays linear on inputs built to defeat it."""
+    """Every catalog pattern and detector stays linear on inputs built to defeat it.
 
-    LIMIT = 0.5
+    The limit is generous so a slow shared runner never fails it; the inputs are sized so
+    exponential or quadratic behaviour would take far longer - 2,000 segments where 12
+    took 9 s on the old prefix, and 10,000 edits among 40,000 events, where the walk per
+    edit took 4.3 s at a quarter of that size."""
+
+    LIMIT = 5.0
 
     def regexes(self, value, found):
         if isinstance(value, dict):
@@ -288,6 +345,7 @@ class HostileInputTests(unittest.TestCase):
     def test_every_catalog_detector_is_fast_on_hostile_commands(self):
         edits = [tool_use("Edit", {"file_path": "src/app.py"}, turn=1, id="e%d" % i)
                  for i in range(100)]
+        self.assertEqual([detector.id for _pattern, detector in _CATALOG], IDS)
         for _pattern, detector in _CATALOG:
             for text in HOSTILE:
                 events = edits + [bash(text, turn=2, id="t1")]
@@ -296,6 +354,27 @@ class HostileInputTests(unittest.TestCase):
                 detector.fn(events, ctx)
                 elapsed = time.perf_counter() - started
                 self.assertLess(elapsed, self.LIMIT, "%s on %r" % (detector.id, text[:40]))
+
+    def test_every_catalog_detector_is_linear_in_a_long_session(self):
+        events = [tool_use("Edit", {"file_path": "src/app.py"}, turn=1, id="e%d" % i)
+                  for i in range(10000)]
+        for i in range(15000):
+            events.append(bash("cd a && ls -la src", turn=2, id="b%d" % i))
+            events.append(tool_result("ok", tool_use_id="b%d" % i, turn=2))
+        ctx = analyse(events)
+        for _pattern, detector in _CATALOG:
+            with self.subTest(detector=detector.id):
+                started = time.perf_counter()
+                detector.fn(events, ctx)
+                if detector.opportunities is not None:
+                    detector.opportunities(events, ctx)
+                self.assertLess(time.perf_counter() - started, self.LIMIT)
+
+    def test_every_pattern_is_covered_by_the_regex_check(self):
+        patterns = self.regexes(list(catalog.ENTRIES), [])
+        for entry in catalog.ENTRIES:
+            with self.subTest(shape=entry["shape"]):
+                self.assertIn(entry["pattern"], patterns)
 
     def test_no_pattern_spans_a_clause_with_a_wildcard(self):
         for entry in catalog.ENTRIES:
@@ -439,6 +518,28 @@ class BindingTests(Temp):
                      "Run the tests before you finish, however small the change."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
+
+    def test_an_exception_in_any_sentence_or_the_heading_unbinds_the_rule(self):
+        for text in ("# Pushing\n\nNever force-push to main.\n\n"
+                     "Except for release branches, rebase freely.\n",
+                     "# Except for release branches\n\nNever force-push to main.\n",
+                     "# Pushing\n\nNever force-push to main. Hotfixes excepted.\n",
+                     "# Pushing\n\nNever force-push to main without approval.\n",
+                     "# Pushing\n\nNever force-push to main when others share it.\n",
+                     "# Pushing\n\nNever force-push to main, apart from the first push.\n",
+                     "# Pushing\n\nNever force-push to main if CI is red.\n",
+                     "# Pushing\n\nNever force-push anything excluding drafts to main.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.detectors, entry.source),
+                                 ("unmeasured", [], None))
+                self.assertIn("exception or condition", entry.reason)
+        [entry] = self.rules("# Pushing\n\nNever force-push to main. Rebase instead.\n").rules
+        self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
+
+    def test_a_double_dash_is_a_clause_break(self):
+        self.assertEqual(matched("Never force-push feature branches -- main is protected."), [])
+        self.assertEqual(matched("Use uv for scripts -- not pip."), [])
 
     def test_a_pattern_never_spans_a_clause_break(self):
         for text in ("Never force-push feature branches; main is protected.",
@@ -606,6 +707,52 @@ class RegistryTests(Temp):
         self.assertIn("not registered", after.reason)
         self.assertEqual(bundle.coverage()["measured"], 0)
         self.assertEqual(bundle.coverage()["catalog"], 0)
+
+    def test_the_rules_line_counts_a_catalog_bound_rule_as_measured(self):
+        bundle = self.rules("# Git\n\nNever force-push to main.\n\n# Style\n\nKeep it tidy.\n")
+        self.assertEqual(bundle.summary(relative_to=self.dir).splitlines()[0],
+                         "rules: 1 measured, 0 dark, 1 unmeasured (50% measured)")
+        bundle.registry()
+        self.assertEqual(bundle.summary(relative_to=self.dir).splitlines()[0],
+                         "rules: 1 measured, 0 dark, 1 unmeasured (50% measured)")
+
+    def test_one_matching_sentence_marks_a_heading_less_file_measured(self):
+        # The stated over-count of whole-text binding: the rest of the file rides along.
+        bundle = self.rules("Never force-push to main.\n\nKeep functions short. Name "
+                            "things well. Write docs.\n")
+        self.assertEqual(bundle.summary(relative_to=self.dir).splitlines()[0],
+                         "rules: 1 measured, 0 dark, 0 unmeasured (100% measured)")
+
+    def test_an_entry_appended_after_a_call_keeps_the_earlier_rules_relabellable(self):
+        did = "git-safety/force-push-default"
+        plugin = DEFAULT.copy()
+        plugin.add(Detector(did, "git-safety", "tool_use", lambda events, ctx: []))
+        bundle = self.rules("# Git\n\nNever force-push to main.\n")
+        bundle.registry(plugin)
+        self.assertEqual(bundle.rules[0].source, "own")
+        bundle.rules.append(RuleEntry("extra", "extra.md", "unmeasured", "", []))
+        bundle.registry()
+        self.assertEqual([e.source for e in bundle.rules], ["catalog", None])
+        self.assertEqual(bundle.rules[1].rule, "extra")
+        self.assertEqual(bundle.coverage()["catalog"], 1)
+
+    def test_a_catalog_detector_no_rule_binds_any_more_does_not_join(self):
+        did = "git-safety/force-push-default"
+        bundle = self.rules("# Git\n\nNever force-push to main.\n")
+        self.assertIn(did, bundle.registry())
+        del bundle.rules[0]
+        self.assertNotIn(did, bundle.registry())
+        bundle.rules = []
+        self.assertNotIn(did, bundle.registry())
+        self.assertIn(did, bundle.registry(whole_catalog=True))
+
+    def test_catalog_detectors_is_exported_but_not_in_the_readme_api(self):
+        import ruleprobe.rules as rules_module
+        self.assertIn("catalog_detectors", rules_module.__all__)
+        with open(os.path.join(ROOT, "README.md"), encoding="utf-8") as handle:
+            readme = handle.read()
+        api = readme[readme.index("## The public API"):readme.index("## Development")]
+        self.assertNotIn("catalog_detectors", api)
 
     def run_cli(self, *argv):
         out = io.StringIO()
