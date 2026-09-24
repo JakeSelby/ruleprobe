@@ -142,6 +142,15 @@ the policy.
   needs a sixth ([#49](https://github.com/JakeSelby/ruleprobe/issues/49)). An `order` detector now
   evaluates in one pass over the session, with the same hits and opportunities.
 
+### Fixed
+
+- A Claude Code subagent's own transcript is read as its own session, keyed
+  `<parent session id>/<agent id>`, where every line of it was skipped as another agent's work and
+  the file read as an empty session ([#86](https://github.com/JakeSelby/ruleprobe/issues/86)).
+  Subagent tool calls are now measured. A transcript that yields no events, from either runtime,
+  is no longer a session: it is counted apart as holding none, so an empty file no longer adds to
+  a share's denominator.
+
 ## 0.1.0 (2026-09-22)
 
 ### Added
