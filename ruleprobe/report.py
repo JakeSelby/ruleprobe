@@ -11,9 +11,15 @@ denominator: counting it as a session with no hit would turn a gap into a clean 
 
 A detector that raised costs its own denominator and nobody else's. The row stays measured,
 and the session is subtracted from the denominator of the detector named in `rules_errors`
-alone - one broken third-party detector may not erase every other detector's evidence. The
-older singular spelling, `rules_error`, names no detector, so a row carrying it is still
-dropped whole: an error nobody attributed cannot be attributed here either.
+alone - one broken third-party detector may not erase every other detector's evidence. An
+entry tagged `"hook": "opportunities"` is the exception: its `fn` ran, so it touches no hit
+figure and costs the detector only its `compliance` entry. The older singular spelling,
+`rules_error`, names no detector, so a row carrying it is still dropped whole: an error
+nobody attributed cannot be attributed here either.
+
+A row may also carry `compliance`, detector id to `{"opportunities", "followed",
+"undecided"}`, for each enabled detector that defines `opportunities`; `measure()` below
+says how it is counted.
 
 Every row and every `report_data` result carries `schema_version`, an integer; a row without
 one was written by 0.1 and is schema 1. A row whose version this package does not know - one
@@ -21,7 +27,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, run
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -40,10 +46,88 @@ def _validity_note(scores, detector_id):
     return validity_note(scores, detector_id)
 
 
+class MalformedOpportunities(TypeError):
+    """An `opportunities` result that is not `(turn, tool_use_id, followed)` triples with
+    `followed` exactly `True`, `False` or `None`. Its name is what a row records, so a
+    malformed result reads apart from a callable that raised a `TypeError` of its own."""
+
+
+def _tally(triples):
+    """`{"opportunities", "followed", "undecided"}` from one `opportunities` result.
+
+    An undecided triple counts in `undecided` alone, never as an opportunity not followed.
+    A malformed result - a `turn` that is not an integer, a `tool_use_id` neither a string
+    nor `None`, a `followed` not exactly a bool or `None`, or one `(turn, tool_use_id)`
+    point twice - raises `MalformedOpportunities`: it is the detector's error, never a guess
+    at what it meant.
+    """
+    if triples is None or isinstance(triples, (str, bytes, dict)):
+        raise MalformedOpportunities("opportunities returned %s, not a list of triples"
+                                     % type(triples).__name__)
+    try:
+        triples = iter(triples)
+    except TypeError:
+        raise MalformedOpportunities("opportunities returned %s, not a list of triples"
+                                     % type(triples).__name__)
+    tally = {"opportunities": 0, "followed": 0, "undecided": 0}
+    points = set()
+    for triple in triples:
+        if not isinstance(triple, (tuple, list)) or len(triple) != 3:
+            raise MalformedOpportunities("not a (turn, tool_use_id, followed) triple: %r"
+                                         % (triple,))
+        turn, tool_use_id, followed = triple
+        if isinstance(turn, bool) or not isinstance(turn, int):
+            raise MalformedOpportunities("turn is %r, not an integer" % (turn,))
+        if tool_use_id is not None and not isinstance(tool_use_id, str):
+            raise MalformedOpportunities("tool_use_id is %r, not a string or None"
+                                         % (tool_use_id,))
+        if (turn, tool_use_id) in points:
+            raise MalformedOpportunities("the point (%r, %r) is repeated"
+                                         % (turn, tool_use_id))
+        points.add((turn, tool_use_id))
+        if followed is None:
+            tally["undecided"] += 1
+        elif followed is True or followed is False:
+            tally["opportunities"] += 1
+            tally["followed"] += followed
+        else:
+            raise MalformedOpportunities("followed is %r, not True, False or None"
+                                         % (followed,))
+    return tally
+
+
+def _compliance(ctx, enabled, errors):
+    """`{detector_id: tally}` for every detector in `enabled` that defines `opportunities`,
+    or `None` when none does. Each is handed the `ctx` its `fn` was, so a compiled detector
+    counts from the evaluation that gave its hits. A raise or a malformed result is appended
+    to `errors` against that detector, tagged `"hook": "opportunities"` so the report's hit
+    figures ignore it, and the detector gets no entry."""
+    defining = sorted((d for d in enabled if getattr(d, "opportunities", None) is not None),
+                      key=lambda d: d.id)
+    if ctx is None or not defining:
+        return None
+    out = {}
+    for detector in defining:
+        try:
+            out[detector.id] = _tally(detector.opportunities(ctx.events, ctx))
+        except Exception as exc:
+            errors.append({"detector": detector.id, "error": type(exc).__name__,
+                           "hook": "opportunities"})
+    return out
+
+
 def measure(session, stances=None, registry=DEFAULT):
-    """One report row from one `Session`: its identity and its hit counts."""
+    """One report row from one `Session`: its identity, its hit counts and its compliance.
+
+    `compliance` maps each enabled detector that defines `opportunities` to
+    `{"opportunities": N, "followed": M, "undecided": U}`, where `N` leaves the undecided
+    out. The key is absent when no enabled detector defines one, and when the session could
+    not be analysed at all (`rules_errors` then names `analysis`). `opportunities` is called
+    here rather than in `run()`, so `run()` and its return keep their shape.
+    """
     errors = []
-    hits = run(session.events, stances, registry=registry, errors=errors)
+    hits, ctx, enabled = _run(session.events, stances, registry, False, errors)
+    compliance = _compliance(ctx, enabled, errors)
     row = {
         "schema_version": SCHEMA_VERSION,
         "session_id": session.id,
@@ -54,6 +138,8 @@ def measure(session, stances=None, registry=DEFAULT):
         "stances": dict(stances or {}),
         "rules": dict((did, len(found)) for did, found in hits.items()),
     }
+    if compliance is not None:
+        row["compliance"] = compliance
     if errors:
         row["rules_errors"] = errors
     return row
@@ -98,10 +184,14 @@ def errored_detectors(row, renamed):
 
     A session an entry names is subtracted from that detector's denominator and from no
     other's, which is the whole difference between "this detector has no evidence here" and
-    "this session has no evidence at all". `renamed` is read as `folded_rules` reads it.
+    "this session has no evidence at all". An entry tagged `"hook": "opportunities"` is not
+    counted: it costs the detector its compliance entry, not its hits. `renamed` is read as
+    `folded_rules` reads it.
     """
     out = set()
     for entry in (row.get("rules_errors") or ()):
+        if isinstance(entry, dict) and entry.get("hook") == "opportunities":
+            continue  # its `fn` ran, so its hits stand; only its compliance entry is gone
         if isinstance(entry, dict) and isinstance(entry.get("detector"), str):
             out.add(_current(entry["detector"], renamed))
     return out

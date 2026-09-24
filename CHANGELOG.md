@@ -68,6 +68,11 @@ one; the README's Versioning section states the policy.
   undecided ([#41](https://github.com/JakeSelby/ruleprobe/issues/41)). Declarative `order` and
   turn-scoped `absent` detectors set it from the same evaluation as their hits; the positional
   constructor and `fn(events, ctx)` are unchanged.
+- A row from `measure()` carries `compliance`: for each enabled detector that defines
+  opportunities, `{"opportunities": N, "followed": M, "undecided": U}`, with undecided points
+  counted apart and never as not followed ([#42](https://github.com/JakeSelby/ruleprobe/issues/42)).
+  A raising or malformed `opportunities` is recorded in `rules_errors` tagged `"hook":
+  "opportunities"` and costs only that detector's compliance, not its hit figures.
 
 ### Changed
 
