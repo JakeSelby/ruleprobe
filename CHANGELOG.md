@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.2.0 (2026-09-24)
+
 ### Breaking
 
 0.2.0 versions the contract and takes its break here, in seven parts: the undecided rule for `not`
@@ -195,6 +197,25 @@ the policy.
   ([#88](https://github.com/JakeSelby/ruleprobe/issues/88)). Every git detector now steps over
   git's valued global options (`--git-dir`, `--work-tree`, `--namespace` and the like), so
   `git --git-dir .git push --force` is read as the push it is.
+
+### Measured
+
+- Field precision on real hits, from one developer's own Claude Code and Codex transcripts: up to
+  50 hits sampled per detector, every hit when fewer, each judged right or wrong against the
+  detector's own claim ([#53](https://github.com/JakeSelby/ruleprobe/issues/53)). The judgment was
+  delegated to agents, not made by hand, and it measures precision, not what a detector misses.
+  Each figure is right over judged; hits the evidence could not decide are counted apart as unsure.
+  `cache-hygiene/compact` 1.00 (22 of 22), `cache-hygiene/model-switch` 1.00 (42 of 42, 1 unsure),
+  `transcript-hygiene/whole-file-cat` 0.98 (94 of 96, 2 unsure), `commits/non-conventional-subject`
+  1.00 (48 of 48, 2 unsure), `git-safety/force-push-default` 1.00 (3 of 3),
+  `package-manager/pip-install` 1.00 (18 of 18) and `testing/test-after-change` 1.00 (44 of 44,
+  6 unsure). `secrets/secret-in-write` scored 0.05 (1 of 21, 2 unsure): it fires on writing about
+  secrets, and its redesign follows 0.2.0. Before this release's fixes (#88, #98),
+  `verification/no-verify` scored 1 of 6 and `transcript-hygiene/unfiltered-find` 0 of 1, every
+  hit it had; `secrets/secret-file-add` had no hits to judge.
+- Time to first answer: `ruleprobe report --rules <dir> --since 30` over a synthetic reference
+  volume of 500 sessions and about 200 MB finished in under 1.5 s on one laptop, the worst run on
+  the Python 3.9 floor ([#50](https://github.com/JakeSelby/ruleprobe/issues/50)).
 
 ## 0.1.0 (2026-09-22)
 

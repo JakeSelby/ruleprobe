@@ -2,13 +2,13 @@
 bmad_id: "RP-SP002"
 type: "spike"
 title: "spike(validity): field precision per shipped detector from hand-sampled hits"
-lifecycle: "active"
+lifecycle: "completed"
 provenance: "authored"
 github_issue: 53
 github_issue_url: "https://github.com/JakeSelby/ruleprobe/issues/53"
 parent_bmad_id: "RP-E006"
 parent_github_issue: 25
-updated: "2026-09-23"
+updated: "2026-09-24"
 ---
 
 # RP-SP002 — spike(validity): field precision per shipped detector from hand-sampled hits
@@ -16,7 +16,7 @@ updated: "2026-09-23"
 <!-- bmad-sync:begin -->
 - **GitHub issue:** [#53](https://github.com/JakeSelby/ruleprobe/issues/53)
 - **Primary parent:** [RP-E006](https://github.com/JakeSelby/ruleprobe/issues/25)
-- **State:** active
+- **State:** completed
 
 The issue carries the summary, discussion and acceptance evidence; this file carries the design.
 
