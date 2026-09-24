@@ -205,7 +205,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E005.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -231,7 +231,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E007.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -582,7 +582,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-SP002.md",
       "parent_bmad_id": "RP-E006",
       "parent_github_number": 25,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -764,7 +764,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B007.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -777,7 +777,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B008.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     },
     {
@@ -790,7 +790,7 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-B005.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
-      "lifecycle": "active",
+      "lifecycle": "completed",
       "provenance": "authored"
     }
   ]
