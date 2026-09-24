@@ -97,7 +97,7 @@ sessions:
         note: escaped parentheses group the name predicates, and head bounds the output
 
   - session: verification-hooks.jsonl
-    note: six hook bypasses, then the gate and a clean push
+    note: six hook bypasses, then the gate, a clean push and commits that ran every hook
     labels:
       - at: "1:tu-v1"
         fire: [verification/no-verify]

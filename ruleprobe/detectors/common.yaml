@@ -76,7 +76,7 @@ detectors:
             args_any: ["-n"]
         - git:
             subcommand: [commit, push]
-            config_regex: "(?i)^core\\.hookspath=(?:/dev/null)?$"
+            config_regex: "^(?i:core\\.hookspath)=(?:/dev/null)?$"
         - env:
             name: [SKIP, PRE_COMMIT_ALLOW_NO_CONFIG]
             command: [git, pre-commit]

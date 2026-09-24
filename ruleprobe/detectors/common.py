@@ -273,9 +273,10 @@ FIND_FILTERS = frozenset((
 # An environment assignment that turns a hook off, and the two commands that read one.
 _HOOK_BYPASS_ASSIGNMENTS = ("SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG")
 _HOOK_AWARE = frozenset(("git", "pre-commit"))
-#: A `-c` value that turns hooks off: an empty `core.hooksPath` or `/dev/null`. Git config
-#: keys are case-insensitive; `common.yaml` and the catalog carry the same pattern.
-_HOOKS_OFF = re.compile(r"(?i)^core\.hookspath=(?:/dev/null)?$")
+#: A `-c` setting that turns hooks off: `core.hooksPath` empty or exactly `/dev/null`. The
+#: key is case-insensitive, as git's is; the value is not. `common.yaml` and the catalog
+#: carry the same pattern.
+_HOOKS_OFF = re.compile(r"^(?i:core\.hookspath)=(?:/dev/null)?$")
 
 
 def whole_file_cat(events, ctx):
@@ -319,9 +320,12 @@ def no_verify(events, ctx):
     the environment assignment pre-commit reads. Each has to be the command being run, never
     a string argument to another one, which is what the parse into segments buys.
 
-    Only an empty hooks path or `/dev/null` counts. Pointing it at a tracked directory such
-    as `.githooks` is how a repository turns its own hooks on, so every hook ran; a path
-    that happens to be empty on disk goes uncounted, the under-count the format prefers.
+    Only the effective `core.hooksPath`, the last `-c` given for it, counts, and only when
+    it is empty or exactly `/dev/null`. Pointing it at a tracked directory such as
+    `.githooks` is how a repository turns its own hooks on, so every hook ran. Any other
+    path goes uncounted, one that is missing or empty on disk included, as do settings given
+    by `--config-env` or the `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and
+    `GIT_CONFIG_VALUE_<n>` environment: under-counts, which the format prefers.
     """
     hits = []
     for parsed in ctx.bash:

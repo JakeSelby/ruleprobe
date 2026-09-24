@@ -30,11 +30,14 @@ The matchers, by the shape they read:
   `--cwd`, `-C`, `--prefix`, `--dir`, `-f` or `--file` given as the next word (`test` in
   `make -C src test`, and not in `yarn --cwd test install`).
 - `git` - `subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`,
-  `config_regex`, `message_regex`: a `git` call, with its flags and `-C`/`-c` options
-  already stepped over. `arg_regex` is searched in each parsed argument after the subcommand
-  on its own, so a pattern never sees a neighbouring argument or segment. `config_regex` is
-  searched in the value of each `-c` given before the subcommand, on its own
-  (`core.hooksPath=` in `git -c core.hooksPath= commit`). `message_regex` is searched in the
+  `config_regex`, `message_regex`: a `git` call, with its global options already stepped
+  over, the value of `-C`, `-c`, `--git-dir`, `--work-tree` and the like with them.
+  `arg_regex` is searched in each parsed argument after the subcommand on its own, so a
+  pattern never sees a neighbouring argument or segment. `config_regex` is searched in each
+  effective `-c` setting before the subcommand, the last one given for a key
+  (`core.hooksPath=` in `git -c core.hooksPath= commit`); a call where none matches and one
+  is unreadable is undecided, and `--config-env` and the `GIT_CONFIG_*` environment are not
+  read. `message_regex` is searched in the
   call's first message - the value of its first `-m`, `-m<text>`, `--message`,
   `--message=<text>`, or of an `m` behind a cluster of the valueless `-a`, `-e`, `-i`, `-n`,
   `-o`, `-p`, `-q`, `-s`, `-v` and `-z` (`-am`, `-sm`, `-amfoo`); a call with none has no
@@ -578,9 +581,12 @@ def _m_git(value, where, owner, key):
                 continue
             if arg_regexes and not any(rx.search(arg) for arg in args for rx in arg_regexes):
                 continue
-            if config_regexes and not any(rx.search(v) for v in git_config(segment)
-                                          for rx in config_regexes):
-                continue
+            if config_regexes:
+                values = git_config(segment)
+                if not any(rx.search(v) for v in values for rx in config_regexes):
+                    if any(_unreadable(v) for v in values):
+                        undecided = True
+                    continue
             if message_regexes:
                 message = _git_message(args)
                 if message is None:

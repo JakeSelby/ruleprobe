@@ -441,7 +441,7 @@ class HostileInputTests(unittest.TestCase):
                     with self.subTest(shape=entry["shape"], key=key):
                         self.assertIn(pattern, patterns)
         self.assertLessEqual({"pattern", "program", "first_operand", "arg_regex",
-                              "message_regex"}, seen)
+                              "config_regex", "message_regex"}, seen)
 
     def test_no_pattern_spans_a_clause_with_a_wildcard(self):
         for entry in catalog.ENTRIES:

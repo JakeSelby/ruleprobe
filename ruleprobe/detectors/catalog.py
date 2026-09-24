@@ -149,7 +149,7 @@ ENTRIES = (
                     {"git": {"subcommand": ["commit", "push"], "args_any": ["--no-verify"]}},
                     {"git": {"subcommand": ["commit"], "args_any": ["-n"]}},
                     {"git": {"subcommand": ["commit", "push"],
-                             "config_regex": r"(?i)^core\.hookspath=(?:/dev/null)?$"}},
+                             "config_regex": r"^(?i:core\.hookspath)=(?:/dev/null)?$"}},
                     {"env": {"name": ["SKIP", "PRE_COMMIT_ALLOW_NO_CONFIG"],
                              "command": ["git", "pre-commit"]}},
                 ],
