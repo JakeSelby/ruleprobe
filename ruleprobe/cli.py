@@ -219,7 +219,7 @@ def _gate_note(detector):
 def _catalog_note(detector, registry):
     """`catalog` for a registered detector a catalog entry supplies, or the shipped one an
     entry restates; `""` for one a plugin or a detector file replaced it with."""
-    for entry in catalog_detectors():
+    for entry in catalog_detectors(registry.fold_map()):
         if entry.id == detector.id:
             held = registry.get(detector.id)
             return "catalog" if held is entry or held is DEFAULT.get(detector.id) else ""
@@ -228,12 +228,22 @@ def _catalog_note(detector, registry):
 
 def _score_restated(scores, registry):
     """Add to a shipped detector's score the `examples:` of the catalog entry that restates
-    it, so every entry's own examples are scored, and fall under the floor with it."""
-    for entry in catalog_detectors():
+    it, so every entry's own examples are scored, and fall under the floor with it. A row
+    the corpus did not score is the examples' score alone, and says so in its `source`. A
+    shipped id a plugin or a detector file replaced takes nothing: the entry does not
+    describe that detector. `report --validity` and `corpus` both go through this, so the
+    two print one score for a detector."""
+    for entry in catalog_detectors(registry.fold_map()):
         held = registry.get(entry.id)
-        if entry.examples and held is not entry and held is DEFAULT.get(entry.id) \
-                and entry.id in scores:
-            scores[entry.id].add(score_examples([entry])[entry.id])
+        if not entry.examples or held is None or held is entry \
+                or held is not DEFAULT.get(entry.id):
+            continue
+        examples = score_examples([entry])[entry.id]
+        current = scores.get(entry.id)
+        if current is None or not current.scored:
+            scores[entry.id] = examples
+        else:
+            current.add(examples)
     return scores
 
 
@@ -273,7 +283,7 @@ def cmd_report(args, out):
     scores = None
     if args.validity:
         try:
-            scores = validity(registry=registry)
+            scores = _score_restated(validity(registry=registry), registry)
         except CorpusError as exc:
             sys.stderr.write("corpus: %s\n" % exc)
             return 2

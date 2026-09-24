@@ -11,10 +11,18 @@ Each entry is a mapping of three keys:
 
 - `shape` - the rule shape, in words, for a person reading the catalog.
 - `pattern` - one regular expression, anchored with `^`, matched case-insensitively at the
-  start of each sentence of a rule's text.
+  start of each sentence of a rule's text. It never crosses a clause break (`;`, `,`, `:`,
+  ` - `, an en or em dash): where it needs words between two it spans a run of characters
+  that stops at one, never `.*`, and the one comma it may cross is the one opening its own
+  contrast, as in "use uv, not pip".
 - `detector` - a declarative detector entry, as a detector file holds one, carrying an
   `examples:` block with a deliberate near-miss beside each positive. `ruleprobe corpus`
   scores those examples, and the floor applies to them as to any detector.
+
+A detector reads a Bash command through the shared parse only - `command`, `git` and `env`
+keys, per segment and per argument - and never through a regular expression over the whole
+command, so no entry splits a command itself and none backtracks on a long one; a shape the
+parse cannot see is a stated under-count in the entry's `description`.
 
 The catalog detector keeps its own slash-free `rule`; a bound section keeps its own id, path
 and all, on the rule entry that lists this detector's id, so a rule file in a subdirectory
@@ -32,30 +40,70 @@ ENTRIES = (
     {
         "shape": "Run the tests before finishing",
         "pattern": r"^(?:always\s+)?run\s+(?:the\s+|all\s+(?:the\s+)?|your\s+)?(?:unit\s+)?"
-                   r"tests?\b.*\bbefore\b",
+                   r"tests?\b(?:(?!\s-\s)[^;,:–—])*?\bbefore\b",
         "detector": {
             "id": "testing/test-after-change",
             "rule": "testing",
             "event": "session",
-            "description": "A file change followed, later in the session, by a test run. Each "
-                           "Write or Edit opens an opportunity, and a hit is one followed, so "
-                           "the report's opportunities and followed count say how often a "
-                           "change was tested. A runner is read at a command's start, by the "
-                           "basename of its first word or through a common wrapper, on the "
-                           "command's first line only.",
+            "description": "Compliance, not violations: unlike every other catalog row, a hit "
+                           "is a rule followed. Each Write or Edit opens an opportunity, and a "
+                           "hit is one a later test run followed, so the detector's "
+                           "opportunities, and how many were followed, say how often a change "
+                           "was tested. A test run is a pipeline segment opening with a known "
+                           "runner, a runner under `.venv/bin`, `node_modules/.bin` or "
+                           "`vendor/bin`, or a common wrapper around one; a runner behind an "
+                           "environment assignment or a flag, under another path or through "
+                           "another wrapper is missed.",
             "when": {
                 "order": {
                     "first": {"tool": {"name": ["Write", "Edit", "MultiEdit"]}},
-                    "then": {"command": {"regex": r"^(?:(?:[^'\"\\\n;&|(]|\\.|'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\")*[;&|(]+\s*)*\s*"
-                                          r"(?:[A-Za-z_]\w*=\S*\s+)*"
-                                          r"(?:(?:uv|poetry|pipenv|hatch|pdm)\s+run\s+|npx\s+|"
-                                          r"bundle\s+exec\s+)?(?:(?:\S*/)?(?:pytest|py\.test|tox|"
-                                          r"nox|jest|vitest|mocha|rspec|phpunit|ctest)"
-                                          r"(?![^\s;&|)])|(?:\S*/)?python[\d.]*\s+-m\s+(?:pytest|"
-                                          r"unittest)\b|(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?test\b|"
-                                          r"(?:go|cargo)\s+test\b|(?:\S*/)?(?:mvn|mvnw|gradle|"
-                                          r"gradlew)\s+(?:-\S+\s+)*test\b|make\s+(?:-\S+\s+)*"
-                                          r"(?:test|check)\b)"}},
+                    "then": {
+                        "any": [
+                            {"command": {"name": [
+                                "pytest", "py.test", "tox", "nox", "jest", "vitest", "mocha",
+                                "rspec", "phpunit", "ctest", ".venv/bin/pytest",
+                                "venv/bin/pytest", "node_modules/.bin/jest",
+                                "./node_modules/.bin/jest", "node_modules/.bin/vitest",
+                                "./node_modules/.bin/vitest", "vendor/bin/phpunit",
+                                "./vendor/bin/phpunit", "bin/rspec"]}},
+                            {"command": {"starts_with": ["python", "-m", "pytest"]}},
+                            {"command": {"starts_with": ["python3", "-m", "pytest"]}},
+                            {"command": {"starts_with": ["python", "-m", "unittest"]}},
+                            {"command": {"starts_with": ["python3", "-m", "unittest"]}},
+                            {"command": {"starts_with": [".venv/bin/python", "-m", "pytest"]}},
+                            {"command": {"starts_with": ["uv", "run", "pytest"]}},
+                            {"command": {"starts_with": ["uv", "run", "tox"]}},
+                            {"command": {"starts_with": ["uv", "run", "python", "-m",
+                                                         "pytest"]}},
+                            {"command": {"starts_with": ["uv", "run", "python", "-m",
+                                                         "unittest"]}},
+                            {"command": {"starts_with": ["poetry", "run", "pytest"]}},
+                            {"command": {"starts_with": ["pipenv", "run", "pytest"]}},
+                            {"command": {"starts_with": ["pdm", "run", "pytest"]}},
+                            {"command": {"starts_with": ["hatch", "test"]}},
+                            {"command": {"starts_with": ["npx", "jest"]}},
+                            {"command": {"starts_with": ["npx", "vitest"]}},
+                            {"command": {"starts_with": ["npx", "mocha"]}},
+                            {"command": {"starts_with": ["bundle", "exec", "rspec"]}},
+                            {"command": {"starts_with": ["npm", "test"]}},
+                            {"command": {"starts_with": ["npm", "t"]}},
+                            {"command": {"starts_with": ["npm", "run", "test"]}},
+                            {"command": {"starts_with": ["pnpm", "test"]}},
+                            {"command": {"starts_with": ["pnpm", "run", "test"]}},
+                            {"command": {"starts_with": ["yarn", "test"]}},
+                            {"command": {"starts_with": ["yarn", "run", "test"]}},
+                            {"command": {"starts_with": ["bun", "test"]}},
+                            {"command": {"starts_with": ["bun", "run", "test"]}},
+                            {"command": {"starts_with": ["go", "test"]}},
+                            {"command": {"starts_with": ["cargo", "test"]}},
+                            {"command": {"starts_with": ["make", "test"]}},
+                            {"command": {"starts_with": ["make", "check"]}},
+                            {"command": {"starts_with": ["mvn", "test"]}},
+                            {"command": {"starts_with": ["./mvnw", "test"]}},
+                            {"command": {"starts_with": ["gradle", "test"]}},
+                            {"command": {"starts_with": ["./gradlew", "test"]}},
+                        ],
+                    },
                     "within": 100000,
                 },
             },
@@ -69,7 +117,7 @@ ENTRIES = (
                      "note": "through a wrapper"},
                     {"events": [{"name": "Edit", "input": {"file_path": "src/app.py"}},
                                 {"input": {"command": ".venv/bin/pytest tests"}}],
-                     "note": "the runner by its basename"},
+                     "note": "the runner in a virtual environment"},
                     {"events": [{"name": "Edit", "input": {"file_path": "web/app.ts"}},
                                 {"input": {"command": "cd web && pnpm run test"}}],
                      "note": "in a compound command"},
@@ -85,8 +133,8 @@ ENTRIES = (
                                 {"input": {"command": "pip install pytest"}}],
                      "note": "installs the runner and runs nothing"},
                     {"events": [{"name": "Edit", "input": {"file_path": "src/app.py"}},
-                                {"input": {"command": "echo 'run pytest later'"}}],
-                     "note": "the runner as text"},
+                                {"input": {"command": "echo 'run pytest later; pytest'"}}],
+                     "note": "the runner as text, a separator inside the quote"},
                 ],
             },
         },
@@ -128,26 +176,35 @@ ENTRIES = (
     },
     {
         "shape": "Never force-push the default branch",
-        "pattern": r"^(?:never|do\s+not|don't)\s+force[- ]?push\b.*\b(?:main|master|"
-                   r"default\s+branch)\b",
+        "pattern": r"^(?:never|do\s+not|don't)\s+force[- ]?push\b"
+                   r"(?:(?!\s-\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
         "detector": {
             "id": "git-safety/force-push-default",
             "rule": "git-safety",
             "event": "tool_use",
-            "description": "A force push naming main or master in the same git call. A bare "
-                           "`git push -f` from the default branch names none, and is missed.",
+            "description": "A force push naming main or master in the same git call: a "
+                           "`+` refspec, or `-f`, a short-flag cluster opening with it, or a "
+                           "`--force` flag beside the branch as `main`, `HEAD:main`, "
+                           "`main:main` or `refs/heads/main` in either place. A bare "
+                           "`git push -f` from the default branch names none, and is missed; "
+                           "so are `feature:main`, a cluster such as `-uf`, and a branch "
+                           "given through a variable.",
             "when": {
-                "all": [
+                "any": [
+                    {"git": {"subcommand": "push",
+                             "args_any": ["+main", "+master", "+HEAD:main", "+HEAD:master",
+                                          "+refs/heads/main", "+refs/heads/master",
+                                          "+HEAD:refs/heads/main", "+HEAD:refs/heads/master",
+                                          "+main:main", "+master:master",
+                                          "+main:refs/heads/main",
+                                          "+master:refs/heads/master"]}},
                     {"git": {"subcommand": "push",
                              "args_any": ["main", "master", "HEAD:main", "HEAD:master",
-                                          "+main", "+master", "+HEAD:main", "+HEAD:master"]}},
-                    {"command": {"regex": r"^(?:(?:[^'\"\\\n;&|(]|\\.|'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\")*[;&|(]+\s*)*\s*"
-                                          r"(?:[A-Za-z_]\w*=\S*\s+)*"
-                                          r"git\s+(?:(?:-C|-c)\s+\S+\s+|--[\w-]+(?:=\S+)?\s+)*push\b(?=[^;&|\n]*\s(?:-(?!-)[A-Za-z]*f[A-Za-z]*|"
-                                          r"--force|--force-with-lease(?:=\S*)?|\+(?:HEAD:)?"
-                                          r"(?:refs/heads/)?(?:main|master))(?![^\s;&|]))"
-                                          r"(?=[^;&|\n]*\s\+?(?:HEAD:)?(?:refs/heads/)?"
-                                          r"(?:main|master)(?![^\s;&|]))"}},
+                                          "refs/heads/main", "refs/heads/master",
+                                          "HEAD:refs/heads/main", "HEAD:refs/heads/master",
+                                          "main:main", "master:master",
+                                          "main:refs/heads/main", "master:refs/heads/master"],
+                             "token_prefix": ["-f", "--force"]}},
                 ],
             },
             "examples": {
@@ -157,11 +214,16 @@ ENTRIES = (
                     {"bash": "git push origin +main", "note": "a forced refspec"},
                     {"bash": "git -C app push -fu origin main",
                      "note": "a global option and a short-flag cluster"},
+                    {"bash": "git push --force-with-lease origin HEAD:refs/heads/main",
+                     "note": "a full ref"},
+                    {"bash": "git push origin +refs/heads/master", "note": "a forced full ref"},
                 ],
                 "skip": [
                     {"bash": "git push origin main", "note": "not forced"},
                     {"bash": "git push --force origin feature-parser",
                      "note": "forced, to another branch"},
+                    {"bash": "git push -f origin feature:main-backup",
+                     "note": "forced, to a branch whose name opens with main"},
                     {"bash": "git push -f origin feature && git push origin main",
                      "note": "the force and the default branch in two calls"},
                     {"bash": "echo 'git push -f origin main'", "note": "text, not a push"},
@@ -173,8 +235,9 @@ ENTRIES = (
     },
     {
         "shape": "Use the named package manager, not another: uv, not pip",
-        "pattern": r"^(?:always\s+)?(?:use|install\s+(?:\w+\s+)?with)\s+uv\b.*"
-                   r"\b(?:not|never|instead\s+of|rather\s+than)\b.*\bpip\b",
+        "pattern": r"^(?:always\s+)?(?:use|install\s+(?:\w+\s+)?with)\s+uv\b"
+                   r"(?:(?!\s-\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
+                   r"rather\s+than)\s+(?:with\s+)?(?:sudo\s+)?pip\b",
         "detector": {
             "id": "package-manager/pip-install",
             "rule": "package-manager",
@@ -240,20 +303,16 @@ ENTRIES = (
             "id": "commits/non-conventional-subject",
             "rule": "commits",
             "event": "tool_use",
-            "description": "A `git commit -m` whose first message does not open `type:` or "
-                           "`type(scope):`. A message from a variable, a substitution, a "
-                           "heredoc, a file or the editor is not read, and a merge or revert "
-                           "subject is passed over.",
+            "description": "A `git commit` whose first message, read from the parsed "
+                           "arguments (`-m`, `--message`, `-am`, `-sm`), does not open "
+                           "`type:` or `type(scope):`. A message from a variable, a "
+                           "substitution, a heredoc, a file or the editor is not read, a merge "
+                           "or revert subject is passed over, and any word before the colon "
+                           "reads as a type, so `WIP: stuff` passes: an under-count.",
             "when": {
-                "all": [
-                    {"git": {"subcommand": "commit"}},
-                    {"command": {"regex": r"^(?:(?:[^'\"\\\n;&|(]|\\.|'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\")*[;&|(]+\s*)*\s*"
-                                          r"(?:[A-Za-z_]\w*=\S*\s+)*"
-                                          r"git\s+(?:(?:-C|-c)\s+\S+\s+|--[\w-]+(?:=\S+)?\s+)*commit\b(?:(?!\s-(?:a?m|-message))[^\n;&|])*"
-                                          r"\s-(?:a?m|-message)(?:\s+|=)?[\"']?(?![\s\"'$`])"
-                                          r"(?!(?:Merge|Revert)\s)"
-                                          r"(?![A-Za-z][\w-]*(?:\([^)\n]*\))?!?: \S)"}},
-                ],
+                "git": {"subcommand": "commit",
+                        "message_regex": r"^(?=\S)(?!(?:Merge|Revert)\s)"
+                                         r"(?![A-Za-z][\w-]*(?:\([^)\n]*\))?!?: \S)"},
             },
             "examples": {
                 "fire": [
@@ -262,6 +321,7 @@ ENTRIES = (
                     {"bash": "git commit -m 'update readme' -m 'feat: body line'",
                      "note": "only the first message is the subject"},
                     {"bash": "git commit -m\"tidy up\"", "note": "the attached form"},
+                    {"bash": "git commit -sm 'fixed it'", "note": "a sign-off cluster"},
                 ],
                 "skip": [
                     {"bash": "git commit -m \"fix(parser): handle empty input\"",
@@ -273,6 +333,8 @@ ENTRIES = (
                     {"bash": "git commit -m \"$MSG\"", "note": "a subject nobody can read"},
                     {"bash": "git commit -m 'feat: x' && echo \"git commit -m wip\"",
                      "note": "the bad subject only in another segment's text"},
+                    {"bash": "git commit --author=\"A -m B\" -m 'feat: x'",
+                     "note": "a -m inside another option's quoted value"},
                 ],
             },
         },
@@ -285,21 +347,16 @@ ENTRIES = (
             "id": "secrets/secret-file-add",
             "rule": "secrets",
             "event": "tool_use",
-            "description": "A `git add` naming a secret-shaped path: `.env`, `.env.local` or "
-                           "`.env.production`, a private SSH key, a `.key`, a `.pem` named for "
-                           "a key, a `.p12` or `.pfx`, or `credentials.json`. `git add -A` "
-                           "names none, and only the command's first line is read.",
+            "description": "A `git add` naming a secret-shaped path: `.env`, `.env.local`, "
+                           "`.env.prod` or `.env.production`, a private SSH key, a `.key`, a "
+                           "`.pem` named for a key and not a public one, a `.p12` or `.pfx`, "
+                           "or `credentials.json`. `git add -A` names none, and is missed.",
             "when": {
-                "all": [
-                    {"git": {"subcommand": "add"}},
-                    {"command": {"regex": r"^(?:(?:[^'\"\\\n;&|(]|\\.|'[^'\n]*'|\"(?:[^\"\\\n]|\\.)*\")*[;&|(]+\s*)*\s*"
-                                          r"(?:[A-Za-z_]\w*=\S*\s+)*"
-                                          r"git\s+(?:(?:-C|-c)\s+\S+\s+|--[\w-]+(?:=\S+)?\s+)*add\b[^\n;&|]*?\s[\"']?(?:[^\s\"';&|]*/)?"
-                                          r"(?:\.env(?:\.(?:local|production|prod))?|id_(?:rsa|"
-                                          r"dsa|ecdsa|ed25519)|[\w.-]+\.key|privkey\.pem|"
-                                          r"[\w.-]*key[\w.-]*\.pem|[\w.-]+\.(?:p12|pfx)|"
-                                          r"credentials\.json)[\"']?(?![^\s;&|])"}},
-                ],
+                "git": {"subcommand": "add",
+                        "arg_regex": r"^(?:[^/]*/)*(?:\.env(?:\.(?:local|production|prod))?|"
+                                     r"id_(?:rsa|dsa|ecdsa|ed25519)|[\w.-]+\.key|"
+                                     r"(?![\w.-]*pub)(?=[\w.-]*key)[\w.-]*\.pem|"
+                                     r"[\w.-]+\.(?:p12|pfx)|credentials\.json)\Z"},
             },
             "examples": {
                 "fire": [
@@ -311,6 +368,7 @@ ENTRIES = (
                 "skip": [
                     {"bash": "git add .env.example", "note": "the template, not the file"},
                     {"bash": "git add config/id_ed25519.pub", "note": "the public half"},
+                    {"bash": "git add certs/public-key.pem", "note": "a public key"},
                     {"bash": "git add src/keys.py", "note": "a name, not a key"},
                     {"bash": "cat .env", "note": "read, not added"},
                     {"bash": "git add .env.test", "note": "a test environment"},

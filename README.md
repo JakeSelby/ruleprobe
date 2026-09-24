@@ -90,9 +90,44 @@ and `ruleprobe detectors` names the stance each one is waiting for.
 
 ## Sixty seconds on a rule of your own
 
-The six above are generic. Your rules are not, and measuring one takes no Python: write a
-detector beside them as data. This is a real run over the example transcript and the example
-rules in this repository, so it is reproducible from a clone:
+The six above are generic. Your rules are not, but a rule in a common shape needs no detector
+at all. Point `--rules` at your rule files and a section that no front matter binds is matched
+against a small shipped catalog by what it says, with no model: its heading and each sentence
+of its text are tested against one anchored pattern per entry, and a section that matches
+exactly one entry is measured by that entry's detector. In a clone:
+
+```sh
+ruleprobe report --root docs --rules tests/fixtures/catalog
+```
+
+binds a file holding one section in each shape, and lists each section as `measured` with
+the note `catalog-bound, <detector id>`. The shapes are: run the tests before finishing
+(`testing/test-after-change`), never skip pre-commit hooks (`verification/no-verify`), never
+force-push the default branch (`git-safety/force-push-default`), use uv, not pip
+(`package-manager/pip-install`), do not read a whole file
+(`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
+(`commits/non-conventional-subject`), and never commit a secret-shaped file
+(`secrets/secret-file-add`).
+
+One row reads the other way round. Every other row counts violations, so fewer hits is
+better; `testing/test-after-change` counts compliance - a hit is a file change that a later
+test run followed - so more is better, and its opportunities and followed count are the
+measure.
+
+The binding under-counts on purpose. A section matching none, or more than one, stays
+unmeasured, and the coverage block names the entries when it matched several. A pattern
+never reaches across a clause break (`;`, `,`, `:`, ` - `, a dash), except the comma of its
+own contrast ("use uv, not pip"), and a sentence carrying an exception or a permission -
+except, unless, other than, but, however, allowed, fine, okay, ok - binds nothing, so "Never
+force-push except to main" is left unmeasured rather than read as its opposite. A file with no
+heading, or none of whose sections is a rule, binds as one unit by its whole text. A catalog
+detector joins the report only when a rule binds it, a detector of your own with a catalog
+id replaces it, `ruleprobe corpus` scores every entry, and `ruleprobe detectors` lists every
+entry marked `catalog`.
+
+Any other rule takes no Python either: write a detector beside it as data. This is a real
+run over the example transcript and the example rules in this repository, so it is
+reproducible from a clone:
 
 ```sh
 cat docs/rules/house-style.md
@@ -148,25 +183,6 @@ Point `--rules` at whatever directory your own rules live in, and drop the same 
 `.ruleprobe/detectors.yaml` at the root of a repository, or into
 `~/.config/ruleprobe/detectors.yaml` for the ones you want everywhere. Both are found
 without a flag; `--no-config` skips them.
-
-**A rule in a common shape needs no detector at all.** A section that no front matter binds is
-matched against a small shipped catalog by what it says, with no model: its heading and each
-sentence of its text are tested against one anchored pattern per entry, and a section that
-matches exactly one entry is measured by that entry's detector. The shapes are: run the tests
-before finishing (`testing/test-after-change`, whose hits are file changes a test run
-followed, so its opportunities and followed count are the measure), never skip pre-commit hooks
-(`verification/no-verify`), never force-push the default branch
-(`git-safety/force-push-default`), use uv, not pip (`package-manager/pip-install`), do not
-read a whole file (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
-(`commits/non-conventional-subject`), and never commit a secret-shaped file
-(`secrets/secret-file-add`). A section matching none, or more than one, stays unmeasured, and
-the coverage block names the entries when it matched several. A bound section is listed as
-`measured` with the note `catalog-bound, <detector id>`. A catalog detector joins the report
-only when a rule binds it, a detector of your own with a catalog id replaces it,
-`ruleprobe corpus` scores every entry, and `ruleprobe detectors` lists every entry marked
-`catalog`. A file with no heading, or none of whose sections is a rule, binds as one unit. In a clone,
-`ruleprobe report --root docs --rules tests/fixtures/catalog` binds a file holding one
-section in each shape.
 
 ## Writing a detector
 
@@ -249,7 +265,7 @@ can never fire.
 The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `path_glob`,
 `contains`, `equals`, `exists`), `command` (`name`, `starts_with`, `contains`, `none_of`,
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`), `git` (`subcommand`,
-`args_any`, `args_none`, `token_prefix`), `env` (`name`, `command`), `text` (`source`,
+`args_any`, `args_none`, `token_prefix`, `arg_regex`, `message_regex`), `env` (`name`, `command`), `text` (`source`,
 `regex`, `contains`), `message` (`role`, `final`, `regex`, `contains`), `kind`, and the three
 session matchers `order`, `absent` and `change`. `ruleprobe/matchers.py` documents each in
 one line. The shipped six in `ruleprobe/detectors/common.yaml` use ten of them - `tool`,
@@ -327,9 +343,11 @@ headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage 
 with the id `<path>#<heading-slug>` under `--rules`, and a repeated heading takes `-2`. A
 section holding only a code block, an HTML comment, a table, a blockquote, an image or a link
 reference is not a rule. A file with no heading, or with no section that is a rule, stays one
-unmeasured rule, named by its `rule:` key or else its file name. Known misses: text above the
-first heading of a headed file is no rule, a setext heading (text underlined with `===` or
-`---`) does not split, and list items are never split.
+rule, named by its `rule:` key or else its file name, and its whole text - text above the first
+heading included - binds the catalog as one unit: measured when exactly one entry matches,
+unmeasured otherwise. Known misses: in a file with a rule section, text above the first
+heading is no rule, a setext heading (text underlined with `===` or `---`) does not split,
+and list items are never split.
 
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see
@@ -406,17 +424,17 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   10    5    0    0   1.00    1.00   1.00
-commits/non-conventional-subject          4    6    4    0    0   1.00    1.00   1.00
-git-safety/force-push-default             4    5    4    0    0   1.00    1.00   1.00
+commits/non-conventional-subject          5    7    5    0    0   1.00    1.00   1.00
+git-safety/force-push-default             6    6    6    0    0   1.00    1.00   1.00
 package-manager/pip-install               3    3    3    0    0   1.00    1.00   1.00
-secrets/secret-file-add                   4    7    4    0    0   1.00    1.00   1.00
+secrets/secret-file-add                   4    8    4    0    0   1.00    1.00   1.00
 secrets/secret-in-write                   6    6    6    0    0   1.00    1.00   1.00
 testing/test-after-change                 4    4    4    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find        5    8    5    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat         7    9    7    0    0   1.00    1.00   1.00
 verification/no-verify                    9    9    9    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    56   73   56    0    0   1.00    1.00   1.00  floor 0.90
+total                                    59   76   59    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors are scored over the corpus, and each catalog entry by its own
@@ -511,6 +529,8 @@ over it: an unmeasured detector is a gap to see, not a failure to fix.
 - `ruleprobe/declarative.py` - the YAML subset and the front-matter split, with a line
   number on every refusal.
 - `ruleprobe/matchers.py` - one entry compiled into the same `Detector` a Python one builds.
+- `ruleprobe/detectors/catalog.py` - the shipped catalog: common rule shapes as Python
+  literals, each an anchored pattern and a declarative detector with its `examples:`.
 - `ruleprobe/rules.py` - where detector files live, and which rule files nothing measures.
 - `ruleprobe/report.py` - rows in, text out. A row is a small dict, so a report can be taken
   over rows you stored months ago rather than over transcripts you still have.

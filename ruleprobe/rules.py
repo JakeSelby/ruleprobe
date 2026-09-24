@@ -13,8 +13,9 @@ The third is the one that makes a report readable, because it also says what is 
 measured. A rule file carrying a `detector:` block is measured; one carrying
 `opt_out: <reason>` is dark on purpose, and either way the file is one rule. A file giving
 neither a value is split at its ATX headings, one rule per section; one with no heading, or
-with no section that is a rule, stays one unmeasured rule, named by its `rule:` key or else
-its file name. Known misses: text above the first heading of a headed file is no rule, and a
+with no section that is a rule, stays one rule, named by its `rule:` key or else its file
+name, and its whole text - above the first heading included - binds the catalog as one unit.
+Known misses: in a file with a rule section, text above the first heading is no rule, and a
 setext heading does not split. Nothing here fails a build: a bad entry is a finding with a
 file, a line and a reason, and the rest of the file still loads.
 
@@ -23,9 +24,12 @@ says, with no model: its heading and each sentence of its prose are matched agai
 entry's anchored pattern, and the rule binds the one entry that matches, as a measured rule
 whose source is `catalog`. None matching, or more than one, leaves it unmeasured and listed,
 so the gap is visible rather than assumed; under-counting is the point, since a loose binding
-would lift the measured share on rules nobody would recognise. A rule bound in its front
-matter is `own`, and so is a catalog-bound one whose detector id a detector file of the
-user's replaced.
+would lift the measured share on rules nobody would recognise. For the same reason a pattern
+never spans a clause break (see `ruleprobe.detectors.catalog`), and a sentence carrying an
+exception or a permission - except, unless, other than, but, however, allowed, fine, okay,
+ok - binds nothing, so "Never force-push except to main" is no force-push rule. A rule bound
+in its front matter is `own`, and so is a catalog-bound one whose detector id a detector
+file of the user's replaced.
 """
 import os
 import re
@@ -71,9 +75,10 @@ def _compile_catalog():
 _CATALOG = _compile_catalog()
 
 
-def catalog_detectors():
-    """The catalog's detectors in catalog order, less any id the shipped fold map retires."""
-    retired = fold_map()
+def catalog_detectors(fold=None):
+    """The catalog's detectors in catalog order, less any id `fold` retires: a registry's
+    effective fold map (`Registry.fold_map()`), or the shipped one when not given."""
+    retired = fold_map() if fold is None else fold
     return [detector for _pattern, detector in _CATALOG if detector.id not in retired]
 
 
@@ -84,13 +89,16 @@ def _is_catalog(detector):
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
-    __slots__ = ("detectors", "rules", "findings", "sources")
+    __slots__ = ("detectors", "rules", "findings", "sources", "_binding", "_labelled")
 
     def __init__(self, detectors=None, rules=None, findings=None, sources=None):
         self.detectors = list(detectors or [])
         self.rules = list(rules or [])
         self.findings = list(findings or [])
         self.sources = list(sources or [])
+        # The rules as bound, and as the last `registry()` call labelled them.
+        self._binding = None
+        self._labelled = None
 
     def registry(self, base=DEFAULT, whole_catalog=False):
         """`base`, then the catalog detectors a rule bound, then everything loaded. A
@@ -100,20 +108,32 @@ class Bundle(object):
         one in place. `whole_catalog` adds every catalog entry, bound or not, which is how
         `ruleprobe corpus` and `ruleprobe detectors` list the whole catalog.
 
-        A catalog-bound rule whose id the result holds under another detector - a plugin's,
-        `base`'s own or a loaded one - is relabelled `own` in `self.rules`, so the coverage
-        block printed after this call names what actually measures it."""
+        A catalog id the result's fold map retires - the shipped renames with `base`'s own
+        `Registry(renamed=)` over them - is never added, not even beside its successor.
+
+        `self.rules` then reads as this call labels the rules, so the coverage block printed
+        after it names what actually measures each: a catalog-bound rule whose id the result
+        holds under another detector - a plugin's, `base`'s own or a loaded one - is `own`,
+        and one whose id it does not hold at all is unmeasured. The labels are computed from
+        the rules as `load_bundle` bound them, never from an earlier call's, so each call
+        answers for its own `base` alone; before any call, `rules`, `coverage()` and
+        `summary()` read as `load_bundle` left them. Rules assigned after a call are taken as
+        a new binding."""
         registry = base.copy() if base is not None else Registry()
-        bound = set(did for entry in self.rules if entry.source == "catalog"
+        fold = registry.fold_map()
+        if self._labelled is None or self.rules != self._labelled:
+            self._binding = list(self.rules)
+        bound = set(did for entry in self._binding if entry.source == "catalog"
                     for did in entry.detectors)
-        for detector in catalog_detectors():
+        for detector in catalog_detectors(fold):
             if (whole_catalog or detector.id in bound) and detector.id not in registry:
                 registry.add(detector)
         for detector in self.detectors:
-            if _is_catalog(detector) and detector.id in registry:
+            if _is_catalog(detector) and (detector.id in registry or detector.id in fold):
                 continue
             registry.add(detector)
-        self.rules = _sourced(self.rules, registry)
+        self.rules = _sourced(self._binding, registry, fold)
+        self._labelled = list(self.rules)
         return registry
 
     def counts(self):
@@ -160,15 +180,22 @@ class Bundle(object):
         return "\n".join(lines)
 
 
-def _sourced(rules, registry):
-    """`rules` with each catalog-bound rule whose detector id `registry` holds under a
-    detector other than the catalog's, or the shipped one it restates, marked `own`."""
+def _sourced(rules, registry, fold):
+    """A new list of `rules`, each catalog-bound one relabelled for `registry`: `own` when
+    it holds the id under a detector other than the catalog's or the shipped one it
+    restates, and unmeasured when it does not hold the id at all, since nothing would
+    measure the rule. `fold` is the registry's fold map, to say which ids are retired."""
     out = []
     for entry in rules:
         if entry.source == "catalog":
             for did in entry.detectors:
                 held = registry.get(did)
-                if held is not None and not _is_catalog(held) and held is not DEFAULT.get(did):
+                if held is None:
+                    reason = ("its catalog entry %s is retired" % did if did in fold
+                              else "its catalog entry %s is not registered" % did)
+                    entry = RuleEntry(entry.rule, entry.path, "unmeasured", reason, [], None)
+                    break
+                if not _is_catalog(held) and held is not DEFAULT.get(did):
                     entry = entry._replace(source="own")
         out.append(entry)
     return out
@@ -348,7 +375,9 @@ def read_rule_file(path, root=None):
     Any other file is split into section rules (`_sections`); `root` is the `--rules`
     directory their ids are relative to, the file's own directory when not given.
 
-    Known miss: in a file with headings, text above the first heading is no rule.
+    A file with no heading, or none of whose sections is a rule, binds the catalog by its
+    whole text, text above the first heading included. Known miss: in a file with a rule
+    section, text above the first heading is no rule.
     """
     rule = os.path.splitext(os.path.basename(path))[0]
     try:
@@ -482,6 +511,10 @@ def _file_prose(body):
 # --- catalog binding ---------------------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+#: An exception or a permission: a sentence carrying one binds nothing, since "never X
+#: except Y" and "X is fine" are not the rule a catalog pattern reads.
+_EXCEPTION = re.compile(r"\b(?:except|unless|other\s+than|but|however|allowed|fine|okay|ok)\b",
+                        re.IGNORECASE)
 _MARKUP = re.compile(r"[`*]+")
 _TASK = re.compile(r"^\[[ xX]\][ \t]+")
 
@@ -502,9 +535,11 @@ def _sentences(heading, paragraphs):
 
 
 def _catalog_matches(heading, paragraphs):
-    """The catalog detectors whose pattern matches the start of any sentence of the rule,
-    in catalog order. Binding reads text and nothing else."""
-    sentences = _sentences(heading, paragraphs)
+    """The catalog detectors whose pattern matches the start of any sentence of the rule
+    that carries no exception or permission (`_EXCEPTION`), in catalog order. Binding reads
+    text and nothing else, against the shipped fold map: a consumer's own renames are
+    applied when `Bundle.registry` is built."""
+    sentences = [s for s in _sentences(heading, paragraphs) if not _EXCEPTION.search(s)]
     retired = fold_map()
     return [detector for pattern, detector in _CATALOG if detector.id not in retired
             and any(pattern.match(sentence) for sentence in sentences)]
