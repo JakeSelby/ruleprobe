@@ -241,12 +241,13 @@ class GatingFindingTests(unittest.TestCase):
 
     def test_finding_11_json_applies_the_same_denominator_and_min_sessions(self):
         _code, text = self.run_cli("report", "--root", self.FIXTURES, "--no-config",
-                                   "--min-sessions", "1", "--promote-share", "0.1",
+                                   "--min-sessions", "1", "--frequent-share", "0.1",
                                    "--json")
         data = json.loads(text)
         self.assertEqual(data["min_sessions"], 1)
+        self.assertEqual(data["frequent_share"], 0.1)
         notes = dict((d["detector"], d["note"]) for d in data["detectors"])
-        self.assertIn("promote?", set(notes.values()))
+        self.assertIn("frequent", set(notes.values()))
         self.assertEqual(data["detectors"][0]["of"], data["measured"])
 
     def test_finding_11_json_folds_a_rename_the_way_the_table_does(self):

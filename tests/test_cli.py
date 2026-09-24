@@ -3,8 +3,10 @@
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -85,9 +87,85 @@ class ReportCommandTests(unittest.TestCase):
         self.assertIn("--root", text)
 
     def test_the_notes_are_tunable_from_the_command_line(self):
-        _, text = run_cli("report", "--root", FIXTURES, "--min-sessions", "1",
-                          "--promote-share", "0.1")
-        self.assertIn("promote?", text)
+        _, text = run_cli("report", "--root", FIXTURES, "--no-config", "--min-sessions", "1",
+                          "--frequent-share", "0.1")
+        self.assertEqual(note_of(text, "cache-hygiene/compact"), "frequent")
+
+    def test_a_share_under_frequent_share_earns_no_frequent_note(self):
+        _, text = run_cli("report", "--root", FIXTURES, "--no-config", "--min-sessions", "1",
+                          "--frequent-share", "0.9")
+        self.assertEqual(note_of(text, "cache-hygiene/compact"), "")
+        self.assertNotIn("frequent", text)
+
+
+def note_of(text, detector_id):
+    """What sits in the note column of `detector_id`'s line, read from the header."""
+    lines = text.split("\n")
+    start = lines[0].index("note")
+    got = [x for x in lines if x.split() and x.split()[0] == detector_id][0]
+    return got[start:].split("  ")[0].strip()
+
+
+ORDER_DETECTOR = """version: 1
+
+detectors:
+  - id: fixture/commit-then-push
+    rule: fixture
+    event: session
+    when:
+      order:
+        first: {git: {subcommand: commit}}
+        then: {git: {subcommand: push}}
+        within: 3
+"""
+
+
+class ComplianceCommandTests(unittest.TestCase):
+    """Over the fixtures, one commit and no push: one opportunity, not followed."""
+
+    def setUp(self):
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp)
+        self.detectors = os.path.join(tmp, "detectors.yaml")
+        with open(self.detectors, "w") as fh:
+            fh.write(ORDER_DETECTOR)
+        self.args = ["report", "--root", FIXTURES, "--no-config", "--detectors",
+                     self.detectors]
+
+    def test_below_min_opportunities_the_counts_print_and_the_rate_does_not(self):
+        _, text = run_cli(*self.args)
+        got = [x for x in text.split("\n") if x.startswith("fixture/commit-then-push")][0]
+        self.assertEqual(got.split()[5:9], ["1", "0", "0", "-"])
+        _, text = run_cli(*(self.args + ["--json"]))
+        entry = [d for d in json.loads(text)["detectors"]
+                 if d["detector"] == "fixture/commit-then-push"][0]
+        self.assertEqual((entry["opportunities"], entry["followed"]), (1, 0))
+        self.assertIsNone(entry["compliance_rate"])
+
+    def test_min_opportunities_lowers_the_minimum(self):
+        _, text = run_cli(*(self.args + ["--min-opportunities", "1", "--json"]))
+        data = json.loads(text)
+        self.assertEqual(data["min_opportunities"], 1)
+        entry = [d for d in data["detectors"]
+                 if d["detector"] == "fixture/commit-then-push"][0]
+        self.assertEqual(entry["compliance_rate"], 0.0)
+
+    def test_by_stance_json_is_byte_identical_across_two_runs(self):
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        outputs = []
+        for seed in ("1", "2"):
+            env = dict(os.environ, PYTHONHASHSEED=seed)
+            done = subprocess.run(
+                [sys.executable, "-m", "ruleprobe"] + self.args
+                + ["--stance", "commits=on", "--by", "stance", "--json"],
+                cwd=root, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                timeout=120)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            outputs.append(done.stdout)
+        self.assertEqual(outputs[0], outputs[1])
+        group = json.loads(outputs[0])["groups"][0]
+        self.assertEqual(group["key"], "commits=on")
+        self.assertEqual(group["compliance"]["fixture/commit-then-push"]["undecided"], 0)
 
 
 class OtherCommandTests(unittest.TestCase):

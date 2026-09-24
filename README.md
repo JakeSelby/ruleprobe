@@ -17,8 +17,8 @@ That reads `~/.claude/projects/**/*.jsonl` (and `~/.codex/sessions/**/*.jsonl`, 
 wrote any), runs the detectors over them, and prints:
 
 ```
-detector                                 hits  sessions    of   share  note
----------------------------------------------------------------------------
+detector                                 hits  sessions    of    share  note
+----------------------------------------------------------------------------
 cache-hygiene/compact                       0         0   339       0%  unobserved
 cache-hygiene/model-switch                 11        11   339       3%
 secrets/secret-in-write                     3         2   339       1%
@@ -33,10 +33,9 @@ guarding against something that is not happening, and the rules behind them are 
 in the context window for nothing.
 
 `share` is the fraction of sessions the detector fired in at least once. `unobserved` means
-it has never fired in the window. `promote?`, above a 30 percent share, means it is common
-enough that either the rule is worth stating more loudly or the rule is wrong. Both notes
-stay blank until there are twenty measured sessions, because a share over five sessions is
-noise.
+it has never fired in the window. `frequent` means it fired in more than 30 percent of sessions;
+it describes the share and advises nothing. Both notes stay blank until there are twenty
+measured sessions, because a share over five sessions is noise.
 
 Nothing is sent anywhere, no model is asked anything, nothing is written to disk, and the
 same transcript gives the same answer every time. Python 3.9 or newer, standard library
@@ -70,6 +69,18 @@ detector's hit denominator only. A row also carries `compliance`, detector id to
 raises, or returns something other than `(turn, tool_use_id, followed)` triples (recorded as
 `MalformedOpportunities`), its `rules_errors` entry carries `"hook": "opportunities"`: the
 detector loses its `compliance` entry, and its hit figures are untouched.
+
+The report sums `compliance` beside hits per session, never in place of them. A detector that
+has any adds `opportunities`, `followed`, `undecided` and `rate` columns to its line, and
+`opportunities`, `followed`, `undecided` and `compliance_rate` to its `--json` entry; one
+without has none of them. `compliance_rate` is `followed / opportunities`, and it stays `null`,
+printed `-`, until the line holds twenty opportunities (`--min-opportunities N`); undecided
+points never count toward that. `--by repo` and `--by stance` group compliance as they group
+hits, under each group's `compliance` key and its own minimum. Retired ids fold as hits do. A
+session whose `opportunities` failed, or whose detector raised, is out of that detector's
+compliance figures, as is one whose stored `compliance` entry cannot be read;
+`opportunity_errors` and `malformed_compliance` count those sessions per detector, and a note
+names them.
 
 A transcript does not record the configuration it ran under, so `--stance dimension=variant`
 is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
@@ -106,8 +117,8 @@ ruleprobe report --root docs --rules docs/rules
 ```
 
 ```
-detector                                 hits  sessions    of   share  note
----------------------------------------------------------------------------
+detector                                 hits  sessions    of    share  note
+----------------------------------------------------------------------------
 cache-hygiene/compact                       0         0     1       0%
 cache-hygiene/model-switch                  0         0     1       0%
 house-style/sudo-install                    2         1     1     100%
@@ -469,7 +480,8 @@ iter_sessions(root=None, runtime="auto", since=None, errors=None)  # -> Session(
 run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None)
 Registry([Detector, ...]); Registry.add(Detector(id, rule, event, fn, gate=None))
 Registry.from_entry_points("ruleprobe.detectors")
-report(rows, by="rule", min_sessions=20, promote_share=0.30)
+report(rows, by="rule", min_sessions=20, frequent_share=0.30, registry=DEFAULT,
+       validity=None, min_opportunities=20)
 report_data(rows, by="rule", ...)                       # the same numbers as a dict; --json prints it
 validity(registry=DEFAULT, directory=None)              # -> {detector_id: Score(.precision .recall)}
 load_bundle(paths=None, rules_dir=None, cwd=None, config=True)  # -> Bundle(.detectors .rules .findings)

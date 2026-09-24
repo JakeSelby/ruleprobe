@@ -28,8 +28,8 @@ import sys
 from . import __version__
 from .readers import RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry
-from .report import (BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, _redact, explain,
-                     explain_text, measure, report, report_data)
+from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
+                     _redact, explain, explain_text, measure, report, report_data)
 from .rules import load_bundle
 from .validity import (CorpusError, DEFAULT_FLOOR, below_floor, scores_as_dict, validity,
                        validity_table)
@@ -58,8 +58,11 @@ def build_parser():
                          help="which runtime wrote them (default: decide per file)")
     run_cmd.add_argument("--min-sessions", type=int, default=RULE_MIN_SESSIONS,
                          metavar="N", help="sessions needed before a note is printed")
-    run_cmd.add_argument("--promote-share", type=float, default=RULE_PROMOTE_SHARE,
-                         metavar="F", help="share of sessions that earns a promote? note")
+    run_cmd.add_argument("--frequent-share", type=float, default=RULE_FREQUENT_SHARE,
+                         metavar="F", help="share of sessions that earns a frequent note")
+    run_cmd.add_argument("--min-opportunities", type=int, default=RULE_MIN_OPPORTUNITIES,
+                         metavar="N", help="opportunities needed in a line or group before a "
+                                           "compliance rate is printed")
     run_cmd.add_argument("--plugins", action="store_true",
                          help="also load detectors installed packages advertise")
     run_cmd.add_argument("--json", action="store_true",
@@ -215,8 +218,8 @@ def cmd_report(args, out):
         # rename fold or a min_sessions note that the two disagreed about would make the
         # machine-readable half a second, quieter instrument.
         data = report_data(rows, by=args.by, min_sessions=args.min_sessions,
-                           promote_share=args.promote_share, registry=registry,
-                           validity=scores)
+                           frequent_share=args.frequent_share, registry=registry,
+                           validity=scores, min_opportunities=args.min_opportunities)
         data["rows"] = rows
         data["read_errors"] = read_errors
         data["coverage"] = bundle.coverage()
@@ -229,8 +232,8 @@ def cmd_report(args, out):
         out.write("no transcripts found; pass --root to point at a directory of them\n")
         return 1
     out.write(report(rows, by=args.by, min_sessions=args.min_sessions,
-                     promote_share=args.promote_share, registry=registry,
-                     validity=scores) + "\n")
+                     frequent_share=args.frequent_share, registry=registry,
+                     validity=scores, min_opportunities=args.min_opportunities) + "\n")
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")
