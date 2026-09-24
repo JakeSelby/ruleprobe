@@ -338,12 +338,17 @@ event to show. A key is unique only within its session, so both are printed. Wha
 the Bash command, or any other tool's whole input as JSON, because a hit does not record which
 field of the event matched. `--session` takes the address or the bare session id;
 `--session`, `--detector` and `--key` each narrow the output, and one that matches nothing
-prints nothing and exits 0. It takes `report`'s `--root`, `--runtime` and `--since`, and
-`--rules`, `--detectors` and `--no-config`.
+prints nothing and exits 0; `--detector` takes a renamed id too. It takes `report`'s
+`--root`, `--runtime`, `--since`, `--stance` and `--plugins`, and `--rules`, `--detectors` and
+`--no-config`, so a gated or plugin detector `report` counts is listed as well; what a
+detector file skipped goes to stderr.
 
-Every line it prints passes through `redact` first, which replaces each shape in
-`SECRET_PATTERNS`, with the rest of its token, the value assigned after it, or a private
-key's body, by `[redacted]`. Like `report`, it writes nothing and sends nothing, and running
+Every line it prints, to either stream, passes through `redact` first, which replaces each
+shape in `SECRET_PATTERNS` by `[redacted]`, together with what follows it: a `:` or `=` and
+the value after it, even on the next line, a quoted value whole, otherwise the rest of the
+line, and a private key's body to its footer. A control character is printed as its `\xNN`
+escape, so a transcript cannot drive your terminal, and one event's text is cut at 4,000
+characters with a note of how many were cut. Like `report`, it writes nothing and sends nothing, and running
 it changes no report number. A stored row keeps counts only, not the events behind them, so
 it cannot be explained after the fact: `ruleprobe.report.explain_row(row)` says so and names
 the rerun over that row's runtime and session id that would.

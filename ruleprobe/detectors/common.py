@@ -26,8 +26,11 @@ SECRET_PATTERNS = [
 REDACTED = "[redacted]"
 
 _PRIVATE_KEY_END = re.compile(r"-----END [A-Z ]*PRIVATE KEY-----")
-_REST_OF_TOKEN = re.compile(r"\S*")
-_ASSIGNED_VALUE = re.compile(r"[ \t]*\S*")
+_REST_OF_NAME = re.compile(r"[^\s:=\"']*")
+_SEPARATOR = re.compile(r"[ \t]*[:=]")
+_SPACE_ACROSS_LINES = re.compile(r"\s*")
+_SPACE = re.compile(r"[ \t]*")
+_REST_OF_LINE = re.compile(r"[^\n]*")
 
 
 def redact(text):
@@ -35,10 +38,11 @@ def redact(text):
     text ruleprobe prints from a transcript.
 
     A match is widened before it is replaced, because several patterns name only the front
-    of a secret: to the end of its run of non-space characters (`xoxb-` and the token after
-    it), past a `:` or `=` to the value it assigns, and from a private key's header to its
-    footer, or to the end of the text when there is none. Over-redacting is the safe side.
-    Anything but a string is returned as the empty string.
+    of a secret or the key it is assigned to. A private key goes from its header to its
+    footer, or to the end of the text when there is none. Any other match takes the rest of
+    its word, then optional spaces and a `:` or `=` - after which the value may start on the
+    next line - and then the value: a quoted string whole, otherwise the rest of the line.
+    Over-redacting is the safe side. Anything but a string is returned as the empty string.
     """
     if not isinstance(text, str):
         return ""
@@ -47,20 +51,30 @@ def redact(text):
     return text
 
 
+def _secret_end(text, found):
+    """Where the secret that `found` points at ends in `text`."""
+    if "PRIVATE KEY" in found.group(0):
+        footer = _PRIVATE_KEY_END.search(text, found.end())
+        return footer.end() if footer else len(text)
+    end = _REST_OF_NAME.match(text, found.end()).end()
+    separator = _SEPARATOR.match(text, end)
+    if separator is not None:
+        end = separator.end()
+    assigned = separator is not None or found.group(0).endswith((":", "="))
+    end = (_SPACE_ACROSS_LINES if assigned else _SPACE).match(text, end).end()
+    if text[end:end + 1] in ("\"", "'"):
+        close = text.find(text[end], end + 1)
+        return close + 1 if close >= 0 else len(text)
+    return _REST_OF_LINE.match(text, end).end()
+
+
 def _redact_one(compiled, text):
     out, pos = [], 0
     while True:
         found = compiled.search(text, pos)
         if found is None:
             break
-        matched = found.group(0)
-        if "PRIVATE KEY" in matched:
-            footer = _PRIVATE_KEY_END.search(text, found.end())
-            end = footer.end() if footer else len(text)
-        elif matched.endswith((":", "=")):
-            end = _ASSIGNED_VALUE.match(text, found.end()).end()
-        else:
-            end = _REST_OF_TOKEN.match(text, found.end()).end()
+        end = _secret_end(text, found)
         out.append(text[pos:found.start()])
         out.append(REDACTED)
         pos = max(end, found.start() + 1)

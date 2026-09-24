@@ -8,6 +8,7 @@
     ruleprobe corpus [--floor F] [--json] [--corpus DIR] [--rules DIR] [--detectors FILE]
     ruleprobe explain [--session RUNTIME:ID] [--detector ID] [--key TURN:TOOL_USE_ID]
                       [--since DATE] [--root DIR] [--runtime NAME]
+                      [--stance DIM=VARIANT] [--plugins]
                       [--rules DIR] [--detectors FILE] [--no-config]
 
 Declarative detectors are read from `.ruleprobe/detectors.yaml` in the repository you are
@@ -25,11 +26,10 @@ import re
 import sys
 
 from . import __version__
-from .detectors.common import redact
 from .readers import RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry
-from .report import (BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, explain, explain_text,
-                     measure, report, report_data, session_address)
+from .report import (BY, RULE_MIN_SESSIONS, RULE_PROMOTE_SHARE, _redact, explain,
+                     explain_text, measure, report, report_data, session_address)
 from .rules import load_bundle
 from .validity import (CorpusError, DEFAULT_FLOOR, below_floor, scores_as_dict, validity,
                        validity_table)
@@ -101,6 +101,12 @@ def build_parser():
     explain_cmd.add_argument("--runtime", choices=["auto"] + sorted(RUNTIMES),
                              default="auto",
                              help="which runtime wrote them (default: decide per file)")
+    explain_cmd.add_argument("--stance", action="append", default=None, type=_stance,
+                             metavar="DIM=VARIANT",
+                             help="the configuration these sessions ran under, as for "
+                                  "report; repeatable, read by gated detectors")
+    explain_cmd.add_argument("--plugins", action="store_true",
+                             help="also load detectors installed packages advertise")
     _declarative_options(explain_cmd)
     return parser
 
@@ -272,8 +278,13 @@ def cmd_detectors(args, out):
 
 def cmd_explain(args, out):
     """Every hit, with the event behind it, redacted. It reruns the detectors over the
-    transcripts rather than reading rows, because a row keeps counts only."""
-    _bundle, registry = _bundle_and_registry(args)
+    transcripts rather than reading rows, because a row keeps counts only. Every line it
+    writes, to either stream, passes through `report._redact`."""
+    bundle, registry = _bundle_and_registry(args)
+    stances = dict(args.stance or [])
+    detector = args.detector
+    if detector is not None:
+        detector = registry.renamed.get(detector, detector)
     read_errors, detector_errors, seen = [], [], [0]
 
     def wanted():
@@ -286,8 +297,9 @@ def cmd_explain(args, out):
                 yield session
 
     wrote = False
-    for item in explain(wanted(), registry=registry, errors=detector_errors):
-        if args.detector is not None and item["detector"] != args.detector:
+    for item in explain(wanted(), stances=stances, registry=registry,
+                        errors=detector_errors):
+        if detector is not None and item["detector"] != detector:
             continue
         if args.key is not None and item["key"] != args.key:
             continue
@@ -295,16 +307,20 @@ def cmd_explain(args, out):
         wrote = True
     unread = _read_errors_line(read_errors)
     if unread:
-        sys.stderr.write(unread + "\n")
+        sys.stderr.write(_redact(unread) + "\n")
+    summary = bundle.summary()
+    if summary:
+        sys.stderr.write(_redact(summary) + "\n")
     if not seen[0]:
-        out.write("no transcripts found; pass --root to point at a directory of them\n")
+        out.write(_redact("no transcripts found; pass --root to point at a directory of "
+                          "them") + "\n")
         return 1
     if detector_errors:
         more = "" if len(detector_errors) <= 3 else ", and %d more" % (len(detector_errors) - 3)
-        sys.stderr.write(redact("%d detector error(s): %s%s\n" % (
+        sys.stderr.write(_redact("%d detector error(s): %s%s" % (
             len(detector_errors), ", ".join("%s (%s) in %s" % (e["detector"], e["error"],
                                                               e["session"])
-                                            for e in detector_errors[:3]), more)))
+                                            for e in detector_errors[:3]), more)) + "\n")
     return 0
 
 

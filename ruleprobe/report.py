@@ -398,19 +398,37 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
     return "\n".join(lines)
 
 
+#: The most of one event's text explain prints; the rest is cut and counted.
+MAX_EXPLAINED = 4000
+
+# Every control character but a newline and a tab: printed raw, an escape sequence in a
+# transcript could rewrite the reader's terminal.
+_CONTROL = r"[\x00-\x08\x0b-\x1f\x7f-\x9f]"
+
+
 def _hit_key(hit):
-    """Imported late for the same reason as `_validity_note`: a label and a hit are keyed by
-    one function, and it lives in `ruleprobe.validity`."""
+    """Imported late: `ruleprobe.validity` sits above this module in the import graph, and
+    a label and a hit are keyed by the one function it owns."""
     from .validity import hit_key
 
     return hit_key(hit)
 
 
 def _redact(text):
-    """`detectors.common.redact`, the one path for text printed from a transcript."""
+    """`detectors.common.redact`, the one path for text printed from a transcript, with
+    every control character but a newline and a tab written as its `\\xNN` escape."""
+    import re
+
     from .detectors.common import redact
 
-    return redact(text)
+    return re.sub(_CONTROL, lambda m: "\\x%02x" % ord(m.group(0)), redact(text))
+
+
+def _capped(text):
+    if len(text) <= MAX_EXPLAINED:
+        return text
+    return "%s\n[%d more character(s) cut]" % (text[:MAX_EXPLAINED],
+                                               len(text) - MAX_EXPLAINED)
 
 
 def session_address(runtime, session_id):
@@ -435,32 +453,48 @@ def _event_field(event):
     return "input", json.dumps(data, sort_keys=True, default=str)
 
 
+def _tool_use_positions(events):
+    """`{(turn, tool use id): index}` for the first tool use at each pair: a hit names its
+    event by both, since an id is only promised unique within its turn's key."""
+    position = {}
+    for index, event in enumerate(events or ()):
+        if not isinstance(event, dict) or event.get("kind") != "tool_use":
+            continue
+        try:
+            position.setdefault((event.get("turn", 0), event.get("id")), index)
+        except TypeError:  # an unhashable turn or id names no hit either
+            continue
+    return position
+
+
 def explain(sessions, stances=None, registry=DEFAULT, errors=None):
     """Every hit `measure()` would count over `sessions`, one dict each, with the event
     behind it.
 
     Each dict carries `session` (the `session_address`), `key` (the hit's
     `"<turn>:<tool_use_id>"`, or `"<turn>:-"` for a hit on the session), `detector`, `turn`,
-    `tool_use_id`, `tool`, `field` and `value`. `value` has been through
-    `detectors.common.redact`; a session hit has no event, so its `tool`, `field` and
-    `value` are None. Sessions keep the order given; within one, hits are by turn, a
-    session hit ahead of the tool uses, those in transcript order, then by detector id. `errors`, when a list is passed, collects what `run()`
-    collects, with the session address added. Nothing is written and no row is built, so
-    no report number can move.
+    `tool_use_id`, `tool`, `field` and `value`. `value` has been through `_redact` and is
+    cut at `MAX_EXPLAINED` characters; a session hit has no event, so its `tool`, `field`
+    and `value` are None. Sessions keep the order given; within one, hits are by turn, a
+    session hit ahead of the tool uses, those in transcript order, then by detector id.
+    `errors`, when a list is passed, collects what `run()` collects, with the session
+    address added. Nothing is written and no row is built, so no report number can move.
     """
     for session in sessions:
         address = session_address(session.runtime, session.id)
-        events = [e for e in (session.events or []) if isinstance(e, dict)]
-        position = {}
-        for index, event in enumerate(events):
-            if event.get("kind") == "tool_use" and event.get("id") is not None:
-                position.setdefault(event.get("id"), index)
+        events = session.events
+        position = _tool_use_positions(events)
         found = []
         session_errors = [] if errors is not None else None
         hits = run(events, stances, registry=registry, errors=session_errors)
         for detector_id in sorted(hits):
             for one in hits[detector_id]:
-                at = position.get(one.tool_use_id, -1) if one.tool_use_id else -1
+                at = -1
+                if one.tool_use_id:
+                    try:
+                        at = position.get((one.turn, one.tool_use_id), -1)
+                    except TypeError:
+                        at = -1
                 found.append(((_turn_order(one.turn), at, detector_id), one))
         for entry in session_errors or ():
             errors.append(dict(entry, session=address))
@@ -472,7 +506,8 @@ def explain(sessions, stances=None, registry=DEFAULT, errors=None):
             if at >= 0:
                 event = events[at]
                 field, value = _event_field(event)
-                item.update(tool=event.get("name"), field=field, value=_redact(value))
+                item.update(tool=event.get("name"), field=field,
+                            value=_capped(_redact(value)))
             yield item
 
 
@@ -495,16 +530,29 @@ def explain_text(item):
 
 def explain_row(row):
     """What explain can say about a stored row: that it carries counts only, and the rerun
-    over its runtime and session id that would explain each hit."""
+    over its runtime and session id that would explain each hit.
+
+    The rerun names `--runtime` only for a runtime this release reads, and addresses the
+    session by its bare id when the row names no runtime; each value is shell-quoted.
+    """
+    import shlex
+
+    from .readers import RUNTIMES
+
     row = row if isinstance(row, dict) else {}
     runtime = row.get("runtime") if isinstance(row.get("runtime"), str) else ""
     session_id = row.get("session_id") if isinstance(row.get("session_id"), str) else ""
-    hits = sum(folded_rules(row, {}).values())
-    rerun = "ruleprobe explain"
-    if runtime:
-        rerun += " --runtime %s" % runtime
+    shown = session_address(runtime, session_id) if runtime else (session_id or "(no id)")
+    if not isinstance(row.get("rules"), dict):
+        return _redact("session %s: this row carries no rule counts, so there is no hit "
+                       "to explain" % shown)
+    rerun = ["ruleprobe", "explain"]
+    if runtime in RUNTIMES:
+        rerun += ["--runtime", runtime]
     if session_id:
-        rerun += " --session %s" % session_address(runtime, session_id)
+        rerun += ["--session", session_address(runtime, session_id) if runtime
+                  else session_id]
+    hits = sum(folded_rules(row, {}).values())
     return _redact("session %s: this row carries counts only (%d hit(s)), not the events "
-                  "behind them; rerun `%s` over its transcripts to see each hit"
-                  % (session_address(runtime, session_id), hits, rerun))
+                   "behind them; rerun `%s` over its transcripts to see each hit"
+                   % (shown, hits, " ".join(shlex.quote(part) for part in rerun)))

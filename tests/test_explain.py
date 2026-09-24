@@ -4,6 +4,7 @@
 Every secret here is fake and assembled at run time, so a scanner reading this file finds
 concatenations rather than key shapes.
 """
+import contextlib
 import io
 import json
 import os
@@ -12,12 +13,15 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from corpus import FAKE_KEY, bash, compact, prompt, say, tool_use
-from ruleprobe import Detector, Registry, Session, iter_sessions, measure, report_data
+from ruleprobe import (DEFAULT, Bundle, Detector, Registry, Session, iter_sessions, measure,
+                       report_data)
 from ruleprobe.cli import main
 from ruleprobe.detectors.common import REDACTED, SECRET_PATTERNS, redact
-from ruleprobe.report import explain, explain_row, explain_text, session_address
+from ruleprobe.report import (MAX_EXPLAINED, explain, explain_row, explain_text,
+                              session_address)
 from ruleprobe.validity import event_key
 from test_readers import FIXTURES
 
@@ -36,11 +40,28 @@ FAKE_SECRETS = [
     "sk" + "-" + "s" * 24,
 ]
 
+#: Secrets assigned to a key name, as a credentials file, YAML, a CLI call, a quoted
+#: string and a value on the next line write them: `(text, the value that must not print)`.
+ASSIGNED = [
+    ("aws_secret" + "_access_key = " + "wJalr" + "V" * 20, "wJalr" + "V" * 20),
+    ("AWS_SECRET" + "_ACCESS_KEY: " + "abc" + "Y" * 20, "abc" + "Y" * 20),
+    ("aws configure set aws_secret" + "_access_key " + "Xq" * 10, "Xq" * 10),
+    ("client_secret" + ' = "two words"', "two words"),
+    ("client_secret" + ":\n  " + "nextline" + "N" * 8, "nextline" + "N" * 8),
+]
+
 
 def run_cli(*argv):
     out = io.StringIO()
     code = main(list(argv), out=out)
     return code, out.getvalue()
+
+
+def run_cli_err(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = main(list(argv), out=out)
+    return code, out.getvalue(), err.getvalue()
 
 
 def blocks(text):
@@ -80,6 +101,17 @@ class RedactTests(unittest.TestCase):
         self.assertNotIn("1234-abcd", redact("token " + FAKE_SECRETS[5] + " end"))
         self.assertNotIn("c" * 12, redact(FAKE_SECRETS[3]))
         self.assertNotIn("Z" * 12, redact(FAKE_SECRETS[1]))
+
+    def test_an_assigned_value_goes_in_every_form(self):
+        for text, value in ASSIGNED:
+            with self.subTest(text=text[:16]):
+                redacted = redact("before\n" + text + "\nafter")
+                self.assertNotIn(value, redacted)
+                self.assertTrue(redacted.startswith("before\n"))
+                self.assertTrue(redacted.endswith("\nafter"))
+
+    def test_a_quoted_value_ends_at_its_quote(self):
+        self.assertEqual(redact("client_secret" + "='a b' tail"), REDACTED + " tail")
 
     def test_a_private_key_body_goes_to_its_footer_or_to_the_end(self):
         text = redact("head\n" + FAKE_SECRETS[4] + "\ntail")
@@ -185,6 +217,53 @@ class ExplainTests(unittest.TestCase):
         self.assertIn("not an event in this session", explain_text(items[0]))
 
 
+    def test_two_hits_in_one_turn_are_in_transcript_order(self):
+        events = [prompt(), bash("git commit --no-verify -m x", id="tu1"),
+                  bash("cat notes.txt", id="tu2")]
+        items = list(explain([Session("s", "", "codex", events, "")]))
+        self.assertEqual([(i["key"], i["detector"]) for i in items],
+                         [("1:tu1", "verification/no-verify"),
+                          ("1:tu2", "transcript-hygiene/whole-file-cat")])
+
+    def test_the_event_is_found_by_turn_and_id(self):
+        events = [prompt(1), bash("echo hi", turn=1, id="tu1"), prompt(2),
+                  bash("find .", turn=2, id="tu1")]
+        items = list(explain([Session("s", "", "codex", events, "")]))
+        self.assertEqual([(i["key"], i["value"]) for i in items], [("2:tu1", "find .")])
+
+    def test_a_malformed_session_counts_as_measure_counts_it(self):
+        events = [prompt(), "not an event", None, bash("find ."), {"kind": "tool_use"}]
+        session = Session("s", "", "codex", events, "")
+        items = list(explain([session]))
+        counted = {}
+        for item in items:
+            counted[item["detector"]] = counted.get(item["detector"], 0) + 1
+        self.assertEqual(counted, measure(session)["rules"])
+
+    def test_control_characters_are_escaped(self):
+        events = [prompt(), bash("cat \x1b[2J\rnotes\x07.txt")]
+        items = list(explain([Session("s\x1b]0;x", "", "codex", events, "")]))
+        text = explain_text(items[0])
+        for raw in ("\x1b", "\r", "\x07"):
+            self.assertNotIn(raw, text)
+            self.assertNotIn(raw, items[0]["value"])
+        self.assertIn("cat \\x1b[2J\\x0dnotes\\x07.txt", text)
+        self.assertIn("session   codex:s\\x1b]0;x", text)
+
+    def test_a_long_value_is_cut_and_the_cut_counted(self):
+        content = "x" * (MAX_EXPLAINED * 2) + FAKE_KEY
+        events = [prompt(), tool_use("Write", {"file_path": "a.env", "content": content})]
+        items = list(explain([Session("s", "", "codex", events, "")]))
+        value = items[0]["value"]
+        head, note = value.rsplit("\n", 1)
+        self.assertEqual(len(head), MAX_EXPLAINED)
+        cut = int(re.match(r"\[(\d+) more character\(s\) cut\]$", note).group(1))
+        whole = len(redact(json.dumps({"content": content, "file_path": "a.env"},
+                                      sort_keys=True)))
+        self.assertEqual(cut, whole - MAX_EXPLAINED)
+        self.assertNotIn(FAKE_KEY, value)
+
+
 class StoredRowTests(unittest.TestCase):
     def test_a_row_says_counts_only_and_names_the_rerun(self):
         row = {"session_id": "sess-9", "runtime": "codex",
@@ -198,7 +277,31 @@ class StoredRowTests(unittest.TestCase):
         text = explain_row({"rules": {"a/one": 1}})
         self.assertIn("counts only", text)
         self.assertIn("`ruleprobe explain`", text)
-        self.assertIn("counts only", explain_row(None))
+        self.assertIn("carries no rule counts", explain_row(None))
+
+    def test_no_runtime_uses_the_bare_id(self):
+        text = explain_row({"session_id": "sess-9", "rules": {"a/one": 1}})
+        self.assertIn("`ruleprobe explain --session sess-9`", text)
+        self.assertNotIn(":sess-9", text)
+
+    def test_an_unknown_runtime_drops_runtime_but_keeps_the_address(self):
+        text = explain_row({"session_id": "sess-9", "runtime": "other", "rules": {}})
+        self.assertIn("`ruleprobe explain --session other:sess-9`", text)
+        self.assertNotIn("--runtime", text)
+
+    def test_values_are_shell_quoted(self):
+        text = explain_row({"session_id": "s 1; rm x", "runtime": "codex", "rules": {}})
+        self.assertIn("--runtime codex --session 'codex:s 1; rm x'", text)
+
+    def test_a_row_without_a_rules_map_carries_no_counts(self):
+        for rules in ([1, 2], None, "3"):
+            row = {"session_id": "s", "runtime": "codex"}
+            if rules is not None:
+                row["rules"] = rules
+            with self.subTest(rules=rules):
+                text = explain_row(row)
+                self.assertIn("carries no rule counts", text)
+                self.assertNotIn("hit(s)", text)
 
     def test_a_secret_shaped_session_id_is_redacted(self):
         text = explain_row({"session_id": FAKE_KEY, "runtime": "codex", "rules": {}})
@@ -258,6 +361,11 @@ class ExplainCommandTests(unittest.TestCase):
                 for n, secret in enumerate(FAKE_SECRETS)]
         uses.append(("toolu_bash", "Bash",
                      {"command": "cat > .env <<EOF\n%s\nEOF" % FAKE_SECRETS[6]}))
+        for n, (assigned, _value) in enumerate(ASSIGNED):
+            uses.append(("toolu_a%d" % n, "Write", {"file_path": "/tmp/demo-repo/creds",
+                                                    "content": assigned + "\n"}))
+            uses.append(("toolu_h%d" % n, "Bash",
+                         {"command": "cat > creds <<EOF\n%s\nEOF" % assigned}))
         with open(os.path.join(scratch.name, "secret.jsonl"), "w") as handle:
             handle.write(claude_transcript("sess-secret", uses))
         code, text = run_cli("explain", "--root", scratch.name, "--no-config")
@@ -265,8 +373,79 @@ class ExplainCommandTests(unittest.TestCase):
         self.assertEqual(len(blocks(text)), len(uses))
         for secret in FAKE_SECRETS:
             self.assertNotIn(secret, text)
+        for _assigned, value in ASSIGNED:
+            self.assertNotIn(value, text)
         self.assertFalse(any(re.search(p, text) for p in SECRET_PATTERNS))
         self.assertIn(REDACTED, text)
+
+    def test_since_and_runtime_narrow_the_transcripts_read(self):
+        for argv in (("--since", "2026-09-21"), ("--runtime", "codex")):
+            with self.subTest(argv=argv):
+                code, text, _err = run_cli_err("explain", "--root", FIXTURES,
+                                               "--no-config", *argv)
+                self.assertEqual(code, 0)
+                self.assertEqual([b.split("\n")[0] for b in blocks(text)],
+                                 ["session   codex:rollout-1"])
+
+    def test_rules_prints_the_coverage_block_to_stderr(self):
+        code, text, err = run_cli_err("explain", "--root", FIXTURES, "--no-config",
+                                      "--rules", os.path.join(ROOT, "docs", "rules"))
+        self.assertEqual(code, 0)
+        self.assertTrue(blocks(text))
+        self.assertIn("rules:", err)
+
+    def test_detectors_loads_a_file_and_a_skipped_entry_is_not_silent(self):
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        path = os.path.join(scratch.name, "detectors.yaml")
+        with open(path, "w") as handle:
+            handle.write("version: 1\ndetectors:\n"
+                         "  - id: mine/find\n    rule: mine\n    event: tool_use\n"
+                         "    when:\n      command: {name: [find]}\n"
+                         "  - id: mine/broken\n    rule: mine\n    event: tool_use\n")
+        code, text, err = run_cli_err("explain", "--root", FIXTURES, "--no-config",
+                                      "--detectors", path, "--detector", "mine/find")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(blocks(text)), 1)
+        self.assertIn("detector  mine/find", text)
+        self.assertIn("detector findings: 1", err)
+
+    def test_stance_runs_a_gated_detector_and_plugins_is_accepted(self):
+        gated = os.path.join(FIXTURES, "gated-detector.yaml")
+        base = ("explain", "--root", FIXTURES, "--no-config", "--detectors", gated,
+                "--detector", "gated/commit-message")
+        self.assertEqual(run_cli(*base), (0, ""))
+        code, text = run_cli(*(base + ("--stance", "commits=conventional")))
+        self.assertEqual(code, 0)
+        self.assertEqual(len(blocks(text)), 1)
+        code, text = run_cli("explain", "--root", FIXTURES, "--no-config", "--plugins")
+        self.assertEqual(code, 0)
+        self.assertEqual(text, run_cli("explain", "--root", FIXTURES, "--no-config")[1])
+
+    def test_a_renamed_detector_id_is_folded(self):
+        registry = DEFAULT.copy().rename("old/find", "transcript-hygiene/unfiltered-find")
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            code, text = run_cli("explain", "--root", FIXTURES, "--detector", "old/find")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(blocks(text)), 1)
+        self.assertIn("detector  transcript-hygiene/unfiltered-find", text)
+
+    def test_a_raising_detector_is_named_on_stderr_redacted_and_exits_zero(self):
+        def boom(events, ctx):
+            raise KeyError("x")
+
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        with open(os.path.join(scratch.name, "s.jsonl"), "w") as handle:
+            handle.write(claude_transcript(FAKE_KEY, [("toolu_1", "Bash", {"command": "ls"})]))
+        registry = Registry([Detector("x/boom", "x", "session", boom)])
+        with mock.patch("ruleprobe.cli._bundle_and_registry",
+                        return_value=(Bundle(), registry)):
+            code, text, err = run_cli_err("explain", "--root", scratch.name)
+        self.assertEqual((code, text), (0, ""))
+        self.assertIn("1 detector error(s): x/boom (KeyError) in claude-code:" + REDACTED, err)
+        self.assertNotIn(FAKE_KEY, err)
 
     def test_the_output_is_byte_identical_across_hash_seeds(self):
         outputs = []
