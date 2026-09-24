@@ -27,6 +27,14 @@ continued lazily on a second line.
 
 ---
 
+## Only an underscore break
+
+___
+
+## Only a spaced break
+
+* * *
+
 ## A rule
 
 Say when something did not work.

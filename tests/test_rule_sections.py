@@ -49,7 +49,18 @@ class SplitTests(unittest.TestCase):
                          [("Only a heading", False), ("Only a fence", False),
                           ("Only a table", False), ("Only a table without edge pipes", False),
                           ("Only a blockquote", False), ("Only a thematic break", False),
+                          ("Only an underscore break", False), ("Only a spaced break", False),
                           ("A rule", True)])
+
+    def test_an_html_comment_is_never_text_and_never_a_heading(self):
+        units = sections("# A\n\n<!-- a note -->\n\n# B\n\n<!--\n# x\nhidden\n-->\n\n"
+                         "# B\n\nReal text.\n")
+        self.assertEqual(units, [("A", 0, False), ("B", 4, False), ("B", 11, True)])
+
+    def test_an_indented_code_block_after_a_blank_line_is_code(self):
+        self.assertEqual(sections("# A\n\n    make test\n\n    make lint\n"),
+                         [("A", 0, False)])
+        self.assertEqual(sections("# A\n\nText,\n    continued.\n"), [("A", 0, True)])
 
     def test_a_non_rule_unit_is_in_no_state(self):
         bundle = Bundle(rules=read_rule_file(fixture("non-rules.md"), root=RULES)[1])
@@ -64,7 +75,7 @@ class SplitTests(unittest.TestCase):
         self.assertEqual(bundle.rules, load_bundle(rules_dir=RULES, config=False).rules)
 
 
-class IdTests(unittest.TestCase):
+class TempDir(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="ruleprobe-")
         self.addCleanup(shutil.rmtree, self.dir, True)
@@ -80,6 +91,8 @@ class IdTests(unittest.TestCase):
     def ids(self, path):
         return [e.rule for e in read_rule_file(path, root=self.dir)[1]]
 
+
+class IdTests(TempDir):
     def test_an_id_is_the_path_under_the_rules_directory_and_the_heading_slug(self):
         path = self.write("team/AGENTS.md", "## Use `uv`, not pip!\n\nInstall with uv.\n")
         self.assertEqual(self.ids(path), ["team/AGENTS.md#use-uv-not-pip"])
@@ -115,6 +128,35 @@ class IdTests(unittest.TestCase):
         path = self.write("x.md", "# Example\n\n```\nx\n```\n\n# Example\n\nA rule.\n")
         self.assertEqual(self.ids(path), ["x.md#example-2"])
 
+    def test_a_heading_with_nothing_to_slug_is_a_section(self):
+        path = self.write("x.md", "# !!!\n\nOne.\n\n# \U0001F680\n\nTwo.\n")
+        self.assertEqual(self.ids(path), ["x.md#section", "x.md#section-2"])
+
+    def test_a_byte_order_mark_does_not_hide_the_first_heading(self):
+        path = self.write("x.md", "\ufeff# Testing\n\nRun it.\n")
+        self.assertEqual(self.ids(path), ["x.md#testing"])
+
+    def test_empty_front_matter_is_an_empty_mapping_and_the_file_splits(self):
+        path = self.write("x.md", "---\n---\n# Testing\n\nRun it.\n")
+        self.assertEqual(read_rule_file(path, root=self.dir)[1:],
+                         ([RuleEntry("x.md#testing", path, "unmeasured", "", [])], []))
+
+    def test_a_rule_name_on_a_split_file_is_a_finding(self):
+        path = self.write("x.md", "---\nrule: a/b\n---\n# Testing\n\nRun it.\n")
+        _detectors, entries, findings = read_rule_file(path, root=self.dir)
+        self.assertEqual([e.rule for e in entries], ["x.md#testing"])
+        self.assertEqual([(f.line, f.reason) for f in findings],
+                         [(2, "rule: does not apply to a file split at its headings; its "
+                              "rules are named by path and heading")])
+
+    def test_a_collision_reaches_the_bundle_s_findings(self):
+        self.write("rules/x.md", "# A\n\nOne.\n\n# A 2\n\nTwo.\n\n# A\n\nThree.\n")
+        bundle = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
+        self.assertEqual([(f.line, f.reason) for f in bundle.findings],
+                         [(9, "the section id x.md#a-2 is already taken in this file")])
+        self.assertIn("findings: 1 (everything else still loaded)",
+                      bundle.summary(relative_to=self.dir))
+
     def test_slug(self):
         self.assertEqual([slug(h) for h in ("Testing", "  Pull requests ", "C++ & you",
                                             "snake_case-ok")],
@@ -141,6 +183,35 @@ class IdTests(unittest.TestCase):
     def test_a_closing_hash_sequence_is_not_part_of_the_heading(self):
         path = self.write("x.md", "## Testing ##\n\nRun it.\n")
         self.assertEqual(self.ids(path), ["x.md#testing"])
+
+
+class SingleRulePathTests(TempDir):
+    """A headed file that takes a one-rule path stays one rule, whatever its sections."""
+
+    TWO = "# One\n\nFirst.\n\n# Two\n\nSecond.\n"
+
+    def entries(self, front):
+        path = self.write("x.md", "---\n%s---\n%s" % (front, self.TWO))
+        return [(e.rule, e.state, e.reason) for e in read_rule_file(path, root=self.dir)[1]]
+
+    def test_front_matter_that_does_not_parse(self):
+        self.assertEqual(self.entries("rule: a\n  bad: x\n"),
+                         [("x", "unmeasured", "front matter did not parse")])
+
+    def test_front_matter_that_is_a_list(self):
+        self.assertEqual(self.entries("- a\n"),
+                         [("x", "unmeasured", "front matter is not a mapping")])
+
+    def test_a_detector_that_does_not_compile(self):
+        self.assertEqual(self.entries("detector:\n  when: {comand: cat}\n"),
+                         [("x", "unmeasured", "its detector did not compile")])
+
+    def test_a_bare_detector_key(self):
+        self.assertEqual(self.entries("detector:\n"),
+                         [("x", "unmeasured", "its detector did not compile")])
+
+    def test_a_bare_opt_out_key(self):
+        self.assertEqual(self.entries("opt_out:\n"), [("x", "dark", "no reason given")])
 
 
 class CoverageBlockTests(unittest.TestCase):

@@ -60,8 +60,8 @@ carries `renamed`, the effective fold map of retired detector id to current id t
 were read through. It is complete, so a saved result folds a retired id by applying it as it
 stands, never by merging it again with a later release's shipped map.
 The result also carries `coverage`, on every run: `measured`, `dark` and `unmeasured` count
-rule files, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
-measured share of them. With no rule files read, the counts are zero and `share` is `null`.
+rules, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
+measured share of them. With no rules read, the counts are zero and `share` is `null`.
 
 A transcript does not record the configuration it ran under, so `--stance dimension=variant`
 is how you say what it was. It is repeatable, it is what `--by stance` groups on, and it is
@@ -283,11 +283,12 @@ detector, and the report will not pretend otherwise.
 
 **A rule file is one rule per section.** A file whose front matter carries `detector:` or
 `opt_out:` is one rule, named by its `rule:` key or its file name. Any other file is split at
-its headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage block, each
+its ATX (`#`) headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage block, each
 with the id `<path>#<heading-slug>` under `--rules`, and a repeated heading takes `-2`. A
-section holding only a fenced block, a table or a blockquote is not a rule, and a file with no
-heading stays one rule named for the file. A known miss: text above the first heading of a
-headed file is no rule, and list items are never split.
+section holding only a code block, an HTML comment, a table or a blockquote is not a rule, and
+a file with no heading stays one rule, named by its `rule:` key or else its file name. Known
+misses: text above the first heading of a headed file is no rule, a setext heading (text
+underlined with `===` or `---`) does not split, and list items are never split.
 
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see

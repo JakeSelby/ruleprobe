@@ -252,7 +252,7 @@ class MalformedRuleTests(Temp):
         self.assertEqual(finding.line, 6)
         self.assertTrue(finding.path.endswith("broken.md"))
         self.assertIn("unknown matcher", finding.reason)
-        self.assertIn("detector findings: 1", bundle.summary(relative_to=self.dir))
+        self.assertIn("findings: 1 (everything else still loaded)", bundle.summary(relative_to=self.dir))
 
     def test_a_rule_whose_detector_did_not_compile_is_unmeasured_not_measured(self):
         self.write("rules/broken.md", MALFORMED)
@@ -327,7 +327,7 @@ class CliTests(Temp):
         code, text = self.run_cli("report", "--root", FIXTURES, "--no-config",
                                   "--detectors", path)
         self.assertEqual(code, 0)
-        self.assertIn("detector findings: 1", text)
+        self.assertIn("findings: 1 (everything else still loaded)", text)
         self.assertIn("unknown matcher", text)
         self.assertIn("transcript-hygiene/whole-file-cat", text)
 
