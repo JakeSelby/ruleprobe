@@ -19,7 +19,10 @@ jobs:
         with:
           python-version: "3.x"
       - name: Tag, version and changelog agree
-        run: python scripts/release_preflight.py --tag "$GITHUB_REF_NAME"
+        # A patch release is checked against its series' .0 tag, which the checkout lacks.
+        run: |
+          git fetch --no-tags --depth=1 origin '+refs/tags/v*:refs/tags/v*'
+          python scripts/release_preflight.py --tag "$GITHUB_REF_NAME"
       - name: Source gates
         run: |
           python -m unittest discover -s tests

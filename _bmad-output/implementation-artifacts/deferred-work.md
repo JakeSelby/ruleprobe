@@ -25,6 +25,8 @@ the story's review findings hold the full reasoning.
   keys; a `text` read of `source: heredocs` is undecided over a skipped parse too, as the
   `ruleprobe/matchers.py` docstring says. Amend AD-4 through `bmad-architecture` update intent, for
   example with #36, which names the 0.2 break.
+  - Amended 2026-09-23: AD-4 now names the heredocs `text` read among the undecided reads, amended
+    through `bmad-architecture` update intent with RP-T001 (#36).
 - `command: {unparsed: true}` beside a segment key is undecided on a skipped command and false on a
   parsed one, so it never fires and raises no error. Pre-existing since 0.1.0; a spec-time
   `DeclarativeError` would change the AD-7 vocabulary.
@@ -61,3 +63,11 @@ the story's review findings hold the full reasoning.
 - A consumer detector registered under an id that a shipped rename retires has its hits counted under
   the successor, and its own report line stays empty; validity moves its labels away. Refusing such
   an id in `Registry.add` would change how entry-point plugins load, so it is the maintainer's call.
+
+## Found while amending the architecture spine for RP-T001.md (2026-09-23)
+
+- Two rule files under `--rules` with the same file name in different directories, or the same
+  front-matter `rule:` name, get one rule name under AD-12, and `rules.load_rules_dir` neither refuses
+  nor reports it, so nothing tells the two apart. Whether a repeated file-rule name is a
+  finding is open, logged in the architecture spine's memlog; it changes loader output, so it is the
+  maintainer's call.

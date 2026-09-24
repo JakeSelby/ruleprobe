@@ -171,7 +171,9 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
     skipped parse, so both `not` over it and `absent` of it fire (historical, 0.1.0; implemented
     under #19, unreleased, shipping in v0.2.0).
   - The segment matchers are every `command` key except `regex` and `unparsed`, every `git` key and
-    every `env` key. Over a command the parse skipped, a segment matcher returns undecided.
+    every `env` key. Over a command the parse skipped, a segment matcher returns undecided, and so
+    does a `text` read of `source: heredocs`, because the parse is what finds heredoc bodies.
+    `ruleprobe/matchers.py`'s module docstring states the same list.
   - `any`, `all` and `not` pass undecided through: `not` of undecided is undecided; `any` is true on
     any true, else undecided on any undecided; `all` is false on any false, else undecided on any
     undecided. A `when` that is undecided produces no hit.
@@ -362,10 +364,14 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
   - `ruleprobe/rules.py` owns binding and the rule id. The report reads its `Bundle` and never binds.
   - A rule is `measured`, `dark` or `unmeasured` (`STATES`), and a binding records its source: own or
     catalog.
-  - A file bound in its front matter (FR-13) keeps one rule, whose id is the file's path relative to
-    `--rules`. A section rule's id is that path, `#`, and a slug of its heading text, so it survives an
-    edit above it. A slug repeated in one file takes an ordinal suffix in document order
-    (`CLAUDE.md#testing`, `CLAUDE.md#testing-2`); a collision that remains is a finding.
+  - A file bound in its front matter (FR-13) keeps one rule, named by its front-matter `rule:` key,
+    else by its file name without extension. A `rule:` with no value is ignored; any other value
+    that is not a non-empty, slash-free string is a finding, and the file name stands. On an
+    unbound file split at its headings, any `rule:` key is a finding that it does not apply,
+    since section rules are named by path and heading. A section rule's id is the file's path relative
+    to `--rules`, `#`, and a slug of its heading text, so it survives an edit above it. A slug
+    repeated in one file takes an ordinal suffix in document order (`CLAUDE.md#testing`,
+    `CLAUDE.md#testing-2`); a collision that remains is a finding.
     The split unit is the heading only, for 0.2 (PRD Q2, decided 2026-09-23); list items are not split,
     so a section of bullet rules is one rule.
   - Detector precedence is fixed: shipped, then catalog, then the three discovery places in
