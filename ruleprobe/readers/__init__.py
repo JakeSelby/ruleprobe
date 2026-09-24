@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Transcript readers, and `iter_sessions` over them.
 
-A reader is a module with `ROOT`, `transcripts(root)` and `read(path)`. Adding a runtime is
-adding one of those and a line in `RUNTIMES`.
+A reader is a module with `ROOT`, `transcripts(root)` and `read(path, empty=False)`. `read`
+returns None for a transcript that yields no event; with `empty=True` it returns one that
+names a session with no events instead, so the `since` cut-off applies before the no-event
+note does. Adding a runtime is adding one of those and a line in `RUNTIMES`.
 """
 import datetime
 import json
@@ -66,7 +68,8 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.
     - `errors` - a list, when you pass one, collecting `{"path": ..., "error": ...}` for
-      every transcript a reader could not read and every one that held no session.
+      every transcript a reader could not read and every one that held no session or no
+      event. One with no event that `since` would have dropped is dropped, not recorded.
 
     Yields `Session` objects. A file that cannot be read, or holds no session, is skipped:
     a report over a hundred transcripts is not worth losing to one bad file. It is counted
@@ -80,7 +83,7 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
     stamp = _since_stamp(since)
     for path, reader in _paths(root, runtime):
         try:
-            session = reader.read(path)
+            session = reader.read(path, empty=True)
         except Exception as exc:
             if errors is not None:
                 errors.append({"path": path, "error": type(exc).__name__})
@@ -90,6 +93,10 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
                 errors.append({"path": path, "error": "no session in it"})
             continue
         if stamp and session.ended and session.ended[:10] < stamp:
+            continue
+        if not session.events:
+            if errors is not None:
+                errors.append({"path": path, "error": "no session in it"})
             continue
         yield session
 

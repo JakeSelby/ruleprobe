@@ -6,6 +6,8 @@ Newer Claude Code writes each subagent to `<session>/subagents/agent-<id>.jsonl`
 every line of it `isSidechain`, with an `agentId` and the parent's `sessionId`. The
 transcripts here are synthetic, written line by line into a temporary directory.
 """
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -13,10 +15,12 @@ import tempfile
 import unittest
 
 from ruleprobe import iter_sessions, run
+from ruleprobe.cli import main
 from ruleprobe.readers import claude_code, codex
 
 PARENT = "sess-parent"
 AGENT = "a1b2c3d4"
+SUBAGENT_ID = PARENT + "/" + AGENT
 
 
 def _line(kind, message=None, **extra):
@@ -63,6 +67,13 @@ SUBAGENT = [
 ]
 
 
+def _cli(*argv):
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stderr(err):
+        code = main(list(argv), out=out)
+    return code, out.getvalue(), err.getvalue()
+
+
 class _Files(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp()
@@ -84,9 +95,9 @@ class SubagentFileTests(_Files):
                                SUBAGENT)
         self.session = claude_code.read(self.path)
 
-    def test_it_is_a_session_keyed_by_its_agent_id(self):
+    def test_it_is_a_session_keyed_by_its_parent_and_agent_id(self):
         self.assertIsNotNone(self.session)
-        self.assertEqual(self.session.id, AGENT)
+        self.assertEqual(self.session.id, SUBAGENT_ID)
         self.assertEqual(self.session.repo, "demo-repo")
         self.assertEqual((self.session.started, self.session.ended),
                          ("2026-09-20T10:00:01Z", "2026-09-20T10:00:06Z"))
@@ -124,7 +135,30 @@ class SubagentFileTests(_Files):
     def test_iter_sessions_yields_the_parent_and_the_subagent_in_path_order(self):
         self.write(PARENT + ".jsonl", [_prompt("Delegate it."), _say("msg-p", "Done.")])
         ids = [s.id for s in iter_sessions(root=self.root)]
-        self.assertEqual(ids, [PARENT, AGENT])
+        self.assertEqual(ids, [PARENT, SUBAGENT_ID])
+
+    def test_marker_less_metadata_lines_do_not_decide_it(self):
+        path = self.write("with-metadata.jsonl", [_line("summary")] + SUBAGENT[:1] + [
+            _line("system", subtype="informational"), _line("attachment")] + SUBAGENT[1:])
+        session = claude_code.read(path)
+        self.assertEqual(session.id, SUBAGENT_ID)
+        self.assertEqual(session.events, self.session.events)
+
+    def test_explain_and_label_take_its_address(self):
+        address = "claude-code:" + SUBAGENT_ID
+        code, text, err = _cli("explain", "--root", self.root, "--no-config",
+                               "--session", address, "--detector", "verification/no-verify")
+        self.assertEqual(code, 0, err)
+        self.assertIn("session   %s\nkey       1:toolu_a\n" % address, text)
+        corpus = os.path.join(self.root, "..", os.path.basename(self.root) + "-corpus")
+        os.mkdir(corpus)
+        self.addCleanup(shutil.rmtree, corpus)
+        code, _text, err = _cli("label", "--root", self.root, "--no-config",
+                                "--session", address, "--detector", "verification/no-verify",
+                                "--key", "1:toolu_a", "--corpus", corpus, "--name", "sub")
+        self.assertEqual(code, 0, err)
+        with open(os.path.join(corpus, "sessions", "sub.events.jsonl")) as handle:
+            self.assertIn("--no-verify", handle.read())
 
 
 class ParentSidechainTests(_Files):
@@ -137,8 +171,27 @@ class ParentSidechainTests(_Files):
         ])
         session = claude_code.read(path)
         self.assertEqual(session.id, PARENT)
-        self.assertEqual([e["kind"] for e in session.events], ["user_prompt", "assistant_text"])
+        self.assertEqual([e["kind"] for e in session.events],
+                         ["user_prompt", "assistant_text"])
         self.assertNotIn("verification/no-verify", run(session.events))
+
+    def test_a_parent_whose_own_lines_carry_an_agent_id_is_still_a_parent(self):
+        path = self.write("stamped.jsonl", [
+            _prompt("Delegate it.", agentId=AGENT),
+            _call("toolu_s", "git commit --no-verify -m wip", **_agent()),
+            _say("msg-p", "Done.", agentId=AGENT),
+        ])
+        session = claude_code.read(path)
+        self.assertEqual(session.id, PARENT)
+        self.assertEqual([e["kind"] for e in session.events],
+                         ["user_prompt", "assistant_text"])
+        self.assertNotIn("verification/no-verify", run(session.events))
+
+    def test_a_parent_holding_only_one_agents_sidechain_lines_reads_as_that_agents(self):
+        # By design: with no line of its own left, nothing tells this file from the
+        # subagent's own, and its lines are that agent's work either way.
+        path = self.write("only-sidechain.jsonl", SUBAGENT)
+        self.assertEqual(claude_code.read(path).id, SUBAGENT_ID)
 
     def test_a_file_mixing_agent_ids_is_not_one_agents_own(self):
         other = dict(isSidechain=True, agentId="ffff0000")
@@ -163,21 +216,33 @@ class NoEventTests(_Files):
                          [("blank.jsonl", "no session in it"),
                           ("empty.jsonl", "no session in it")])
 
+    def test_an_empty_transcript_older_than_since_is_dropped_not_noted(self):
+        self.write("old.jsonl", [_line("attachment")])
+        self.write("new.jsonl", [dict(_line("attachment"), timestamp="2026-09-22T00:00:00Z")])
+        errors = []
+        self.assertEqual(list(iter_sessions(root=self.root, since="2026-09-21",
+                                            errors=errors)), [])
+        self.assertEqual([(os.path.basename(e["path"]), e["error"]) for e in errors],
+                         [("new.jsonl", "no session in it")])
+        self.assertIsNotNone(claude_code.read(os.path.join(self.root, "old.jsonl"),
+                                              empty=True))
+
     def test_meta_lines_alone_are_no_session(self):
         path = self.write("meta.jsonl", [_prompt("<command>", isMeta=True)])
         self.assertIsNone(claude_code.read(path))
 
 
 def _codex(kind, payload, second=0):
-    return {"type": kind, "timestamp": "2026-09-21T08:00:%02d.000Z" % second, "payload": payload}
+    return {"type": kind, "timestamp": "2026-09-21T08:00:%02d.000Z" % second,
+            "payload": payload}
 
 
 class CodexNoEventTests(_Files):
     META = _codex("session_meta", {"id": "rollout-empty", "cwd": "/work/demo-repo"})
 
     def test_a_rollout_with_a_session_id_and_no_event_is_no_session_and_a_note(self):
-        empty = self.write("a-rollout.jsonl", [self.META,
-                                               _codex("turn_context", {"model": "model-b"}, 1)])
+        turn = _codex("turn_context", {"model": "model-b"}, 1)
+        empty = self.write("a-rollout.jsonl", [self.META, turn])
         self.write("b-rollout.jsonl", [self.META])
         full = self.write("c-rollout.jsonl", [self.META, _codex("response_item", {
             "type": "message", "role": "user",
@@ -189,6 +254,17 @@ class CodexNoEventTests(_Files):
         self.assertEqual([(os.path.basename(e["path"]), e["error"]) for e in errors],
                          [("a-rollout.jsonl", "no session in it"),
                           ("b-rollout.jsonl", "no session in it")])
+
+    def test_an_empty_rollout_older_than_since_is_dropped_not_noted(self):
+        early = dict(self.META, timestamp="2026-09-20T08:00:00.000Z")
+        self.write("old-rollout.jsonl", [early])
+        late = dict(self.META, timestamp="2026-09-22T00:00:00.000Z")
+        self.write("new-rollout.jsonl", [late])
+        errors = []
+        self.assertEqual(list(iter_sessions(root=self.root, runtime="codex",
+                                            since="2026-09-21", errors=errors)), [])
+        self.assertEqual([(os.path.basename(e["path"]), e["error"]) for e in errors],
+                         [("new-rollout.jsonl", "no session in it")])
 
 
 if __name__ == "__main__":
