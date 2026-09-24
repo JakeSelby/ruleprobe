@@ -77,6 +77,23 @@ from `compile_matcher` returns that undecided value, which is falsy: a Python ca
 negates a predicate itself reads it as false and can over-count. Either compose through the
 declarative `not`, `any` and `all`, or test the result with `is_undecided` before negating it.
 
+`order`, and `absent` with `scope: turn`, also count opportunities - each point at which the
+rule applied, and whether it was followed - as the detector's `opportunities`. It and `fn`
+read one evaluation: the detector keeps the last event list it was handed and what it found
+there, so the second of the two calls on the same list evaluates nothing, and a hit is
+always an opportunity. Each event `first` matches opens one `order` opportunity, followed
+when `then` matched within `within`, so a hit is a followed opportunity. Each turn in the
+event list is one `absent` opportunity, followed when `of` matched in it, so a hit is one
+not followed; `absent` has no trigger, so a turn in which the rule asked for nothing is an
+opportunity too. `absent` with `scope: session`, `change`, and every detector whose `when`
+reads one event at a time (`tool`, `command`, `any` and the rest) count none: their
+`opportunities` is `None`. Undecided stays undecided here as well: an event `first` is
+undecided on, an `order` whose `then` is never true and undecided at least once within the
+window, and an `absent` turn holding an undecided candidate and no true one each have
+`followed` of `None` - never false. The callable returns those undecided triples too, so
+the length of its list is not the opportunity count: the count is the triples whose
+`followed` is `True` or `False`, and the undecided ones are counted apart.
+
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
 fires.
@@ -134,11 +151,6 @@ def is_undecided(value):
 
 def _not3(value):
     return _UNDECIDED if value is _UNDECIDED else not value
-
-
-def _maybe(value):
-    """True or undecided: anything but a decided false."""
-    return value is _UNDECIDED or bool(value)
 
 
 def _any3(values):
@@ -204,10 +216,19 @@ class _Env(object):
 class _Aggregate(object):
     """A matcher that reads the whole session and returns hits itself."""
 
-    __slots__ = ("run",)
+    __slots__ = ("run", "evaluate", "opportunities")
 
-    def __init__(self, run):
+    def __init__(self, run, evaluate=None, opportunities=None):
+        # With `evaluate`, `run` and `opportunities` take its result rather than the session,
+        # so the compiled detector can evaluate once for both.
         self.run = run
+        self.evaluate = evaluate
+        self.opportunities = opportunities
+
+
+def _followed(value):
+    """A three-valued match as an opportunity's `followed`: `True`, `False`, or `None`."""
+    return None if value is _UNDECIDED else bool(value)
 
 
 # --- reading a spec safely -------------------------------------------------------------
@@ -662,15 +683,24 @@ def _a_order(value, where, owner, key):
     if not isinstance(within, int) or isinstance(within, bool) or within < 1:
         where.fail("order within must be a positive number", value, "within")
 
-    def run(events, env):
-        hits = []
+    def evaluate(events, env):
+        # Every event `first` does not decidedly miss, with whether `then` followed it. A
+        # hit is one followed; `run` and `opportunities` both read this one result.
+        out = []
         for i, event in enumerate(events):
-            if not first(event, env):
+            opened = first(event, env)
+            if opened is _UNDECIDED:
+                out.append((_hit(event), None))
                 continue
-            distance = 0
+            if not opened:
+                continue
+            followed, distance = False, 0
             for later in events[i + 1:]:
-                if then(later, env):
-                    hits.append(_hit(event))
+                seen = then(later, env)
+                if seen is _UNDECIDED:
+                    followed = None
+                elif seen:
+                    followed = True
                     break
                 # A `tool_result` is the answer to the call before it, not a step the agent
                 # took, and on a Claude Code transcript there is one after every call. Left
@@ -680,8 +710,15 @@ def _a_order(value, where, owner, key):
                 distance += 1
                 if distance >= within:
                     break
-        return hits
-    return _Aggregate(run)
+            out.append((_hit(event), followed))
+        return out
+
+    def run(found):
+        return [at for at, followed in found if followed is True]
+
+    def opportunities(found):
+        return [(turn, tool_use_id, followed) for (turn, tool_use_id), followed in found]
+    return _Aggregate(run, evaluate, opportunities)
 
 
 def _a_absent(value, where, owner, key):
@@ -694,25 +731,35 @@ def _a_absent(value, where, owner, key):
     if scope not in ("session", "turn"):
         where.fail("unknown absent scope %r; session or turn" % (scope,), value, "scope")
 
-    def run(events, env):
-        if scope == "session":
+    if scope == "session":
+        def run(events, env):
             # A session with no events at all - an aborted rollout carrying only its
             # header - is not a session in which something failed to happen. Counting one
             # as a hit walks a rule like `no-test-run` towards 100% on nothing.
             if not events or _any3(of(event, env) for event in events) is not False:
                 return []
             return [(events[-1].get("turn", 0), None)]
-        # A turn is absent only when every event in it is decidedly not `of`: one the
-        # parse could not read may have been the very thing asked for.
-        order, present = [], set()
+        return _Aggregate(run)
+
+    def evaluate(events, env):
+        # Each turn, in the order it first appears, with whether `of` matched in it. A turn
+        # is absent only when every event in it is decidedly not `of`: one the parse could
+        # not read may have been the very thing asked for.
+        order, seen = [], {}
         for event in events:
             turn = event.get("turn", 0)
-            if turn not in order:
+            if turn not in seen:
                 order.append(turn)
-            if _maybe(of(event, env)):
-                present.add(turn)
-        return [(turn, None) for turn in order if turn not in present]
-    return _Aggregate(run)
+                seen[turn] = []
+            seen[turn].append(of(event, env))
+        return [(turn, _followed(_any3(seen[turn]))) for turn in order]
+
+    def run(found):
+        return [(turn, None) for turn, followed in found if followed is False]
+
+    def opportunities(found):
+        return [(turn, None, followed) for turn, followed in found]
+    return _Aggregate(run, evaluate, opportunities)
 
 
 def _a_change(value, where, owner, key):
@@ -865,6 +912,8 @@ def _snippet(event, where, container, index):
     out = dict(spec)
     out.setdefault("kind", "tool_use")
     out.setdefault("turn", index + 1)
+    if not isinstance(out["turn"], int) or isinstance(out["turn"], bool):
+        where.fail("an event snippet's turn is a whole number", spec, "turn")
     if out["kind"] == "tool_use":
         out.setdefault("name", "Bash")
         out.setdefault("id", "example-%d" % (index + 1))
@@ -901,7 +950,27 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
     examples = compile_examples(spec.get("examples"),
                                 _Where(path, lines, where.at(spec, "examples")), spec)
 
-    if isinstance(matcher, _Aggregate):
+    opportunities = None
+    if isinstance(matcher, _Aggregate) and matcher.evaluate is not None:
+        run, count, evaluate = matcher.run, matcher.opportunities, matcher.evaluate
+        # The last event list and what was found in it. Holding the list itself, not its
+        # id, means the id cannot be reused by another list while the entry stands.
+        memo = [None, None]
+
+        def evaluated(events, ctx):
+            if memo[0] is not events:
+                found = evaluate(events, _Env(ctx))
+                memo[:] = [events, found]
+            return memo[1]
+
+        def fn(events, ctx):
+            return run(evaluated(events, ctx))
+
+        def opportunities(events, ctx):
+            return count(evaluated(events, ctx))
+
+        opportunities.__name__ = re.sub(r"\W", "_", detector_id) + "_opportunities"
+    elif isinstance(matcher, _Aggregate):
         run = matcher.run
 
         def fn(events, ctx):
@@ -915,7 +984,8 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
                     if selects(event) and matcher(event, env)]
 
     fn.__name__ = re.sub(r"\W", "_", detector_id)
-    return Detector(detector_id, rule, event_kind, fn, gate, examples)
+    return Detector(detector_id, rule, event_kind, fn, gate, examples,
+                    opportunities=opportunities)
 
 
 register_compiler(SPEC_KIND, lambda spec: compile_detector(spec))

@@ -9,8 +9,8 @@ Run: python3 -m unittest discover -s tests
 """
 import unittest
 
-from corpus import FAKE_KEY, bash, compact, prompt, say, tool_use
-from ruleprobe import Registry, run
+from corpus import FAKE_KEY, bash, compact, prompt, say, tool_result, tool_use
+from ruleprobe import Registry, analyse, run
 from ruleprobe.declarative import DeclarativeError, parse_with_lines
 from ruleprobe.matchers import compile_detector
 from ruleprobe.shell import MAX_COMMAND, Parsed
@@ -530,6 +530,135 @@ class UndecidedTests(unittest.TestCase):
         self.assertEqual([h.turn for h in hits(when, events, event="session")], [2])
         when = {"absent": {"of": PYTEST, "scope": "session"}}
         self.assertEqual(count(when, events, event="session"), 0)
+
+
+def opportunities(when, events):
+    """The `(turn, tool_use_id, followed)` triples a one-matcher session detector counts,
+    beside the hits `run()` gives it; `None` for a detector that defines none."""
+    detector = compile_detector({"id": "t/x", "rule": "t", "event": "session",
+                                 "when": when}, "<test>")
+    if detector.opportunities is None:
+        return None, hits(when, events, event="session")
+    ctx = analyse(events)
+    return detector.opportunities(ctx.events, ctx), hits(when, events, event="session")
+
+
+class OpportunityTests(unittest.TestCase):
+    ABSENT = {"absent": {"of": PYTEST, "scope": "turn"}}
+    ORDER = {"order": {"first": {"git": {"subcommand": "commit"}},
+                       "then": {"git": {"subcommand": "push"}}, "within": 1}}
+
+    def test_each_turn_is_one_absent_opportunity_followed_when_of_matched_in_it(self):
+        events = [bash("pytest -q", turn=1), bash("ls", turn=2),
+                  bash("ls", turn=3), bash("pytest -x", turn=3, id="tu2")]
+        found, hit = opportunities(self.ABSENT, events)
+        self.assertEqual(found, [(1, None, True), (2, None, False), (3, None, True)])
+        self.assertEqual([h.turn for h in hit], [2])
+
+    def test_each_first_match_opens_one_order_opportunity(self):
+        events = [bash("git commit -m a", id="tu1"), tool_result("ok", "Bash", "tu1"),
+                  bash("git push", id="tu2"),
+                  bash("git commit -m b", turn=2, id="tu3"), bash("ls", turn=2, id="tu4"),
+                  bash("git push", turn=2, id="tu5")]
+        found, hit = opportunities(self.ORDER, events)
+        self.assertEqual(found, [(1, "tu1", True), (2, "tu3", False)])
+        self.assertEqual([h.tool_use_id for h in hit], ["tu1"])
+
+    def test_a_session_with_nothing_to_open_one_has_no_opportunity(self):
+        self.assertEqual(opportunities(self.ORDER, [bash("ls")])[0], [])
+        self.assertEqual(opportunities(self.ABSENT, [])[0], [])
+
+    def test_session_scope_change_and_event_matchers_define_none(self):
+        events = [bash("ls")]
+        for when in ({"absent": {"of": PYTEST}}, {"absent": {"of": PYTEST, "scope": "session"}},
+                     {"change": {"kind": "assistant_text", "field": "model"}}, PYTEST):
+            with self.subTest(when=when):
+                self.assertIsNone(opportunities(when, events)[0])
+
+    def test_an_absent_turn_with_an_undecided_candidate_and_no_true_one_is_undecided(self):
+        events = [bash(SKIPPED[1], turn=1), bash("ls", turn=1, id="tu2"),
+                  bash(SKIPPED[1], turn=2), bash("pytest -q", turn=2, id="tu2"),
+                  bash("ls", turn=3)]
+        found, hit = opportunities(self.ABSENT, events)
+        self.assertEqual(found, [(1, None, None), (2, None, True), (3, None, False)])
+        self.assertEqual([h.turn for h in hit], [3])
+
+    def test_an_undecided_first_is_an_undecided_opportunity_and_no_hit(self):
+        when = {"order": {"first": {"git": {"subcommand": "push"}},
+                          "then": {"command": {"name": "ls"}}}}
+        found, hit = opportunities(when, [bash(UNREAD_PUSH, id="tu1"), bash("ls", id="tu2")])
+        self.assertEqual((found, hit), ([(1, "tu1", None)], []))
+        found, hit = opportunities(when, [bash("git push", id="tu1"), bash("ls", id="tu2")])
+        self.assertEqual(found, [(1, "tu1", True)])
+        self.assertEqual(len(hit), 1)
+
+    def test_an_undecided_then_is_undecided_unless_a_true_one_follows_in_the_window(self):
+        # `first` is a `regex`, which stays decided over the unread push, so the push opens
+        # no undecided opportunity of its own.
+        when = {"order": {"first": {"command": {"regex": "^git add"}},
+                          "then": {"git": {"subcommand": "push"}}, "within": 2}}
+        add, unread = bash("git add a", id="tu1"), bash(UNREAD_PUSH, id="tu2")
+        cases = [([add, unread, bash("ls", id="tu3")], None, 0),
+                 ([add, unread, bash("git push", id="tu3")], True, 1),
+                 ([add, bash("ls", id="tu2"), bash("ls", id="tu3"), unread], False, 0)]
+        for events, followed, count_ in cases:
+            with self.subTest(followed=followed):
+                found, hit = opportunities(when, events)
+                self.assertEqual(found, [(1, "tu1", followed)])
+                self.assertEqual(len(hit), count_)
+
+
+class SharedEvaluationTests(unittest.TestCase):
+    """`fn` and `opportunities` read one evaluation per event list."""
+
+    def evaluations(self, calls):
+        import ruleprobe.matchers as matchers
+        made = []
+        real = matchers._Env
+
+        def counting(ctx):
+            made.append(ctx)
+            return real(ctx)
+
+        matchers._Env = counting
+        try:
+            calls()
+        finally:
+            matchers._Env = real
+        return len(made)
+
+    def test_both_calls_on_one_list_evaluate_once_and_another_list_again(self):
+        for when in (OpportunityTests.ORDER, OpportunityTests.ABSENT):
+            with self.subTest(when=when):
+                detector = compile_detector({"id": "t/x", "rule": "t", "event": "session",
+                                             "when": when}, "<test>")
+                first = analyse([bash("git commit -m a", id="tu1"), bash("git push", id="tu2")])
+                second = analyse([bash("git commit -m a", id="tu1"), bash("ls", id="tu2")])
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.fn(first.events, first),
+                    detector.opportunities(first.events, first))), 1)
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.opportunities(second.events, second),
+                    detector.fn(second.events, second))), 1)
+                self.assertEqual(len(detector.fn(second.events, second)),
+                                 0 if "order" in when else 1)
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.fn(first.events, first))), 1)
+
+
+class SnippetTurnTests(unittest.TestCase):
+    def test_a_snippet_turn_that_is_not_a_whole_number_is_refused_with_a_line(self):
+        text = ("id: t/x\nevent: session\nwhen:\n  absent:\n    of: {tool: Write}\n"
+                "    scope: turn\nexamples:\n  fire:\n    - event: {turn: [1], input: {}}\n")
+        spec, lines = parse_with_lines(text, "<test>")
+        for bad in ([1], "1", True, 1.5):
+            with self.subTest(turn=bad):
+                spec["examples"]["fire"][0]["event"]["turn"] = bad
+                with self.assertRaisesRegex(DeclarativeError, "turn is a whole number") as cm:
+                    compile_detector(spec, "<test>", lines)
+                self.assertGreater(cm.exception.line, 0)
+        spec["examples"]["fire"][0]["event"]["turn"] = 2
+        self.assertIsNotNone(compile_detector(spec, "<test>", lines).opportunities)
 
 
 if __name__ == "__main__":

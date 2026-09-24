@@ -39,17 +39,25 @@ class Detector(object):
     - `examples` - optional, an `Examples(fire, skip)` of minimal cases the detector says
       it should and should not fire on, scored by `ruleprobe.validity`. A declarative
       detector fills this from its `examples:` block; `None` means nobody said.
+    - `opportunities` - optional and keyword-only, a callable over `(events, ctx)` returning
+      `[(turn, tool_use_id, followed), ...]`: each point at which the rule applied, and
+      whether it was followed - `True`, `False`, or `None` when that could not be decided.
+      Undecided triples are in the list, so its length is not the opportunity count.
+      It travels beside `fn` rather than inside its return, so `fn` keeps its shape. A
+      declarative `order`, or `absent` with `scope: turn`, fills it. It is `None` when a
+      detector defines none, including a subclass that never set it, once registered.
     """
 
-    __slots__ = ("id", "rule", "event", "fn", "gate", "examples")
+    __slots__ = ("id", "rule", "event", "fn", "gate", "examples", "opportunities")
 
-    def __init__(self, id, rule, event, fn, gate=None, examples=None):
+    def __init__(self, id, rule, event, fn, gate=None, examples=None, *, opportunities=None):
         self.id = id
         self.rule = rule
         self.event = event
         self.fn = fn
         self.gate = gate
         self.examples = examples
+        self.opportunities = opportunities
 
     def enabled(self, stances):
         if self.gate is None:
@@ -135,6 +143,14 @@ class Registry(object):
                              % (detector.event, ", ".join(sorted(EVENT_KINDS))))
         if not callable(detector.fn):
             raise TypeError("detector %s has no callable fn" % detector.id)
+        # A `__slots__ = ()` subclass that never calls `Detector.__init__` leaves the slot
+        # unset; set it, so a caller reading it directly gets None.
+        opportunities = getattr(detector, "opportunities", None)
+        if opportunities is None:
+            detector.opportunities = None
+        elif not callable(opportunities):
+            raise TypeError("detector %s has an opportunities that is not callable"
+                            % detector.id)
         if detector.id in self._by_id:
             self._order[self._order.index(self._by_id[detector.id])] = detector
         else:

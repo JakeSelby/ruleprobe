@@ -57,6 +57,11 @@ All notable changes to this project are documented here. The format follows
 - `is_undecided(value)`, exported from the package root, tells the undecided result of a
   `compile_matcher` predicate from a false one
   ([#35](https://github.com/JakeSelby/ruleprobe/issues/35)).
+- `Detector` takes an optional keyword-only `opportunities`: a callable over `(events, ctx)`
+  returning `(turn, tool_use_id, followed)` triples, with `followed` true, false or None for
+  undecided ([#41](https://github.com/JakeSelby/ruleprobe/issues/41)). Declarative `order` and
+  turn-scoped `absent` detectors set it from the same evaluation as their hits; the positional
+  constructor and `fn(events, ctx)` are unchanged.
 
 ### Changed
 
