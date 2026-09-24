@@ -5,9 +5,13 @@ An `absent` hit is an opportunity not followed and an `order` hit is a followed 
 any event list `hits == opportunities - followed` for `absent` and `hits == followed` for
 `order`, where `opportunities` leaves out the undecided ones. The sessions are the labelled
 corpus, the fixture transcripts and every compiled detector's own `examples:` cases. The
-detectors are every entry in `common.yaml` and the `docs/rules` front matter, and the ones
-below; each one's polarity is read from its spec's `when`, so a new `order` or turn-scoped
-`absent` entry in either file is checked with no change here.
+detectors are `common.yaml` and the `docs/rules` files, loaded by the package's own loaders,
+and the ones below; each one's polarity is read from its spec's `when`, so a new `order` or
+turn-scoped `absent` entry in either file is checked with no change here.
+
+The identity is the real guard for `absent` only. An `order` that recorded an undecided
+opportunity as not followed would still have hits equal to followed; the exact-triple cases
+in `tests/test_matchers.py` are what catch that.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -17,6 +21,7 @@ import unittest
 from corpus import bash
 from ruleprobe import Registry, analyse, iter_sessions, run
 from ruleprobe.declarative import load, parse, split_front_matter
+from ruleprobe.rules import _markdown, load_file, read_rule_file
 from ruleprobe.matchers import compile_detector
 from ruleprobe.shell import MAX_COMMAND
 from ruleprobe.validity import load_corpus
@@ -75,31 +80,41 @@ def polarity(spec):
     return None
 
 
-def specs():
-    """Every entry: the ones above, `common.yaml`, and each `docs/rules` file's front matter,
-    filled the way a rule file fills its entries."""
-    out = [dict(spec, rule=spec["id"].split("/")[0]) for spec in SPECS]
-    out.extend(load(COMMON_YAML)[0]["detectors"])
-    rules_dir = os.path.join(ROOT, "docs", "rules")
-    for name in sorted(os.listdir(rules_dir)):
-        if not name.endswith(".md"):
-            continue
-        with open(os.path.join(rules_dir, name), encoding="utf-8") as handle:
+def entries(path):
+    """The raw entries of a detectors file or a rule file's front matter, in file order."""
+    if path.endswith(".md"):
+        with open(path, encoding="utf-8") as handle:
             front = split_front_matter(handle.read())[0]
         doc = parse(front) if front else {}
-        entries = doc.get("detector", doc.get("detectors"))
-        if entries is None:
-            continue
-        rule = doc.get("rule") or name[:-3]
-        for index, entry in enumerate(entries if isinstance(entries, list) else [entries]):
-            out.append(dict(entry, rule=entry.get("rule") or rule,
-                            id=entry.get("id") or "%s/%d" % (rule, index + 1)))
-    return out
+        found = doc.get("detector", doc.get("detectors"))
+    else:
+        found = load(path)[0]["detectors"]
+    return [] if found is None else found if isinstance(found, list) else [found]
 
 
 def compiled():
-    """`(polarity or None, detector)` for every detector this test compiles."""
-    return [(polarity(spec), compile_detector(spec, "<test>")) for spec in specs()]
+    """`(polarity or None, detector)` for every detector: the ones above, and each file's,
+    compiled by the loader that reads that file and paired with its entry by position."""
+    out = [(polarity(spec), compile_detector(dict(spec, rule=spec["id"].split("/")[0]),
+                                             "<test>")) for spec in SPECS]
+    rules_dir = os.path.join(ROOT, "docs", "rules")
+    files = [(COMMON_YAML, load_file(COMMON_YAML))]
+    files.extend((path, read_rule_file(path)[0::2]) for path in _markdown(rules_dir))
+    for path, (detectors, findings) in files:
+        assert not findings, findings
+        specs = entries(path)
+        assert len(specs) == len(detectors), path
+        out.extend((polarity(spec), detector) for spec, detector in zip(specs, detectors))
+    return out
+
+
+def stances(detector):
+    """Stances under which `detector`'s gate is open, so a gate never hides a hit here."""
+    if detector.gate is None:
+        return {}
+    assert not callable(detector.gate), detector.id
+    dimension, allowed = detector.gate
+    return {dimension: allowed[0] if allowed else "on"}
 
 
 def sessions(detectors):
@@ -115,6 +130,7 @@ def sessions(detectors):
 class IdentityTests(unittest.TestCase):
     def test_hits_are_what_the_opportunities_say_for_every_compiled_detector(self):
         detectors = compiled()
+        every = sessions(detectors)
         totals = {"order": [0, 0, 0, 0], "absent": [0, 0, 0, 0]}
         for kind, detector in detectors:
             if detector.opportunities is None:
@@ -122,7 +138,7 @@ class IdentityTests(unittest.TestCase):
             self.assertIn(kind, totals, "%s counts opportunities; name its polarity here"
                           % detector.id)
             one = Registry([detector])
-            for index, events in enumerate(sessions(detectors)):
+            for index, events in enumerate(every):
                 with self.subTest(detector=detector.id, session=index):
                     ctx = analyse(events)
                     found = detector.opportunities(ctx.events, ctx)
@@ -131,7 +147,8 @@ class IdentityTests(unittest.TestCase):
                     followed = sum(1 for t in found if t[2] is True)
                     undecided = sum(1 for t in found if t[2] is None)
                     opportunities = len(found) - undecided
-                    hits = len(run(events, registry=one, strict=True).get(detector.id, []))
+                    hits = len(run(events, stances(detector), registry=one,
+                                   strict=True).get(detector.id, []))
                     if kind == "absent":
                         self.assertEqual(hits, opportunities - followed)
                     else:

@@ -608,5 +608,58 @@ class OpportunityTests(unittest.TestCase):
                 self.assertEqual(len(hit), count_)
 
 
+class SharedEvaluationTests(unittest.TestCase):
+    """`fn` and `opportunities` read one evaluation per event list."""
+
+    def evaluations(self, calls):
+        import ruleprobe.matchers as matchers
+        made = []
+        real = matchers._Env
+
+        def counting(ctx):
+            made.append(ctx)
+            return real(ctx)
+
+        matchers._Env = counting
+        try:
+            calls()
+        finally:
+            matchers._Env = real
+        return len(made)
+
+    def test_both_calls_on_one_list_evaluate_once_and_another_list_again(self):
+        for when in (OpportunityTests.ORDER, OpportunityTests.ABSENT):
+            with self.subTest(when=when):
+                detector = compile_detector({"id": "t/x", "rule": "t", "event": "session",
+                                             "when": when}, "<test>")
+                first = analyse([bash("git commit -m a", id="tu1"), bash("git push", id="tu2")])
+                second = analyse([bash("git commit -m a", id="tu1"), bash("ls", id="tu2")])
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.fn(first.events, first),
+                    detector.opportunities(first.events, first))), 1)
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.opportunities(second.events, second),
+                    detector.fn(second.events, second))), 1)
+                self.assertEqual(len(detector.fn(second.events, second)),
+                                 0 if "order" in when else 1)
+                self.assertEqual(self.evaluations(lambda: (
+                    detector.fn(first.events, first))), 1)
+
+
+class SnippetTurnTests(unittest.TestCase):
+    def test_a_snippet_turn_that_is_not_a_whole_number_is_refused_with_a_line(self):
+        text = ("id: t/x\nevent: session\nwhen:\n  absent:\n    of: {tool: Write}\n"
+                "    scope: turn\nexamples:\n  fire:\n    - event: {turn: [1], input: {}}\n")
+        spec, lines = parse_with_lines(text, "<test>")
+        for bad in ([1], "1", True, 1.5):
+            with self.subTest(turn=bad):
+                spec["examples"]["fire"][0]["event"]["turn"] = bad
+                with self.assertRaisesRegex(DeclarativeError, "turn is a whole number") as cm:
+                    compile_detector(spec, "<test>", lines)
+                self.assertGreater(cm.exception.line, 0)
+        spec["examples"]["fire"][0]["event"]["turn"] = 2
+        self.assertIsNotNone(compile_detector(spec, "<test>", lines).opportunities)
+
+
 if __name__ == "__main__":
     unittest.main()

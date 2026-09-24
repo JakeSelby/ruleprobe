@@ -231,31 +231,43 @@ class DetectorTypeTests(unittest.TestCase):
                                  ["contract/pos"])
 
     # Covers: `opportunities`, set by keyword only, a callable over `(events, ctx)` returning
-    # `(turn, tool_use_id, followed)` triples; `None` when not given, and filled by
-    # `compile_detector` for `order`; `run()` and its return untouched by it.
+    # `(turn, tool_use_id, followed)` triples; `None` when not given; never called by `run()`;
+    # filled by `compile_detector` for `order` and turn-scoped `absent`, `None` for
+    # session-scoped `absent`.
     def test_opportunities_is_keyword_only_and_returns_triples(self):
         def fn(events, ctx):
             return [(1, None)]
 
-        def count(events, ctx):
-            return [(1, None, True), (2, "tu2", False), (3, None, None)]
+        def boom(events, ctx):
+            raise AssertionError("run() called opportunities")
 
         detector = Detector("contract/opp", "contract", "session", fn, None,
-                            opportunities=count)
-        self.assertIs(detector.opportunities, count)
+                            opportunities=boom)
+        self.assertIs(detector.opportunities, boom)
         self.assertIsNone(Detector("contract/opp", "contract", "session", fn,
                                    None).opportunities)
         with self.assertRaises(TypeError):
-            Detector("contract/opp", "contract", "session", fn, None, None, count)
-        self.assertEqual(list(run([], registry=Registry([detector]))), ["contract/opp"])
-        compiled = compile_detector({"id": "contract/order", "event": "session", "when": {
-            "order": {"first": {"tool": "Bash"}, "then": {"tool": "Read"}}}})
+            Detector("contract/opp", "contract", "session", fn, None, None, boom)
+        self.assertEqual(list(run([], registry=Registry([detector]), strict=True)),
+                         ["contract/opp"])
         events = [{"kind": "tool_use", "turn": 1, "id": "tu1", "name": "Bash",
                    "input": {"command": "ls"}},
-                  {"kind": "tool_use", "turn": 1, "id": "tu2", "name": "Read",
+                  {"kind": "tool_use", "turn": 2, "id": "tu2", "name": "Read",
                    "input": {"file_path": "a"}}]
         ctx = analyse(events)
-        self.assertEqual(compiled.opportunities(ctx.events, ctx), [(1, "tu1", True)])
+        read = {"tool": "Read"}
+        cases = [({"order": {"first": {"tool": "Bash"}, "then": read}}, [(1, "tu1", True)]),
+                 ({"absent": {"of": read, "scope": "turn"}}, [(1, None, False),
+                                                               (2, None, True)]),
+                 ({"absent": {"of": read, "scope": "session"}}, None)]
+        for when, expected in cases:
+            with self.subTest(when=when):
+                compiled = compile_detector({"id": "contract/agg", "event": "session",
+                                             "when": when})
+                if expected is None:
+                    self.assertIsNone(compiled.opportunities)
+                else:
+                    self.assertEqual(compiled.opportunities(ctx.events, ctx), expected)
 
     # Covers: `.id`, `.rule`, `.event`, `.fn` and `.gate` on each item of `common.DETECTORS`.
     def test_the_shipped_detectors_carry_the_declared_attributes(self):

@@ -44,8 +44,8 @@ class Detector(object):
       whether it was followed - `True`, `False`, or `None` when that could not be decided.
       Undecided triples are in the list, so its length is not the opportunity count.
       It travels beside `fn` rather than inside its return, so `fn` keeps its shape. A
-      declarative `order`, or `absent` with `scope: turn`, fills it; `None` means the
-      detector counts hits only.
+      declarative `order`, or `absent` with `scope: turn`, fills it. It is `None` when a
+      detector defines none, including a subclass that never set it, once registered.
     """
 
     __slots__ = ("id", "rule", "event", "fn", "gate", "examples", "opportunities")
@@ -143,10 +143,12 @@ class Registry(object):
                              % (detector.event, ", ".join(sorted(EVENT_KINDS))))
         if not callable(detector.fn):
             raise TypeError("detector %s has no callable fn" % detector.id)
-        # Read through getattr: a `__slots__ = ()` subclass that never calls
-        # `Detector.__init__` leaves the slot unset.
+        # A `__slots__ = ()` subclass that never calls `Detector.__init__` leaves the slot
+        # unset; set it, so a caller reading it directly gets None.
         opportunities = getattr(detector, "opportunities", None)
-        if opportunities is not None and not callable(opportunities):
+        if opportunities is None:
+            detector.opportunities = None
+        elif not callable(opportunities):
             raise TypeError("detector %s has an opportunities that is not callable"
                             % detector.id)
         if detector.id in self._by_id:

@@ -86,8 +86,10 @@ class OpportunitiesAttributeTests(unittest.TestCase):
                 self.id, self.rule, self.event, self.fn, self.gate = id, rule, event, fn, gate
 
         detector = Bare("a/b", "a", "session", always)
-        self.assertIsNone(getattr(detector, "opportunities", None))
+        with self.assertRaises(AttributeError):
+            detector.opportunities
         registry = Registry([detector])
+        self.assertIsNone(detector.opportunities)
         self.assertEqual(list(run([bash("ls")], registry=registry, strict=True)), ["a/b"])
 
     def test_a_non_callable_opportunities_is_refused_by_name(self):

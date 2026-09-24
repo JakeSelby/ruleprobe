@@ -79,20 +79,20 @@ declarative `not`, `any` and `all`, or test the result with `is_undecided` befor
 
 `order`, and `absent` with `scope: turn`, also count opportunities - each point at which the
 rule applied, and whether it was followed - as the detector's `opportunities`. It and `fn`
-each evaluate the session separately, through the same code, so a hit is always derived
-from an opportunity. Each event `first` matches opens one `order` opportunity,
-followed when `then` matched within `within`, so a hit is a followed opportunity. Each turn
-in the event list is one `absent` opportunity, followed when `of` matched in it, so a hit is
-one not followed; `absent` has no trigger, so a turn in which the rule asked for nothing is
-an opportunity too. `absent` with `scope: session`, `change`, and every detector whose `when`
+read one evaluation: the detector keeps the last event list it was handed and what it found
+there, so the second of the two calls on the same list evaluates nothing, and a hit is
+always an opportunity. Each event `first` matches opens one `order` opportunity, followed
+when `then` matched within `within`, so a hit is a followed opportunity. Each turn in the
+event list is one `absent` opportunity, followed when `of` matched in it, so a hit is one
+not followed; `absent` has no trigger, so a turn in which the rule asked for nothing is an
+opportunity too. `absent` with `scope: session`, `change`, and every detector whose `when`
 reads one event at a time (`tool`, `command`, `any` and the rest) count none: their
-`opportunities` is `None`. Undecided stays
-undecided here as well: an event `first` is undecided on, an `order` whose `then` is never
-true and undecided at least once within the window, and an `absent` turn holding an
-undecided candidate and no true one each have `followed` of `None` - never false. The
-callable returns those undecided triples too, so the length of its list is not the
-opportunity count: the count is the triples whose `followed` is `True` or `False`, and the
-undecided ones are counted apart.
+`opportunities` is `None`. Undecided stays undecided here as well: an event `first` is
+undecided on, an `order` whose `then` is never true and undecided at least once within the
+window, and an `absent` turn holding an undecided candidate and no true one each have
+`followed` of `None` - never false. The callable returns those undecided triples too, so
+the length of its list is not the opportunity count: the count is the triples whose
+`followed` is `True` or `False`, and the undecided ones are counted apart.
 
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
@@ -216,10 +216,13 @@ class _Env(object):
 class _Aggregate(object):
     """A matcher that reads the whole session and returns hits itself."""
 
-    __slots__ = ("run", "opportunities")
+    __slots__ = ("run", "evaluate", "opportunities")
 
-    def __init__(self, run, opportunities=None):
+    def __init__(self, run, evaluate=None, opportunities=None):
+        # With `evaluate`, `run` and `opportunities` take its result rather than the session,
+        # so the compiled detector can evaluate once for both.
         self.run = run
+        self.evaluate = evaluate
         self.opportunities = opportunities
 
 
@@ -682,7 +685,7 @@ def _a_order(value, where, owner, key):
 
     def evaluate(events, env):
         # Every event `first` does not decidedly miss, with whether `then` followed it. A
-        # hit is one followed; `run` and `opportunities` both read this, so they agree.
+        # hit is one followed; `run` and `opportunities` both read this one result.
         out = []
         for i, event in enumerate(events):
             opened = first(event, env)
@@ -710,13 +713,12 @@ def _a_order(value, where, owner, key):
             out.append((_hit(event), followed))
         return out
 
-    def run(events, env):
-        return [at for at, followed in evaluate(events, env) if followed is True]
+    def run(found):
+        return [at for at, followed in found if followed is True]
 
-    def opportunities(events, env):
-        return [(turn, tool_use_id, followed)
-                for (turn, tool_use_id), followed in evaluate(events, env)]
-    return _Aggregate(run, opportunities)
+    def opportunities(found):
+        return [(turn, tool_use_id, followed) for (turn, tool_use_id), followed in found]
+    return _Aggregate(run, evaluate, opportunities)
 
 
 def _a_absent(value, where, owner, key):
@@ -752,12 +754,12 @@ def _a_absent(value, where, owner, key):
             seen[turn].append(of(event, env))
         return [(turn, _followed(_any3(seen[turn]))) for turn in order]
 
-    def run(events, env):
-        return [(turn, None) for turn, followed in evaluate(events, env) if followed is False]
+    def run(found):
+        return [(turn, None) for turn, followed in found if followed is False]
 
-    def opportunities(events, env):
-        return [(turn, None, followed) for turn, followed in evaluate(events, env)]
-    return _Aggregate(run, opportunities)
+    def opportunities(found):
+        return [(turn, None, followed) for turn, followed in found]
+    return _Aggregate(run, evaluate, opportunities)
 
 
 def _a_change(value, where, owner, key):
@@ -910,6 +912,8 @@ def _snippet(event, where, container, index):
     out = dict(spec)
     out.setdefault("kind", "tool_use")
     out.setdefault("turn", index + 1)
+    if not isinstance(out["turn"], int) or isinstance(out["turn"], bool):
+        where.fail("an event snippet's turn is a whole number", spec, "turn")
     if out["kind"] == "tool_use":
         out.setdefault("name", "Bash")
         out.setdefault("id", "example-%d" % (index + 1))
@@ -947,19 +951,30 @@ def compile_detector(spec, path="<spec>", lines=None, line=0):
                                 _Where(path, lines, where.at(spec, "examples")), spec)
 
     opportunities = None
-    if isinstance(matcher, _Aggregate):
+    if isinstance(matcher, _Aggregate) and matcher.evaluate is not None:
+        run, count, evaluate = matcher.run, matcher.opportunities, matcher.evaluate
+        # The last event list and what was found in it. Holding the list itself, not its
+        # id, means the id cannot be reused by another list while the entry stands.
+        memo = [None, None]
+
+        def evaluated(events, ctx):
+            if memo[0] is not events:
+                found = evaluate(events, _Env(ctx))
+                memo[:] = [events, found]
+            return memo[1]
+
+        def fn(events, ctx):
+            return run(evaluated(events, ctx))
+
+        def opportunities(events, ctx):
+            return count(evaluated(events, ctx))
+
+        opportunities.__name__ = re.sub(r"\W", "_", detector_id) + "_opportunities"
+    elif isinstance(matcher, _Aggregate):
         run = matcher.run
 
         def fn(events, ctx):
             return run(events, _Env(ctx))
-
-        if matcher.opportunities is not None:
-            count = matcher.opportunities
-
-            def opportunities(events, ctx):
-                return count(events, _Env(ctx))
-
-            opportunities.__name__ = re.sub(r"\W", "_", detector_id) + "_opportunities"
     else:
         selects = _select(event_kind)
 
