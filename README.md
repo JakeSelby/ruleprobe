@@ -113,14 +113,15 @@ rules: 2 measured, 1 dark, 1 unmeasured (50% measured)
   measured   house-style                 docs/rules/house-style.md
   dark       secrets                     docs/rules/secrets.md: a credential that never reaches a file leaves no shape in a transcript
   measured   verification                docs/rules/verification.md
-  unmeasured working-style               docs/rules/working-style.md
+  unmeasured working-style.md#working-st docs/rules/working-style.md
 ```
 
 Three lines of that report are the point. `house-style/sudo-install` is a rule of the
 reader's own, firing. `secrets` is **dark** by choice: its front matter carries
 `opt_out: <reason>`, because the rule is about a credential that never reaches a file and a
 transcript only shows what did. `working-style` is **unmeasured**: it has neither a detector
-nor an opt-out, and saying so is the only way an author sees the gap. Nothing fails; a
+nor an opt-out, so it is split at its headings and its one section is listed by its id,
+`working-style.md#working-style`; saying so is the only way an author sees the gap. Nothing fails; a
 report is evidence, not a gate.
 
 Point `--rules` at whatever directory your own rules live in, and drop the same entries into
@@ -280,9 +281,13 @@ known miss of the shell parse in `ruleprobe/shell.py` - a command inside a subst
 invisible, and so is a variable's value. A rule whose shape needs any of that is a Python
 detector, and the report will not pretend otherwise.
 
-**A rule file is one rule.** Binding is per file, not per heading: a `CLAUDE.md` holding
-twelve rules is one entry in the coverage block, not twelve. Splitting rules into files is
-what makes the unmeasured list mean anything.
+**A rule file is one rule per section.** A file whose front matter carries `detector:` or
+`opt_out:` is one rule, named by its `rule:` key or its file name. Any other file is split at
+its headings, so a `CLAUDE.md` of twelve sections is twelve entries in the coverage block, each
+with the id `<path>#<heading-slug>` under `--rules`, and a repeated heading takes `-2`. A
+section holding only a fenced block, a table or a blockquote is not a rule, and a file with no
+heading stays one rule named for the file. A known miss: text above the first heading of a
+headed file is no rule, and list items are never split.
 
 **Detector validity is measured, and the measurement is small.** Every detector is scored
 against a hand-labelled corpus that ships with the package - see

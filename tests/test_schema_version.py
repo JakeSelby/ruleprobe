@@ -255,7 +255,7 @@ class FrontMatterTests(Temp):
                                             "---\n"
                                             "\n"
                                             "Use uv.\n")
-        detectors, entry, findings = read_rule_file(path)
+        detectors, [entry], findings = read_rule_file(path)
         self.assertEqual((detectors, entry.state), ([], "unmeasured"))
         self.assertEqual([f.line for f in findings], [5])
         self.assertIn("newer than this ruleprobe", findings[0].reason)
@@ -267,7 +267,7 @@ class FrontMatterTests(Temp):
                                             "  id: house-style/npm\n"
                                             "  when: {tool: Write}\n"
                                             "---\n")
-        detectors, entry, findings = read_rule_file(path)
+        detectors, [entry], findings = read_rule_file(path)
         self.assertEqual(([d.id for d in detectors], findings), (["house-style/npm"], []))
 
 
