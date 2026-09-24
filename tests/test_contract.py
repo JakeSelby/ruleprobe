@@ -586,7 +586,7 @@ def _package_data_globs():
 
 def _source_wheel(directory):
     """The source tree packed the way the wheel packs it: every module, plus package data,
-    each pattern globbed as setuptools globs it, so `*` stops at a `/`."""
+    each pattern globbed as setuptools globs it, so `*` stops at a `/` and `**` crosses it."""
     import glob
 
     package = os.path.join(ROOT, "ruleprobe")
@@ -595,7 +595,7 @@ def _source_wheel(directory):
         dirnames[:] = [d for d in dirnames if d != "__pycache__"]
         files.update(os.path.join(dirpath, f) for f in filenames if f.endswith(".py"))
     for pattern in _package_data_globs():
-        matched = glob.glob(os.path.join(package, pattern))
+        matched = glob.glob(os.path.join(package, pattern), recursive=True)
         if not matched:
             raise AssertionError("package-data pattern %r matches no file" % pattern)
         files.update(matched)

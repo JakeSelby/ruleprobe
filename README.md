@@ -392,8 +392,9 @@ events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_co
   `<parent session id>/<its own id>`.
 - Turns are not recorded. One starts at each user record that is not only tool responses.
 
-Every other shipped and catalog detector is scored on labelled Gemini sessions in the
-corpus, near-misses included, under a POSIX root and a Windows one.
+Every other shipped and catalog detector is scored on labelled Gemini sessions under a
+POSIX root, near-misses included. A session under a Windows root checks that the shell
+detectors stay silent there; it does not measure them on PowerShell.
 
 Gemini deletes sessions older than 30 days by default, so a longer `--since` finds fewer.
 
@@ -465,17 +466,17 @@ detector                                pos  neg   tp   fp   fn   prec  recall  
 -------------------------------------------------------------------------------------------
 cache-hygiene/compact                     5    6    5    0    0   1.00    1.00   1.00
 cache-hygiene/model-switch                5   15    5    0    0   1.00    1.00   1.00
-commits/non-conventional-subject          5    8    5    0    0   1.00    1.00   1.00
-git-safety/force-push-default             5    6    5    0    0   1.00    1.00   1.00
-package-manager/pip-install               5    5    5    0    0   1.00    1.00   1.00
-secrets/secret-file-add                   5    5    5    0    0   1.00    1.00   1.00
-secrets/secret-in-write                  12   11   12    0    0   1.00    1.00   1.00
-testing/test-after-change                 7    7    7    0    0   1.00    1.00   1.00
-transcript-hygiene/unfiltered-find       10   13   10    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat        10   11   10    0    0   1.00    1.00   1.00
-verification/no-verify                   11   11   11    0    0   1.00    1.00   1.00
+commits/non-conventional-subject          5    9    5    0    0   1.00    1.00   1.00
+git-safety/force-push-default             5    7    5    0    0   1.00    1.00   1.00
+package-manager/pip-install               5    7    5    0    0   1.00    1.00   1.00
+secrets/secret-file-add                   5    6    5    0    0   1.00    1.00   1.00
+secrets/secret-in-write                  15   13   15    0    0   1.00    1.00   1.00
+testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
+transcript-hygiene/unfiltered-find       10   14   10    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
+verification/no-verify                   11   12   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    80   98   80    0    0   1.00    1.00   1.00  floor 0.90
+total                                    87  109   87    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector

@@ -15,7 +15,7 @@ from unittest import mock
 
 import ruleprobe
 from ruleprobe.cli import main
-from ruleprobe.readers import RUNTIMES, iter_sessions
+from ruleprobe.readers import RUNTIMES, gemini, iter_sessions
 from ruleprobe.report import explain, explain_row, explain_text, measure
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -183,9 +183,13 @@ def no_network_no_writes():
 
 
 def corpus_transcripts():
-    # A Gemini session sits in a project directory under `sessions/`, beside its root file.
-    return len([n for _d, _s, files in os.walk(CORPUS_SESSIONS) for n in files
-                if n.endswith(".jsonl")])
+    # Every session file the readers walk to: each `.jsonl`, at any depth and through a
+    # linked directory, and a legacy Gemini `session-*.json` its `.jsonl` does not replace.
+    walked = os.walk(CORPUS_SESSIONS, followlinks=True)
+    found = set(os.path.join(d, n) for d, _s, files in walked for n in files
+                if n.endswith(".jsonl"))
+    found.update(p for p in gemini.transcripts(CORPUS_SESSIONS) if p.endswith(".json"))
+    return len(found)
 
 
 class DependencyTests(unittest.TestCase):
