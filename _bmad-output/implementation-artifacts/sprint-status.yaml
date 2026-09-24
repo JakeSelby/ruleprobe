@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-24-2026 02:22
-last_updated: '09-24-2026 02:48'
+last_updated: '09-24-2026 03:24'
 project: ruleprobe
 project_key: NOKEY
 tracking_system: file-system
@@ -64,9 +64,8 @@ development_status:
   3-3-feat-rules-print-the-measured-share-in-the-coverage-block: done
   3-4-feat-rules-split-a-rule-file-into-one-rule-per-section: done
   3-5-feat-detectors-a-shipped-catalog-of-common-rule-shapes-bound: done
-  3-6-spike-report-time-the-sixty-second-path-on-a-reference-volum: 
-    ready-for-dev
-  epic-3-retrospective: optional
+  3-6-spike-report-time-the-sixty-second-path-on-a-reference-volum: done
+  epic-3-retrospective: done
 
   epic-4: in-progress
   4-1-feat-cli-ruleprobe-explain-prints-the-event-behind-every-hit: done
@@ -196,3 +195,52 @@ action_items:
     owner: "maintainer"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-16-state-in-the-readme-that-one-catalog-sha"
+    epic: 3
+    action: "State in the README that one catalog-shaped bullet or clause marks a
+      whole section measured, beside the heading-less file over-count"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-17-give-the-docs-worked-example-a-catalog-s"
+    epic: 3
+    action: "Give the docs worked example a catalog-shaped rule so the report shows
+      a catalog-bound rule and a compliance figure"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-18-clear-epic-3-realised-assumption-tags-in"
+    epic: 3
+    action: "Clear Epic 3 realised ASSUMPTION tags in epics.md and the story files,
+      in the same spec pass as the Epic 1 and Epic 2 spec items, before 6.2 cuts 0.2.0"
+    owner: "architect"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-19-confirm-or-override-rp-s015-decisions-1"
+    epic: 3
+    action: "Confirm or override RP-S015 decisions 1 to 12 and the RP-S014 defaults,
+      and log any left open in deferred-work.md"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-20-refresh-the-issue-map-so-rp-sp001-reads"
+    epic: 3
+    action: "Refresh the issue map so RP-SP001 reads completed, set its dev agent
+      record status, and decide whether epic 24 closes"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-21-add-rp-sp001-review-findings-and-replace"
+    epic: 3
+    action: "Add RP-SP001 review findings and replace the RP-S016 local gate-script
+      citation with the AGENTS.md Gate commands"
+    owner: "dev"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"
+  - id: "epic-3-retro-item-22-require-in-docs-bmad-governance-md-that"
+    epic: 3
+    action: "Require in docs/bmad-governance.md that a new AD-7 matcher key or a matcher
+      algorithm change is filed as its own item first"
+    owner: "maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-3-retro-2026-09-24.md"

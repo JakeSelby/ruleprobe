@@ -2,7 +2,7 @@
 bmad_id: "RP-SP001"
 type: "spike"
 title: "spike(report): time the sixty-second path on a reference volume"
-lifecycle: "active"
+lifecycle: "completed"
 provenance: "authored"
 github_issue: 50
 github_issue_url: "https://github.com/JakeSelby/ruleprobe/issues/50"
@@ -16,7 +16,7 @@ updated: "2026-09-24"
 <!-- bmad-sync:begin -->
 - **GitHub issue:** [#50](https://github.com/JakeSelby/ruleprobe/issues/50)
 - **Primary parent:** [RP-E005](https://github.com/JakeSelby/ruleprobe/issues/24)
-- **State:** active
+- **State:** completed
 
 The issue carries the summary, discussion and acceptance evidence; this file carries the design.
 
