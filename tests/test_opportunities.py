@@ -4,12 +4,13 @@
 An `absent` hit is an opportunity not followed and an `order` hit is a followed one, so over
 any event list `hits == opportunities - followed` for `absent` and `hits == followed` for
 `order`, where `opportunities` leaves out the undecided ones. The sessions are the labelled
-corpus, the fixture transcripts and every compiled detector's own `examples:` cases. The
-detectors are `common.yaml`, the `docs/rules` files and the shipped catalog, loaded by the
-package's own loaders, and the ones below; each one's polarity is read from its spec's `when`,
-so a new `order` or turn-scoped `absent` entry in any of them is checked with no change here.
-Each result also goes through `measure()`, the consumer the report reads, so a compiled
-detector whose output it refuses as malformed fails here too.
+corpus, the fixture transcripts, every compiled detector's own `examples:` cases, `UNDECIDED`
+(the undecided cases) and `NO_ID` (one turn holding several events whose opportunity points
+name no tool use id). The detectors are `common.yaml`, the `docs/rules` files and the
+shipped catalog, loaded by the package's own loaders, and the ones below; each one's polarity
+is read from its spec's `when`, so a new `order` or turn-scoped `absent` entry in any of them
+is checked with no change here. Each result also goes through `measure()`, the consumer the
+report reads, so a compiled detector whose output it refuses as malformed fails here too.
 
 The identity is the real guard for `absent` only. An `order` that recorded an undecided
 opportunity as not followed would still have hits equal to followed; the exact-triple cases

@@ -43,6 +43,8 @@ class Detector(object):
       `[(turn, tool_use_id, followed), ...]`: each point at which the rule applied, and
       whether it was followed - `True`, `False`, or `None` when that could not be decided.
       Undecided triples are in the list, so its length is not the opportunity count.
+      A point with a tool use id repeated in one turn is refused as malformed; an id-less
+      one, `None` or `""`, counts once per occurrence.
       It travels beside `fn` rather than inside its return, so `fn` keeps its shape. A
       declarative `order`, or `absent` with `scope: turn`, fills it. It is `None` when a
       detector defines none, including a subclass that never set it, once registered.

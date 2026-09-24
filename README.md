@@ -67,10 +67,12 @@ rules read, the counts are zero and `share` is `null`.
 A row names each detector that raised in `rules_errors`, and that session leaves the
 detector's hit denominator only. A row also carries `compliance`, detector id to
 `{"opportunities", "followed", "undecided"}`, for each enabled detector that defines
-`opportunities`; an undecided opportunity counts in `undecided` alone. When that callable
-raises, or returns something other than `(turn, tool_use_id, followed)` triples (recorded as
-`MalformedOpportunities`), its `rules_errors` entry carries `"hook": "opportunities"`: the
-detector loses its `compliance` entry, and its hit figures are untouched.
+`opportunities`; an undecided opportunity counts in `undecided` alone. A point that names a
+`tool_use_id` appears at most once per turn, and a repeat is malformed; an id-less point,
+`None` or `""`, counts once per occurrence. When that callable raises, or returns something
+other than `(turn, tool_use_id, followed)` triples (recorded as `MalformedOpportunities`),
+its `rules_errors` entry carries `"hook": "opportunities"`: the detector loses its
+`compliance` entry, and its hit figures are untouched.
 
 The report sums `compliance` beside hits per session, never in place of them. A detector that
 has any adds `opportunities`, `followed`, `undecided` and `rate` columns to its line, and

@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""A repeated opportunity point with no tool use id is several opportunities, not a malformed
-result; a repeated point with one is still refused. The rule is `_tally`'s docstring.
+"""A repeated opportunity point with no tool use id, `None` or `""`, is several opportunities,
+not a malformed result; a repeated point with one is still refused. The rule is `_tally`'s
+docstring.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -27,8 +28,8 @@ def order(first):
 
 class RepeatedPointTests(unittest.TestCase):
     def test_an_order_opening_on_two_results_in_one_turn_keeps_its_compliance(self):
-        # Two tool results in turn 1 carry no tool use id of their own, so the compiled
-        # `order` gives (1, None) twice.
+        # The two tool results carry `tool_use_id`s, but an opportunity point names a tool
+        # use id only for a `tool_use` event, so the compiled `order` gives (1, None) twice.
         detector = order({"kind": "tool_result"})
         events = [tool_result("a", tool_use_id="x1"), tool_result("b", tool_use_id="x2"),
                   bash("ls", id="tu3")]
@@ -52,6 +53,22 @@ class RepeatedPointTests(unittest.TestCase):
                 self.assertNotIn("rules_errors", row)
                 self.assertEqual(row["compliance"], {"o/then-bash": {
                     "opportunities": 2, "followed": followed, "undecided": 0}})
+
+    def test_an_order_opening_on_two_tool_uses_with_empty_ids_keeps_its_compliance(self):
+        # A reader gives a tool use its transcript left without an id the id "".
+        detector = compile_detector({"id": "o/ls-then-cat", "rule": "o", "event": "session",
+                                     "when": {"order": {"first": {"command": {"name": "ls"}},
+                                                        "then": {"command": {"name": "cat"}}}}},
+                                    "<test>")
+        events = [bash("ls a", id=""), bash("ls b", id=""), bash("cat c", id="")]
+        ctx = analyse(events)
+        self.assertEqual(detector.opportunities(ctx.events, ctx),
+                         [(1, "", True), (1, "", True)])
+        row = measure(session(events), registry=Registry([detector]))
+        self.assertNotIn("rules_errors", row)
+        self.assertEqual(row["compliance"], {"o/ls-then-cat": {"opportunities": 2,
+                                                               "followed": 2,
+                                                               "undecided": 0}})
 
     def test_a_hand_written_repeat_with_no_id_counts_each_triple(self):
         registry = Registry([Detector("a/opp", "a", "session", lambda e, c: [],

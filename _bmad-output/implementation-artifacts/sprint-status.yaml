@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-24-2026 02:22
-last_updated: '09-24-2026 02:39'
+last_updated: '09-24-2026 02:48'
 project: ruleprobe
 project_key: NOKEY
 tracking_system: file-system
@@ -153,13 +153,13 @@ action_items:
     action: "Stop measure() refusing a compiled order detector own output when first
       opens on events with no tool use id, with a regression test through measure()"
     owner: "dev (bmad-build)"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
   - id: "epic-2-retro-item-10-run-the-ad-11-identity-test-through-meas"
     epic: 2
     action: "Run the AD-11 identity test through measure() and over the shipped catalog"
     owner: "dev"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-2-retro-2026-09-24.md"
   - id: "epic-2-retro-item-11-make-the-compiled-detector-evaluation-me"
     epic: 2
