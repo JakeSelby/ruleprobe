@@ -348,10 +348,11 @@ shape in `SECRET_PATTERNS` by `[redacted]`, together with what follows it: a `:`
 the value after it, even on the next line, a quoted value whole, otherwise the rest of the
 line, and a private key's body to its footer. A control character is printed as its `\xNN`
 escape, so a transcript cannot drive your terminal, and one event's text is cut at 4,000
-characters with a note of how many were cut. Like `report`, it writes nothing and sends nothing, and running
-it changes no report number. A stored row keeps counts only, not the events behind them, so
-it cannot be explained after the fact: `ruleprobe.report.explain_row(row)` says so and names
-the rerun over that row's runtime and session id that would.
+characters with a note of how many were cut. Like `report`, it writes nothing and sends
+nothing, and running it changes no report number. A stored row keeps counts only, not the
+events behind them, so it cannot be explained after the fact:
+`ruleprobe.report.explain_row(row, ruleprobe.readers.RUNTIMES)` says so and names the rerun
+over that row's runtime and session id that would.
 
 ## How good are the detectors?
 

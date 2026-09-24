@@ -528,16 +528,15 @@ def explain_text(item):
     return _redact("\n".join(lines))
 
 
-def explain_row(row):
+def explain_row(row, runtimes=()):
     """What explain can say about a stored row: that it carries counts only, and the rerun
     over its runtime and session id that would explain each hit.
 
-    The rerun names `--runtime` only for a runtime this release reads, and addresses the
-    session by its bare id when the row names no runtime; each value is shell-quoted.
+    `runtimes` is the runtime names `--runtime` accepts, such as `readers.RUNTIMES`; the
+    rerun names `--runtime` only for one of them, so by default it names none. It addresses
+    the session by its bare id when the row names no runtime; each value is shell-quoted.
     """
     import shlex
-
-    from .readers import RUNTIMES
 
     row = row if isinstance(row, dict) else {}
     runtime = row.get("runtime") if isinstance(row.get("runtime"), str) else ""
@@ -547,7 +546,7 @@ def explain_row(row):
         return _redact("session %s: this row carries no rule counts, so there is no hit "
                        "to explain" % shown)
     rerun = ["ruleprobe", "explain"]
-    if runtime in RUNTIMES:
+    if runtime and runtime in runtimes:
         rerun += ["--runtime", runtime]
     if session_id:
         rerun += ["--session", session_address(runtime, session_id) if runtime

@@ -20,6 +20,7 @@ from ruleprobe import (DEFAULT, Bundle, Detector, Registry, Session, iter_sessio
                        report_data)
 from ruleprobe.cli import main
 from ruleprobe.detectors.common import REDACTED, SECRET_PATTERNS, redact
+from ruleprobe.readers import RUNTIMES
 from ruleprobe.report import (MAX_EXPLAINED, explain, explain_row, explain_text,
                               session_address)
 from ruleprobe.validity import event_key
@@ -268,7 +269,7 @@ class StoredRowTests(unittest.TestCase):
     def test_a_row_says_counts_only_and_names_the_rerun(self):
         row = {"session_id": "sess-9", "runtime": "codex",
                "rules": {"a/one": 2, "a/two": 1}}
-        text = explain_row(row)
+        text = explain_row(row, RUNTIMES)
         self.assertIn("counts only", text)
         self.assertIn("3 hit(s)", text)
         self.assertIn("ruleprobe explain --runtime codex --session codex:sess-9", text)
@@ -285,12 +286,19 @@ class StoredRowTests(unittest.TestCase):
         self.assertNotIn(":sess-9", text)
 
     def test_an_unknown_runtime_drops_runtime_but_keeps_the_address(self):
-        text = explain_row({"session_id": "sess-9", "runtime": "other", "rules": {}})
+        text = explain_row({"session_id": "sess-9", "runtime": "other", "rules": {}},
+                           RUNTIMES)
         self.assertIn("`ruleprobe explain --session other:sess-9`", text)
         self.assertNotIn("--runtime", text)
 
+    def test_no_runtime_is_known_by_default(self):
+        text = explain_row({"session_id": "sess-9", "runtime": "codex", "rules": {}})
+        self.assertIn("`ruleprobe explain --session codex:sess-9`", text)
+        self.assertNotIn("--runtime", text)
+
     def test_values_are_shell_quoted(self):
-        text = explain_row({"session_id": "s 1; rm x", "runtime": "codex", "rules": {}})
+        text = explain_row({"session_id": "s 1; rm x", "runtime": "codex", "rules": {}},
+                           RUNTIMES)
         self.assertIn("--runtime codex --session 'codex:s 1; rm x'", text)
 
     def test_a_row_without_a_rules_map_carries_no_counts(self):
