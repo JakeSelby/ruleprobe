@@ -10,29 +10,41 @@
                       [--since DATE] [--root DIR] [--runtime NAME]
                       [--stance DIM=VARIANT] [--plugins]
                       [--rules DIR] [--detectors FILE] [--no-config]
+    ruleprobe label --session RUNTIME:ID --detector ID --key TURN:TOOL_USE_ID
+                    --corpus DIR --name NAME
+                    [--since DATE] [--root DIR] [--runtime NAME]
+                    [--stance DIM=VARIANT] [--plugins]
+                    [--rules DIR] [--detectors FILE] [--no-config]
 
 Declarative detectors are read from `.ruleprobe/detectors.yaml` in the repository you are
 in and from `~/.config/ruleprobe/detectors.yaml`, unless `--no-config` says otherwise;
 `--rules <dir>` also reads a directory of markdown rule files, and reports which of them
 nothing measures.
 
-Nothing is written anywhere and nothing leaves the machine: the transcripts are read, the
-detectors are run over them in memory, and a table is printed.
+Nothing leaves the machine, and every command but `label` writes nothing: the transcripts are
+read, the detectors are run over them in memory, and a table is printed. `label` writes one
+event-schema session and one `near` label, redacted, under the corpus directory it is given,
+and nowhere else; `cmd_label` says what it refuses.
 """
 import argparse
 import json
 import os
 import re
 import sys
+import unicodedata
 
 from . import __version__
+from .declarative import DeclarativeError, emit, load, parse
+from .detectors.common import REDACTED, SECRET_PATTERNS, redact
 from .readers import RUNTIMES, iter_sessions
-from .registry import DEFAULT, Registry
+from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
-                     _redact, explain, explain_text, measure, report, report_data)
+                     _redact, explain, explain_text, measure, report, report_data,
+                     session_address)
 from .rules import load_bundle
-from .validity import (CorpusError, DEFAULT_FLOOR, below_floor, scores_as_dict, validity,
-                       validity_table)
+from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
+                       DEFAULT_FLOOR, below_floor, event_key, hit_key, load_corpus,
+                       read_events, score_corpus, scores_as_dict, validity, validity_table)
 
 
 def build_parser():
@@ -111,6 +123,37 @@ def build_parser():
     explain_cmd.add_argument("--plugins", action="store_true",
                              help="also load detectors installed packages advertise")
     _declarative_options(explain_cmd)
+
+    label_cmd = sub.add_parser(
+        "label", help="record one wrong hit as a labelled negative in a corpus of your own")
+    label_cmd.add_argument("--session", required=True, metavar="RUNTIME:ID",
+                           help="the session, as explain prints its address")
+    label_cmd.add_argument("--detector", required=True, metavar="ID",
+                           help="the detector whose hit is wrong")
+    label_cmd.add_argument("--key", required=True, metavar="TURN:TOOL_USE_ID",
+                           help="the hit's key, as explain prints it; a session hit "
+                                "(TURN:-) is refused")
+    label_cmd.add_argument("--corpus", required=True, metavar="DIR",
+                           help="an existing corpus directory of your own; nothing is "
+                                "written outside it")
+    label_cmd.add_argument("--name", required=True, metavar="NAME",
+                           help="the new session's file stem: DIR/sessions/"
+                                "NAME.events.jsonl")
+    label_cmd.add_argument("--since", default=None, metavar="DATE", type=_since,
+                           help="a YYYY-MM-DD date, or a number of days back")
+    label_cmd.add_argument("--root", default=None, metavar="DIR",
+                           help="a directory of transcripts to read instead of the "
+                                "defaults")
+    label_cmd.add_argument("--runtime", choices=["auto"] + sorted(RUNTIMES),
+                           default="auto",
+                           help="which runtime wrote them (default: decide per file)")
+    label_cmd.add_argument("--stance", action="append", default=None, type=_stance,
+                           metavar="DIM=VARIANT",
+                           help="the configuration these sessions ran under, as for "
+                                "report; repeatable, read by gated detectors")
+    label_cmd.add_argument("--plugins", action="store_true",
+                           help="also load detectors installed packages advertise")
+    _declarative_options(label_cmd)
     return parser
 
 
@@ -323,6 +366,267 @@ def cmd_explain(args, out):
     return 0
 
 
+class _Refused(Exception):
+    """Why `label` wrote nothing."""
+
+
+def cmd_label(args, out):
+    """One wrong hit as a labelled negative: `DIR/sessions/NAME.events.jsonl` holding the
+    event behind it, redacted, and one `near` entry for it in `DIR/labels.yaml`.
+
+    It refuses, says why on stderr and exits 2, leaving every file as it found it, for a
+    session hit, which one event cannot reproduce; a name that is not a plain file stem; a
+    corpus directory that does not exist; a session file that already exists or is already
+    labelled; no session, or more than one, at the address; no hit at the key, or not one
+    event behind it; a detector that is gated, since the corpus runs no stances; a written
+    event the detector no longer hits, because redaction changed what it matched or the hit
+    needs more than one event, since that negative would pass trivially; any secret shape
+    left in the bytes it would write; and a `labels.yaml` it cannot append to and read back
+    as the old document plus the one entry. The corpus is read back after writing, and
+    anything short of the new negative scoring is rolled back.
+    """
+    try:
+        lines = _label(args)
+    except _Refused as exc:
+        sys.stderr.write(_redact("label: refused: %s" % exc) + "\n")
+        return 2
+    for line in lines:
+        out.write(_redact(line) + "\n")
+    return 0
+
+
+def _label(args):
+    name = _label_name(args.name)
+    key = args.key
+    if key.endswith(":-"):
+        raise _Refused("%s is a session hit; one event cannot reproduce a hit that names no "
+                       "tool use, such as an absent or order hit" % key)
+    base = os.path.abspath(os.path.expanduser(args.corpus))
+    if not os.path.isdir(base):
+        raise _Refused("%s is not a directory; label writes only into a corpus directory "
+                       "that exists" % base)
+    sessions_dir = os.path.join(base, SESSIONS_DIRNAME)
+    labels_path = os.path.join(base, LABELS_FILE)
+    for path, kind in ((sessions_dir, os.path.isdir), (labels_path, os.path.isfile)):
+        # A link could point outside the directory the user named.
+        if os.path.islink(path) or (os.path.lexists(path) and not kind(path)):
+            raise _Refused("%s is a link or not a plain %s" % (
+                path, "directory" if kind is os.path.isdir else "file"))
+    file_name = name + EVENTS_SUFFIX
+    events_path = os.path.join(sessions_dir, file_name)
+    if os.path.lexists(events_path):
+        raise _Refused("%s already exists" % events_path)
+
+    _bundle, registry = _bundle_and_registry(args)
+    detector_id = registry.fold_map().get(args.detector, args.detector)
+    detector = registry.get(detector_id)
+    if detector is None:
+        raise _Refused("no detector %s is loaded" % args.detector)
+    if not detector.enabled(None):
+        raise _Refused("%s is gated on a stance and the corpus runs with none, so a negative "
+                       "for it would pass trivially" % detector_id)
+    only = Registry([detector])
+    event = _labelled_event(args, only, detector_id, key)
+
+    written = _redacted_event(event)
+    line = json.dumps(written, sort_keys=True, ensure_ascii=True) + "\n"
+    loaded = read_events(line, events_path)
+    if event_key(loaded[0]) != key:
+        raise _Refused("redaction changed the event's key, so the label could not name it")
+    if key not in _hit_keys(loaded, only, detector_id):
+        if key in _hit_keys([event], only, detector_id):
+            raise _Refused("redaction changed what %s matched at %s: the written event no "
+                           "longer hits, so the negative would pass trivially"
+                           % (detector_id, key))
+        raise _Refused("%s does not hit at %s on that event alone: the hit needs events "
+                       "around it, which one event cannot carry" % (detector_id, key))
+
+    entry = {"session": file_name, "labels": [{"at": key, "near": [detector_id]}]}
+    original, addition = _labels_addition(labels_path, entry)
+    for text in (line, addition):
+        if redact(text) != text or any(re.search(p, text) for p in SECRET_PATTERNS):
+            raise _Refused("a secret shape would survive into the written bytes; nothing "
+                           "was written")
+
+    _write_label(base, sessions_dir, events_path, labels_path, line, original, addition,
+                 registry, detector_id, file_name)
+    return ["wrote %s (1 event)" % events_path,
+            "%s %s: near %s at %s" % ("appended to" if original is not None else "created",
+                                      labels_path, detector_id, key),
+            "score it with: ruleprobe corpus --corpus %s" % base]
+
+
+def _label_name(name):
+    """`name` when it is a plain file stem, so nothing is written outside the directory."""
+    seps = [os.sep] + ([os.altsep] if os.altsep else []) + ["/", "\\"]
+    if not name or name.startswith(".") or ".." in name or any(s in name for s in seps) \
+            or any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in name):
+        raise _Refused("--name %r is not a plain file stem: no separator, no '..', no "
+                       "leading dot, not empty" % name)
+    return name
+
+
+def _labelled_event(args, registry, detector_id, key):
+    """The one event behind `detector_id`'s hit at `key` in the one session at the address,
+    rerun from the transcripts."""
+    read_errors, found, matches = [], None, 0
+    for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since,
+                                 errors=read_errors):
+        if session_address(session.runtime, session.id) != args.session:
+            continue
+        matches += 1
+        if found is None:
+            found = session
+    if not matches:
+        unread = _read_errors_line(read_errors)
+        raise _Refused("no session %s among the transcripts read%s"
+                       % (args.session, "; " + unread if unread else ""))
+    if matches > 1:
+        raise _Refused("%d sessions are at %s; narrow --root or --runtime to one"
+                       % (matches, args.session))
+    stances = dict(args.stance or [])
+    if key not in _hit_keys(found.events, registry, detector_id, stances):
+        raise _Refused("%s has no hit at %s in %s; ruleprobe explain lists its hits"
+                       % (detector_id, key, args.session))
+    events = [e for e in found.events if isinstance(e, dict) and e.get("kind") == "tool_use"
+              and event_key(e) == key]
+    if len(events) != 1:
+        raise _Refused("%s is %s event in %s" % (
+            key, "not an" if not events else "more than one", args.session))
+    return events[0]
+
+
+def _hit_keys(events, registry, detector_id, stances=None):
+    return [hit_key(h) for h in run(events, stances, registry=registry,
+                                    errors=[]).get(detector_id, [])]
+
+
+def _redacted_event(value):
+    """`value` with every string through `redact`. A mapping key that is, or is named like,
+    a secret becomes `REDACTED` and so does its whole value, since the value was redacted
+    apart from the name that marked it."""
+    if isinstance(value, str):
+        return redact(value)
+    if isinstance(value, list):
+        return [_redacted_event(item) for item in value]
+    if isinstance(value, dict):
+        out = {}
+        for name, item in value.items():
+            name = name if isinstance(name, str) else str(name)
+            assigned = "%s: v" % name
+            if redact(name) != name or redact(assigned) != assigned:
+                out[REDACTED] = REDACTED
+            else:
+                out[name] = _redacted_event(item)
+        return out
+    return value
+
+
+def _labels_addition(labels_path, entry):
+    """`(the original bytes or None, the text to append or create)`, refusing anything that
+    would not read back as the old document plus `entry`."""
+    if not os.path.lexists(labels_path):
+        return None, emit({"version": 1, "sessions": [entry]})
+    try:
+        with open(labels_path, "rb") as handle:
+            original = handle.read()
+        text = original.decode("utf-8")
+        document, _lines = load(labels_path)
+    except (OSError, UnicodeDecodeError, DeclarativeError) as exc:
+        raise _Refused("cannot read %s: %s" % (labels_path, exc))
+    if not isinstance(document, dict) or not isinstance(document.get("sessions"), list):
+        raise _Refused("%s is not a mapping with a sessions list" % labels_path)
+    if list(document)[-1] != "sessions":
+        raise _Refused("sessions is not the last key in %s, so an entry cannot be appended"
+                       % labels_path)
+    if any(isinstance(e, dict) and e.get("session") == entry["session"]
+           for e in document["sessions"]):
+        raise _Refused("%s already names %s" % (labels_path, entry["session"]))
+    indent = _item_indent(text)
+    try:
+        addition = emit([entry], indent)
+    except DeclarativeError as exc:
+        raise _Refused("the label cannot be written in the YAML subset: %s" % exc.reason)
+    if text and not text.endswith("\n"):
+        addition = "\n" + addition
+    expected = dict(document, sessions=document["sessions"] + [entry])
+    try:
+        same = parse(text + addition) == expected
+    except DeclarativeError:
+        same = False
+    if not same:
+        raise _Refused("appending to %s would not read back as the old document plus one "
+                       "entry" % labels_path)
+    return original, addition
+
+
+def _item_indent(text):
+    """The indentation of the entries under the top-level `sessions:`, or 2 for none."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    for i, raw in enumerate(lines):
+        if re.match(r"^sessions\s*:", raw):
+            for later in lines[i + 1:]:
+                stripped = later.strip()
+                if stripped and not stripped.startswith("#"):
+                    found = re.match(r"^( *)-(?: |$)", later)
+                    return len(found.group(1)) if found else 2
+    return 2
+
+
+def _write_label(base, sessions_dir, events_path, labels_path, line, original, addition,
+                 registry, detector_id, file_name):
+    """Both writes, then the corpus read back; any failure removes what was written and
+    restores `labels.yaml` byte for byte."""
+    made_dir = wrote_events = wrote_labels = False
+    try:
+        if not os.path.isdir(sessions_dir):
+            os.mkdir(sessions_dir)
+            made_dir = True
+        handle = os.fdopen(os.open(events_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                                   0o644), "w", encoding="utf-8", newline="\n")
+        wrote_events = True
+        with handle:
+            handle.write(line)
+        if original is None:
+            with open(labels_path, "x", encoding="utf-8", newline="\n") as labels:
+                wrote_labels = True
+                labels.write(addition)
+        else:
+            with open(labels_path, "ab") as labels:
+                wrote_labels = True
+                labels.write(addition.encode("utf-8"))
+        labelled = [one for one in load_corpus(base) if one.name == file_name]
+        score = score_corpus(registry, corpus=labelled)[detector_id]
+        if (score.negatives, score.fp) != (1, 1):
+            raise _Refused("the corpus read back did not score the new negative")
+    except BaseException as exc:
+        if wrote_labels:
+            if original is None:
+                _quietly(os.remove, labels_path)
+            else:
+                with open(labels_path, "wb") as labels:
+                    labels.write(original)
+        if wrote_events:
+            _quietly(os.remove, events_path)
+        if made_dir:
+            _quietly(os.rmdir, sessions_dir)
+        if isinstance(exc, _Refused):
+            raise
+        if isinstance(exc, (OSError, CorpusError)):
+            raise _Refused("%s; nothing was kept" % exc)
+        if isinstance(exc, Exception):
+            raise _Refused("a detector raised %s over the written corpus; nothing was kept"
+                           % type(exc).__name__)
+        raise
+
+
+def _quietly(remove, path):
+    try:
+        remove(path)
+    except OSError:
+        pass
+
+
 def main(argv=None, out=None):
     parser = build_parser()
     args = parser.parse_args(sys.argv[1:] if argv is None else argv)
@@ -335,6 +639,8 @@ def main(argv=None, out=None):
         return cmd_corpus(args, out)
     if args.command == "explain":
         return cmd_explain(args, out)
+    if args.command == "label":
+        return cmd_label(args, out)
     parser.print_help(out)
     return 1
 

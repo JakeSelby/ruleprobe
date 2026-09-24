@@ -414,6 +414,29 @@ field accuracy. Growing it is the cheapest contribution this repository takes: a
 under `ruleprobe/corpus/sessions/`, label it in `ruleprobe/corpus/labels.yaml`, and the
 table above moves.
 
+**A wrong hit of yours becomes a labelled negative.** When `ruleprobe explain` shows a hit that
+should not have fired, `ruleprobe label` records it in a corpus directory you name:
+
+```sh
+mkdir -p ~/ruleprobe-corpus
+ruleprobe label --session claude-code:sess-1 --detector verification/no-verify \
+                --key 1:toolu_2 --corpus ~/ruleprobe-corpus --name no-verify-in-a-message
+ruleprobe corpus --corpus ~/ruleprobe-corpus
+```
+
+It reruns the detector over your transcripts, takes the one event behind the hit, and writes it,
+redacted, as `sessions/<name>.events.jsonl` - one event per line, read back without a runtime
+reader - with one `near` label for it in `labels.yaml`, which it creates or appends to so a
+hand-written file keeps its comments. It is the only command that writes, and it writes nothing
+outside that directory. It refuses, says why and writes nothing when the hit is a session hit
+(`<turn>:-`), which one event cannot reproduce; when the written event no longer produces the
+hit, because redaction changed what the detector matched or the hit needs the events around
+it, since that negative would pass trivially; when a secret shape would survive into the
+written bytes; and when the session file exists already or `labels.yaml` would not read back
+as before plus one entry. It takes `report`'s source options and the same detector options as
+`explain`; `--name` is a plain file stem. The new negative scores as a false positive until the
+detector stops firing on it, which is the point.
+
 **A detector of your own scores itself.** Rather than a corpus, a declarative detector may
 carry an `examples:` block of minimal cases, and `ruleprobe corpus --rules ./docs/rules`
 scores those:
