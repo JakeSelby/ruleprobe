@@ -501,11 +501,13 @@ written bytes; and when the session file exists already or `labels.yaml` would n
 as before plus one entry. It takes `report`'s `--root`, `--runtime` and `--since`, and
 `--rules`, `--detectors` and `--no-config`; `--name` is a plain file stem. It takes no
 `--stance`, because a detector gated on one is refused, since the corpus runs with none, and
-no `--plugins`, because `ruleprobe corpus` loads none to score the negative with. When a
-subagent's transcript shares its parent's session id, the session with the hit at the key is
-the one taken. It prints the `ruleprobe corpus` command that scores the new negative, with the
-same `--rules`, `--detectors` and `--no-config` it was given. The new negative scores as a
-false positive until the detector stops firing on it, which is the point.
+no `--plugins`, because `ruleprobe corpus` loads none to score the negative with. A Claude Code
+subagent's own transcript is its own session, keyed as `<parent session id>/<agent id>`, and a
+transcript that yields no event is no session at all. When two transcripts still share a
+session id, the session with the hit at the key is the one taken. It prints the
+`ruleprobe corpus` command that scores the new negative, with the same `--rules`, `--detectors`
+and `--no-config` it was given. The new negative scores as a false positive until the detector
+stops firing on it, which is the point.
 
 In a corpus's `sessions/`, the suffix `.events.jsonl` is reserved: a file ending in it is read
 as one event per line, never through a runtime reader, so a native transcript must not be

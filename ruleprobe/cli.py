@@ -541,9 +541,8 @@ def _label_name(name):
 def _labelled_event(args, registry, detector_id, key, read_errors):
     """The one event behind `detector_id`'s hit at `key`, rerun from the transcripts.
 
-    A Claude Code subagent's transcript carries its parent's session id, so an address can
-    name more than one session; the one with the hit at `key` is taken, and more than one is
-    refused as ambiguous."""
+    An address can still name more than one session, as when a transcript was copied; the
+    one with the hit at `key` is taken, and more than one is refused as ambiguous."""
     matches, hits, found = 0, 0, None
     for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since,
                                  errors=read_errors):

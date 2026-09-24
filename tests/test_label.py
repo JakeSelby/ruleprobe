@@ -333,8 +333,8 @@ class LabelTests(unittest.TestCase):
         self.assertRefused("2 sessions at claude-code:sess-1 have a hit at 1:toolu_1; "
                            "narrow --root or --since to one")
 
-    def test_a_subagent_sharing_the_session_id_is_passed_over(self):
-        # A subagent's transcript carries its parent's session id.
+    def test_a_copied_transcript_sharing_the_session_id_is_passed_over(self):
+        # A copy of a transcript carries the same session id as the original.
         self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})])
         self.transcript([("toolu_1", "Bash", {"command": "ls"})], name="agent-1.jsonl")
         code, _text, err = self.label()

@@ -7,7 +7,7 @@
     "epic": 10,
     "story": 21,
     "task": 6,
-    "bug": 3,
+    "bug": 4,
     "chore": 5,
     "spike": 4,
     "decision": 12
@@ -713,6 +713,19 @@
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B003",
+      "github_number": 86,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/86",
+      "title": "fix(readers): read a Claude Code subagent's own transcript as its own session",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B003.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
       "provenance": "authored"
     }
   ]
