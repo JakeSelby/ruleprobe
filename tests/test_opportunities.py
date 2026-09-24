@@ -4,9 +4,10 @@
 An `absent` hit is an opportunity not followed and an `order` hit is a followed one, so over
 any event list `hits == opportunities - followed` for `absent` and `hits == followed` for
 `order`, where `opportunities` leaves out the undecided ones. The sessions are the labelled
-corpus, the fixture transcripts and every compiled detector's own `examples:` cases. No
-shipped detector counts opportunities yet, so the detectors checked are the shipped ones, the
-rule files under `docs/rules` and the ones below, which read the same sessions.
+corpus, the fixture transcripts and every compiled detector's own `examples:` cases. The
+detectors are every entry in `common.yaml` and the `docs/rules` front matter, and the ones
+below; each one's polarity is read from its spec's `when`, so a new `order` or turn-scoped
+`absent` entry in either file is checked with no change here.
 
 Run: python3 -m unittest discover -s tests
 """
@@ -14,8 +15,8 @@ import os
 import unittest
 
 from corpus import bash
-from ruleprobe import Registry, analyse, iter_sessions, load_bundle, run
-from ruleprobe.declarative import load
+from ruleprobe import Registry, analyse, iter_sessions, run
+from ruleprobe.declarative import load, parse, split_front_matter
 from ruleprobe.matchers import compile_detector
 from ruleprobe.shell import MAX_COMMAND
 from ruleprobe.validity import load_corpus
@@ -27,13 +28,13 @@ UNREAD = "git push origin 'main"
 TOO_LONG = "pytest -q -k " + "x" * MAX_COMMAND
 
 SPECS = [
-    ("order", {"id": "o/commit-then-push", "event": "session", "when": {"order": {
+    {"id": "o/commit-then-push", "event": "session", "when": {"order": {
         "first": {"git": {"subcommand": "commit"}},
-        "then": {"git": {"subcommand": "push"}}, "within": 3}}}),
-    ("order", {"id": "o/cat-then-filter", "event": "session", "when": {"order": {
+        "then": {"git": {"subcommand": "push"}}, "within": 3}}},
+    {"id": "o/cat-then-filter", "event": "session", "when": {"order": {
         "first": {"command": {"name": "cat"}},
-        "then": {"command": {"name": ["grep", "sed", "head"]}}, "within": 2}}}),
-    ("order", {"id": "o/push-then-log", "event": "session", "when": {"order": {
+        "then": {"command": {"name": ["grep", "sed", "head"]}}, "within": 2}}},
+    {"id": "o/push-then-log", "event": "session", "when": {"order": {
         "first": {"git": {"subcommand": "push"}},
         "then": {"git": {"subcommand": "log"}}, "within": 5}},
         "examples": {"fire": [{"events": [{"kind": "tool_use", "name": "Bash", "id": "tu1",
@@ -44,16 +45,16 @@ SPECS = [
                                            "input": {"command": UNREAD}},
                                           {"kind": "tool_use", "name": "Bash", "id": "tu2",
                                            "input": {"command": "git log"}}],
-                               "note": "the push nobody could read"}]}}),
-    ("absent", {"id": "a/push-per-turn", "event": "session", "when": {"absent": {
-        "of": {"git": {"subcommand": "push"}}, "scope": "turn"}}}),
-    ("absent", {"id": "a/test-per-turn", "event": "session", "when": {"absent": {
+                               "note": "the push nobody could read"}]}},
+    {"id": "a/push-per-turn", "event": "session", "when": {"absent": {
+        "of": {"git": {"subcommand": "push"}}, "scope": "turn"}}},
+    {"id": "a/test-per-turn", "event": "session", "when": {"absent": {
         "of": {"command": {"name": ["pytest", "python"]}}, "scope": "turn"}},
         "examples": {"fire": [{"bash": "ls"}],
                      "skip": [{"bash": "pytest -q"},
-                              {"bash": TOO_LONG, "note": "a test run nobody could read"}]}}),
-    ("absent", {"id": "a/write-per-turn", "event": "session", "when": {"absent": {
-        "of": {"tool": ["Write", "Edit"]}, "scope": "turn"}}}),
+                              {"bash": TOO_LONG, "note": "a test run nobody could read"}]}},
+    {"id": "a/write-per-turn", "event": "session", "when": {"absent": {
+        "of": {"tool": ["Write", "Edit"]}, "scope": "turn"}}},
 ]
 
 #: Sessions that put the undecided cases in front of every detector above.
@@ -64,17 +65,41 @@ UNDECIDED = [
 ]
 
 
+def polarity(spec):
+    """`order`, `absent` for a turn-scoped `absent`, or `None`: read from the spec."""
+    when = spec.get("when") or {}
+    if "order" in when:
+        return "order"
+    if "absent" in when and (when["absent"] or {}).get("scope") == "turn":
+        return "absent"
+    return None
+
+
+def specs():
+    """Every entry: the ones above, `common.yaml`, and each `docs/rules` file's front matter,
+    filled the way a rule file fills its entries."""
+    out = [dict(spec, rule=spec["id"].split("/")[0]) for spec in SPECS]
+    out.extend(load(COMMON_YAML)[0]["detectors"])
+    rules_dir = os.path.join(ROOT, "docs", "rules")
+    for name in sorted(os.listdir(rules_dir)):
+        if not name.endswith(".md"):
+            continue
+        with open(os.path.join(rules_dir, name), encoding="utf-8") as handle:
+            front = split_front_matter(handle.read())[0]
+        doc = parse(front) if front else {}
+        entries = doc.get("detector", doc.get("detectors"))
+        if entries is None:
+            continue
+        rule = doc.get("rule") or name[:-3]
+        for index, entry in enumerate(entries if isinstance(entries, list) else [entries]):
+            out.append(dict(entry, rule=entry.get("rule") or rule,
+                            id=entry.get("id") or "%s/%d" % (rule, index + 1)))
+    return out
+
+
 def compiled():
     """`(polarity or None, detector)` for every detector this test compiles."""
-    out = [(kind, compile_detector(dict(spec, rule=spec["id"].split("/")[0]), "<test>"))
-           for kind, spec in SPECS]
-    document, lines = load(COMMON_YAML)
-    out.extend((None, compile_detector(entry, COMMON_YAML, lines))
-               for entry in document["detectors"])
-    bundle = load_bundle(rules_dir=os.path.join(ROOT, "docs", "rules"), config=False)
-    assert not bundle.findings, bundle.findings
-    out.extend((None, detector) for detector in bundle.detectors)
-    return out
+    return [(polarity(spec), compile_detector(spec, "<test>")) for spec in specs()]
 
 
 def sessions(detectors):

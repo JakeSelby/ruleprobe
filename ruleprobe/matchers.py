@@ -78,16 +78,21 @@ negates a predicate itself reads it as false and can over-count. Either compose 
 declarative `not`, `any` and `all`, or test the result with `is_undecided` before negating it.
 
 `order`, and `absent` with `scope: turn`, also count opportunities - each point at which the
-rule applied, and whether it was followed - as the detector's `opportunities`, computed in
-the same pass as its hits. Each event `first` matches opens one `order` opportunity,
+rule applied, and whether it was followed - as the detector's `opportunities`. It and `fn`
+each evaluate the session separately, through the same code, so a hit is always derived
+from an opportunity. Each event `first` matches opens one `order` opportunity,
 followed when `then` matched within `within`, so a hit is a followed opportunity. Each turn
 in the event list is one `absent` opportunity, followed when `of` matched in it, so a hit is
 one not followed; `absent` has no trigger, so a turn in which the rule asked for nothing is
-an opportunity too. `absent` with `scope: session` and `change` count none. Undecided stays
+an opportunity too. `absent` with `scope: session`, `change`, and every detector whose `when`
+reads one event at a time (`tool`, `command`, `any` and the rest) count none: their
+`opportunities` is `None`. Undecided stays
 undecided here as well: an event `first` is undecided on, an `order` whose `then` is never
 true and undecided at least once within the window, and an `absent` turn holding an
-undecided candidate and no true one each have `followed` of `None` - never false - and add
-to neither the opportunities nor the followed count.
+undecided candidate and no true one each have `followed` of `None` - never false. The
+callable returns those undecided triples too, so the length of its list is not the
+opportunity count: the count is the triples whose `followed` is `True` or `False`, and the
+undecided ones are counted apart.
 
 Every spec error is a `DeclarativeError` with a line number. Nothing here compiles a
 half-valid detector: a typo in a key name is a finding, never a detector that quietly never
@@ -677,7 +682,7 @@ def _a_order(value, where, owner, key):
 
     def evaluate(events, env):
         # Every event `first` does not decidedly miss, with whether `then` followed it. A
-        # hit is one followed, so hits and opportunities come out of this one pass.
+        # hit is one followed; `run` and `opportunities` both read this, so they agree.
         out = []
         for i, event in enumerate(events):
             opened = first(event, env)

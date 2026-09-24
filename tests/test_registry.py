@@ -78,6 +78,22 @@ class OpportunitiesAttributeTests(unittest.TestCase):
                                                  strict=True)["a/b"]],
                          [("a/b", 1, None)])
 
+    def test_a_slots_subclass_that_skips_init_registers_and_runs(self):
+        class Bare(Detector):
+            __slots__ = ()
+
+            def __init__(self, id, rule, event, fn, gate=None):
+                self.id, self.rule, self.event, self.fn, self.gate = id, rule, event, fn, gate
+
+        detector = Bare("a/b", "a", "session", always)
+        self.assertIsNone(getattr(detector, "opportunities", None))
+        registry = Registry([detector])
+        self.assertEqual(list(run([bash("ls")], registry=registry, strict=True)), ["a/b"])
+
+    def test_a_non_callable_opportunities_is_refused_by_name(self):
+        with self.assertRaisesRegex(TypeError, "a/b"):
+            Registry([Detector("a/b", "a", "session", never, opportunities=[(1, None, True)])])
+
 
 class RegistryTests(unittest.TestCase):
     def test_a_registered_detector_is_found_by_id(self):

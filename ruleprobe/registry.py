@@ -42,6 +42,7 @@ class Detector(object):
     - `opportunities` - optional and keyword-only, a callable over `(events, ctx)` returning
       `[(turn, tool_use_id, followed), ...]`: each point at which the rule applied, and
       whether it was followed - `True`, `False`, or `None` when that could not be decided.
+      Undecided triples are in the list, so its length is not the opportunity count.
       It travels beside `fn` rather than inside its return, so `fn` keeps its shape. A
       declarative `order`, or `absent` with `scope: turn`, fills it; `None` means the
       detector counts hits only.
@@ -142,6 +143,12 @@ class Registry(object):
                              % (detector.event, ", ".join(sorted(EVENT_KINDS))))
         if not callable(detector.fn):
             raise TypeError("detector %s has no callable fn" % detector.id)
+        # Read through getattr: a `__slots__ = ()` subclass that never calls
+        # `Detector.__init__` leaves the slot unset.
+        opportunities = getattr(detector, "opportunities", None)
+        if opportunities is not None and not callable(opportunities):
+            raise TypeError("detector %s has an opportunities that is not callable"
+                            % detector.id)
         if detector.id in self._by_id:
             self._order[self._order.index(self._by_id[detector.id])] = detector
         else:
