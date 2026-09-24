@@ -632,7 +632,7 @@ class ExplainCommandTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(blocks(text)), 1)
         self.assertIn("detector  mine/find", text)
-        self.assertIn("detector findings: 1", err)
+        self.assertIn("findings: 1 (everything else still loaded)", err)
 
     def test_stance_runs_a_gated_detector_and_plugins_is_accepted(self):
         gated = os.path.join(FIXTURES, "gated-detector.yaml")

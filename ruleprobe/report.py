@@ -27,7 +27,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run, run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
