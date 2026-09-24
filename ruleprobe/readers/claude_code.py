@@ -21,6 +21,8 @@ Two shapes cost more care than they look:
 
 A transcript that yields no event is not a measured session: `read` returns None for it, as
 for a file that holds no session at all, so it never enters a share's denominator.
+`session_key(path)` gives the id `read` would, from as few lines as decide it, so
+`iter_sessions` can find two files carrying one session before reading either.
 `read(path, empty=True)` returns it with no events instead, which `iter_sessions` uses to drop
 an old one by `since` before reporting the rest.
 """
@@ -55,9 +57,8 @@ def read(path, empty=False):
     entries = _entries(path)
     if entries is None:
         return None
-    agent_id = _own_agent(entries)
+    session_id, agent_id = _identity(entries)
     events = []
-    session_id = ""
     cwd = ""
     started = ended = ""
     tool_names = {}
@@ -71,7 +72,6 @@ def read(path, empty=False):
         if stamp:
             started = stamp if not started or stamp < started else started
             ended = stamp if stamp > ended else ended
-        session_id = session_id or entry.get("sessionId") or ""
         cwd = cwd or entry.get("cwd") or ""
         kind = entry.get("type")
         message = entry.get("message") or {}
@@ -138,12 +138,42 @@ def read(path, empty=False):
         pending_final["final"] = True
     if not events and not (empty and session_id):
         return None
-    if agent_id:
-        session_id = "%s/%s" % (session_id, agent_id) if session_id else agent_id
-    return Session(id=session_id or os.path.basename(path)[:-6],
+    return Session(id=_key(session_id, agent_id, path),
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="claude-code", events=events, path=path,
                    started=started, ended=ended)
+
+
+def session_key(path):
+    """The id `read(path)` gives its session, or None when the file cannot be opened or names
+    neither a `sessionId` nor an agent id, since a file known only by its stem is not known
+    to be another file's copy.
+
+    It reads only as far as decides the id: to the first `sessionId` and the first line that
+    shows the file is not a subagent's own, which in a parent's file is its opening lines. A
+    subagent's own file is read to the end, since only its last line can rule that out. A
+    file that `read` finds no session in may still have a key; it is simply never kept.
+    """
+    try:
+        handle = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with handle:
+        session_id, agent_id = _identity(_parsed(handle))
+    if not session_id and not agent_id:
+        return None
+    return _key(session_id, agent_id, path)
+
+
+def _key(session_id, agent_id, path):
+    """A session's id: `<parent session id>/<agent id>` for a subagent's own file, the
+    `sessionId` otherwise, and the file's stem when the file names neither. A `sessionId`
+    that is not a string, a list say, is its `str()`, so the id is always a string."""
+    if session_id and not isinstance(session_id, str):
+        session_id = str(session_id)
+    if agent_id:
+        session_id = "%s/%s" % (session_id, agent_id) if session_id else agent_id
+    return session_id or os.path.basename(path)[:-6]
 
 
 def _entries(path):
@@ -152,38 +182,53 @@ def _entries(path):
         handle = open(path, encoding="utf-8", errors="replace")
     except OSError:
         return None
-    entries = []
     with handle:
-        for line in handle:
-            try:
-                entry = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(entry, dict):
-                entries.append(entry)
-    return entries
+        return list(_parsed(handle))
 
 
-def _own_agent(entries):
-    """The agent id when `entries` are a subagent's own transcript, else "".
+def _parsed(lines):
+    """Each line of `lines` that is a JSON object, parsed, in order."""
+    for line in lines:
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(entry, dict):
+            yield entry
 
-    They are when every `user` and `assistant` line is `isSidechain` and all of them name the
-    same non-empty `agentId`. Those lines carry the work; a `system`, `attachment` or
-    `summary` line does not, so one written without the markers cannot turn the file back
-    into an empty session. A parent's file holds its own non-sidechain lines, so its sidechain
-    lines stay another agent's work; a file mixing agent ids is read as a parent, which
-    counts less rather than more.
+
+def _identity(entries):
+    """`(session id, agent id)` for `entries`: the first `sessionId` in them, and the agent id
+    when they are a subagent's own transcript, else "". It stops once both are decided, so
+    `session_key` can hand it a lazy iterator and `read` its list.
+
+    They are a subagent's own when every `user` and `assistant` line is `isSidechain` and all
+    of them name the same non-empty `agentId`. Those lines carry the work; a `system`,
+    `attachment` or `summary` line does not, so one written without the markers cannot turn
+    the file back into an empty session. A parent's file holds its own non-sidechain lines,
+    so its sidechain lines stay another agent's work; a file mixing agent ids is read as a
+    parent, which counts less rather than more.
     """
-    agent = ""
+    session_id = agent = ""
+    parent = False
     for entry in entries:
+        session_id = session_id or entry.get("sessionId") or ""
+        if parent:
+            if session_id:
+                break
+            continue
         if entry.get("type") not in ("user", "assistant"):
             continue
         named = entry.get("agentId")
         if not entry.get("isSidechain") or not isinstance(named, str) or not named \
                 or (agent and named != agent):
-            return ""
+            parent = True
+            agent = ""
+            if session_id:
+                break
+            continue
         agent = named
-    return agent
+    return session_id, agent
 
 
 def _prompt_text(content):

@@ -162,6 +162,12 @@ the policy.
   `MalformedOpportunities` when two such events fell in one turn
   ([#91](https://github.com/JakeSelby/ruleprobe/issues/91)). A repeated point with no id now counts
   once per occurrence, while a repeated point with an id is still refused.
+- A session copied into several transcript files, as when a project folder is copied or renamed,
+  is counted once: one session per runtime and session id, the file with the most events kept
+  ([#87](https://github.com/JakeSelby/ruleprobe/issues/87)). Each copy set aside is named apart
+  from read failures on stderr, and `report --json` lists them under a new `copies` key while
+  `read_errors` keeps failures only. `ruleprobe corpus` still reads each labelled file as its own
+  session, since labels name files.
 
 ## 0.1.0 (2026-09-22)
 

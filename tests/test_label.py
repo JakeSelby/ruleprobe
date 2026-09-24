@@ -324,18 +324,25 @@ class LabelTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertRefused("not a plain file stem", name=name)
 
-    def test_no_session_or_two_at_the_address_is_refused(self):
-        use = [("toolu_1", "Bash", {"command": "git commit --no-verify"})]
-        self.transcript(use)
+    def test_no_session_at_the_address_is_refused(self):
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify"})])
         self.assertRefused("no session claude-code:other", session="claude-code:other")
         self.assertRefused("no session sess-1", session="sess-1")
-        self.transcript(use, name="copy.jsonl")
-        self.assertRefused("2 sessions at claude-code:sess-1 have a hit at 1:toolu_1; "
-                           "narrow --root or --since to one")
 
-    def test_a_copied_transcript_sharing_the_session_id_is_passed_over(self):
+    def test_an_identical_copy_is_one_session_and_is_named_as_a_copy(self):
+        use = [("toolu_1", "Bash", {"command": "git commit --no-verify"})]
+        self.transcript(use)
+        self.transcript(use, name="copy.jsonl")
+        code, _text, err = self.label()
+        self.assertEqual(code, 0, err)
+        self.assertIn("1 transcript(s) set aside as copies of a session read from another "
+                      "file: transcripts/t.jsonl (kept transcripts/copy.jsonl)", err)
+        self.assertNotIn("produced no session", err)
+
+    def test_of_two_copies_the_one_with_more_events_is_the_session(self):
         # A copy of a transcript carries the same session id as the original.
-        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})])
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"}),
+                         ("toolu_2", "Bash", {"command": "ls"})])
         self.transcript([("toolu_1", "Bash", {"command": "ls"})], name="agent-1.jsonl")
         code, _text, err = self.label()
         self.assertEqual(code, 0, err)
@@ -343,20 +350,39 @@ class LabelTests(unittest.TestCase):
         os.remove(os.path.join(self.root, "t.jsonl"))
         self.assertRefused("has no hit at 1:toolu_1 in claude-code:sess-1;", name="other")
 
-    def test_no_hit_in_any_of_several_sessions_says_how_many(self):
+    def test_a_hit_only_in_the_shorter_copy_is_refused_naming_the_copies(self):
+        for folder in ("proj-a", "proj-b"):
+            os.mkdir(os.path.join(self.root, folder))
+        self.transcript([("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})],
+                        name="proj-a/s.jsonl")
+        self.transcript([("toolu_1", "Bash", {"command": "ls"}),
+                         ("toolu_2", "Bash", {"command": "pwd"})], name="proj-b/s.jsonl")
+        self.assertRefused(r"has no hit at 1:toolu_1 in claude-code:sess-1; ruleprobe explain "
+                           r"lists its hits; it was read from proj-b/s.jsonl, and 1 copy\(ies\) "
+                           r"of it were set aside: proj-a/s.jsonl; point --root at the one "
+                           r"with the hit")
+        code, _text, err = self.label("--root", os.path.join(self.root, "proj-a"))
+        self.assertEqual(code, 0, err)
+
+    def test_copies_with_no_hit_are_one_session_without_it(self):
         use = [("toolu_1", "Bash", {"command": "ls"})]
         self.transcript(use)
         self.transcript(use, name="agent-1.jsonl")
-        self.assertRefused(r"no hit at 1:toolu_1 in claude-code:sess-1 \(2 sessions at it\)")
+        err = self.assertRefused("no hit at 1:toolu_1 in claude-code:sess-1;")
+        self.assertNotIn("sessions at it", err)
 
-    def test_since_narrows_two_copies_to_one(self):
+    def test_since_drops_an_old_copy_before_one_is_kept(self):
         use = [("toolu_1", "Bash", {"command": "git commit --no-verify -m wip"})]
         self.transcript(use)
         with open(os.path.join(self.root, "old.jsonl"), "w") as handle:
             handle.write(claude_transcript("sess-1", use).replace("2026-09-20", "2026-01-05"))
-        self.assertRefused("2 sessions at claude-code:sess-1 have a hit")
         code, _text, err = self.label("--since", "2026-09-01")
         self.assertEqual(code, 0, err)
+        self.assertNotIn("set aside", err)
+        # Without the cut-off the two tie, and the first in path order is kept.
+        code, _text, err = self.label(name="again")
+        self.assertEqual(code, 0, err)
+        self.assertIn("transcripts/t.jsonl (kept transcripts/old.jsonl)", err)
 
     def test_a_codex_session_is_labelled_and_runtime_is_forwarded(self):
         with open(os.path.join(FIXTURES, "codex-rollout.jsonl")) as handle:

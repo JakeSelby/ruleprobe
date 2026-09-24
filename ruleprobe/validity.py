@@ -34,7 +34,7 @@ import os
 
 from .declarative import DeclarativeError, load
 from .events import Hit, Session  # noqa: F401  - Hit is named in the docstring's contract
-from .readers import iter_sessions
+from .readers import iter_file_sessions
 from .registry import DEFAULT, fold_map, run
 
 __all__ = ["CorpusError", "Score", "DEFAULT_FLOOR", "corpus_dir", "load_corpus",
@@ -239,9 +239,10 @@ def load_corpus(directory=None):
     # An event-schema file ends in `.jsonl` too, so the readers see it; it is theirs to skip
     # and `load_events`' to read.
     # A label names its session by file name, so two files of one name in different
-    # subdirectories are refused rather than one silently replacing the other.
+    # subdirectories are refused rather than one silently replacing the other, and two
+    # files carrying one session id are both read.
     by_name = {}
-    sessions = [s for s in iter_sessions(root=sessions_dir)
+    sessions = [s for s in iter_file_sessions(root=sessions_dir)
                 if not s.path.endswith(EVENTS_SUFFIX)]
     sessions.extend(load_events(p) for p in _event_session_paths(sessions_dir))
     for session in sessions:
