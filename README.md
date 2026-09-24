@@ -17,8 +17,8 @@ That reads `~/.claude/projects/**/*.jsonl` (and `~/.codex/sessions/**/*.jsonl`, 
 wrote any), runs the detectors over them, and prints:
 
 ```
-detector                                 hits  sessions    of   share  note
----------------------------------------------------------------------------
+detector                                 hits  sessions    of    share  note
+----------------------------------------------------------------------------
 cache-hygiene/compact                       0         0   339       0%  unobserved
 cache-hygiene/model-switch                 11        11   339       3%
 secrets/secret-in-write                     3         2   339       1%
@@ -117,8 +117,8 @@ ruleprobe report --root docs --rules docs/rules
 ```
 
 ```
-detector                                 hits  sessions    of   share  note
----------------------------------------------------------------------------
+detector                                 hits  sessions    of    share  note
+----------------------------------------------------------------------------
 cache-hygiene/compact                       0         0     1       0%
 cache-hygiene/model-switch                  0         0     1       0%
 house-style/sudo-install                    2         1     1     100%

@@ -245,6 +245,7 @@ class GatingFindingTests(unittest.TestCase):
                                    "--json")
         data = json.loads(text)
         self.assertEqual(data["min_sessions"], 1)
+        self.assertEqual(data["frequent_share"], 0.1)
         notes = dict((d["detector"], d["note"]) for d in data["detectors"])
         self.assertIn("frequent", set(notes.values()))
         self.assertEqual(data["detectors"][0]["of"], data["measured"])

@@ -114,6 +114,36 @@ class MinimumTests(unittest.TestCase):
         self.assertIsNone(got["compliance_rate"])
 
 
+class ZeroOpportunityTests(unittest.TestCase):
+    """A detector with the hook but no opportunity is not a detector without the hook."""
+
+    def test_the_hook_with_zero_opportunities_prints_zeros_and_no_rate(self):
+        rows = [row({"o/order": 0}, {"o/order": tally(0, 0)})]
+        got = entry(report_data(rows, registry=REGISTRY, min_opportunities=0), "o/order")
+        self.assertEqual((got["opportunities"], got["followed"], got["undecided"],
+                          got["compliance_rate"]), (0, 0, 0, None))
+        self.assertEqual(line(report(rows, registry=REGISTRY), "o/order").split()[5:9],
+                         ["0", "0", "0", "-"])
+
+
+class RateDisplayTests(unittest.TestCase):
+    def rate_cell(self, opportunities, followed):
+        rows = [row({"o/order": 1}, {"o/order": tally(opportunities, followed)})]
+        return line(report(rows, registry=REGISTRY, min_opportunities=1), "o/order").split()[8]
+
+    def test_a_rate_never_rounds_onto_all_or_none(self):
+        self.assertEqual(self.rate_cell(1000, 999), "99%")
+        self.assertEqual(self.rate_cell(300, 1), "1%")
+        self.assertEqual(self.rate_cell(1000, 1000), "100%")
+        self.assertEqual(self.rate_cell(300, 0), "0%")
+        self.assertEqual(self.rate_cell(4, 3), "75%")
+
+    def test_the_data_keeps_the_exact_rate(self):
+        rows = [row({}, {"o/order": tally(1000, 999)})]
+        self.assertEqual(entry(report_data(rows, registry=REGISTRY),
+                               "o/order")["compliance_rate"], 0.999)
+
+
 class GroupingTests(unittest.TestCase):
     ROWS = [row({"o/order": 1}, {"o/order": tally(3, 2)}, repo="r1",
                 stances={"commits": "on"}),
@@ -170,6 +200,14 @@ class FoldTests(unittest.TestCase):
         self.assertEqual(folded_compliance(both, registry.renamed),
                          {"o/order": tally(3, 2, 1)})
 
+    def test_a_retired_ids_hits_and_compliance_fold_to_the_same_current_id(self):
+        registry = REGISTRY.copy().rename("o/old", "o/order")
+        rows = [row({"o/old": 3}, {"o/old": tally(4, 2)})]
+        data = report_data(rows, registry=registry, min_opportunities=1)
+        got = entry(data, "o/order")
+        self.assertEqual((got["hits"], got["opportunities"], got["followed"]), (3, 4, 2))
+        self.assertEqual([d["detector"] for d in data["detectors"]], ["a/plain", "o/order"])
+
     def test_a_shipped_rename_folds_compliance_with_no_map_of_your_own(self):
         rows = [row({"o/gone": 1}, {"o/gone": tally(4, 1)})]
         with mock.patch.dict(contract_data.RENAMED, {"o/gone": "o/order"}):
@@ -196,6 +234,24 @@ class FoldTests(unittest.TestCase):
         got = entry(data, "o/order")
         self.assertEqual((got["opportunities"], got["followed"]), (4, 3))
         self.assertEqual((got["hits"], got["of"]), (2, 2))
+
+    def test_an_unreadable_compliance_map_is_counted_and_noted(self):
+        for bad in ([], "x", {7: tally(1, 1), "o/order": tally(2, 1)}):
+            rows = [row({"o/order": 1}, bad), row({"o/order": 1}, {"o/order": tally(3, 3)})]
+            data = report_data(rows, registry=REGISTRY, min_opportunities=1)
+            self.assertEqual(data["unreadable_compliance"], 1, bad)
+            self.assertIn("1 session(s) carry a compliance map, or a key in one, naming no"
+                          " detector", data["notes"])
+            # The row's hits still count; its readable entries, if any, still sum.
+            got = entry(data, "o/order")
+            self.assertEqual(got["hits"], 2)
+            self.assertEqual(got["opportunities"], 5 if isinstance(bad, dict) else 3, bad)
+
+    def test_a_null_compliance_is_read_as_absent(self):
+        stored = row({})
+        stored["compliance"] = None
+        data = report_data([stored], registry=REGISTRY)
+        self.assertEqual(data["unreadable_compliance"], 0)
 
     def test_a_malformed_retired_entry_drops_the_folded_sum_for_that_session(self):
         registry = REGISTRY.copy().rename("o/old", "o/order")
@@ -288,6 +344,34 @@ class OpportunityErrorTests(unittest.TestCase):
         self.assertEqual(report_data(rows, registry=REGISTRY)["opportunity_errors"],
                          {"o/order": 2, "o/other": 1})
 
+    def test_the_hits_stand_sentence_is_printed_once(self):
+        rows = [row({}, {"o/order": tally(-1, 0)}, rules_errors=[opp_error("o/other")]),
+                row({}, [])]
+        notes = report_data(rows, registry=REGISTRY)["notes"]
+        self.assertEqual(len([n for n in notes if n.endswith("its hits stand")]), 1)
+        self.assertEqual(notes[-1], "each is out of its own compliance figures for those"
+                                    " sessions; its hits stand")
+
+    def test_by_stance_counts_fn_errors_over_the_same_sessions(self):
+        raised = {"detector": "a/plain", "error": "ValueError"}
+        rows = [row({}, stances={"c": "on"}, rules_errors=[raised, opp_error("o/order")]),
+                row({}, stances={"c": "on"}, stances_source="rescan",
+                    rules_errors=[raised, opp_error("o/order")])]
+        data = report_data(rows, by="stance", registry=REGISTRY)
+        self.assertEqual(data["errors"], {"a/plain": 1})
+        self.assertEqual(data["opportunity_errors"], {"o/order": 1})
+        self.assertIn("1 detector(s) raised in 1 session(s): a/plain (1)", data["notes"])
+        self.assertEqual(report_data(rows, registry=REGISTRY)["errors"], {"a/plain": 2})
+
+    def test_an_id_known_only_from_compliance_is_never_unobserved(self):
+        rows = [row({}, {"x/stored": tally(1, 1)}, rules_errors=[opp_error("x/failed")])
+                for _ in range(3)]
+        data = report_data(rows, registry=REGISTRY, min_sessions=1)
+        self.assertEqual(entry(data, "x/failed")["note"], "")
+        self.assertEqual(entry(data, "x/stored")["note"], "")
+        # A registered detector with no hit still is.
+        self.assertEqual(entry(data, "o/order")["note"], "unobserved")
+
     def test_a_failure_leaves_the_session_out_of_its_group_too(self):
         rows = [row({}, {"o/order": tally(3, 1)}, repo="r1"),
                 row({}, {"o/order": tally(9, 9)}, repo="r1",
@@ -332,6 +416,21 @@ class LayoutTests(unittest.TestCase):
         self.assertTrue(line(text, "o/order").endswith("70%"))
         self.assertTrue(head.index("rate") + len("rate") == len(line(text, "o/order")))
 
+    def test_the_plain_table_puts_every_note_and_validity_under_its_header(self):
+        rows = [row({"a/plain": 1}) for _ in range(20)]
+        text = report(rows, registry=REGISTRY, validity={})
+        head = text.split("\n")[0]
+        self.assertEqual(head.split(), ["detector", "hits", "sessions", "of", "share", "note",
+                                        "validity"])
+        self.assertEqual(line(text, "a/plain").index("frequent"), head.index("note"))
+        self.assertEqual(line(text, "o/order").index("unobserved"), head.index("note"))
+        for did in ("a/plain", "o/order"):
+            self.assertEqual(line(text, did).index("not in the corpus"),
+                             head.index("validity"), did)
+        # The share cell ends where its header does.
+        self.assertEqual(line(text, "a/plain").index("100%") + 4,
+                         head.index("share") + len("share"))
+
     def test_compliance_columns_and_the_validity_column_line_up(self):
         text = report(self.ROWS, registry=REGISTRY, validity={})
         head = text.split("\n")[0]
@@ -363,10 +462,11 @@ class DeterminismTests(unittest.TestCase):
                 row({}, {"o/z": tally(1, 0), "o/order": tally(2, 1, 1)}, repo="r1",
                     rules_errors=[opp_error("o/z"), opp_error("o/old")])]
         for by in ("rule", "repo", "stance"):
-            first = json.dumps(report_data(rows, by=by, registry=registry), indent=2)
-            again = json.dumps(report_data(list(reversed(rows)), by=by, registry=registry),
-                               indent=2)
-            # Not sorted by the dump: the result's own order is the stable one.
+            # Dumped as `report --json` dumps it, from the same rows reported twice.
+            first = json.dumps(report_data(rows, by=by, registry=registry), indent=2,
+                               sort_keys=True)
+            again = json.dumps(report_data(rows, by=by, registry=registry), indent=2,
+                               sort_keys=True)
             self.assertEqual(first, again, by)
 
 
