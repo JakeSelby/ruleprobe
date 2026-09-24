@@ -179,6 +179,10 @@ the policy.
   holds for `\;`, `\|`, `\&`, `\<`, `\>` and quoted forms, so `pipelines()` keeps
   `find . -exec cat {} \;` as one segment; a quoted or escaped reserved word stays a command word,
   and `normalise` keeps the `cd` in `cd a\&& ls`. An unquoted operator still splits.
+- A Gemini CLI write the user edited before accepting it is no longer read as the agent's write:
+  it keeps its native tool name and its text is dropped from the event, so it is not measured as a
+  write ([#102](https://github.com/JakeSelby/ruleprobe/issues/102)). Gemini records the user's
+  version in the call and cannot be relied on to keep the model's.
 
 ## 0.1.0 (2026-09-22)
 
