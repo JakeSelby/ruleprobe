@@ -29,6 +29,7 @@ ruleprobe = "ruleprobe.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/JakeSelby/ruleprobe"
+Documentation = "https://ruleprobe.jakeselby.com"
 Issues = "https://github.com/JakeSelby/ruleprobe/issues"
 
 [tool.setuptools.dynamic]

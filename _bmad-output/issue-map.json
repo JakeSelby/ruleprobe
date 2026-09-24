@@ -8,7 +8,7 @@
     "story": 21,
     "task": 6,
     "bug": 9,
-    "chore": 5,
+    "chore": 6,
     "spike": 4,
     "decision": 12
   },
@@ -700,6 +700,19 @@
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "completed",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C005",
+      "github_number": 67,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/67",
+      "title": "chore(docs): publish a reference site at ruleprobe.jakeselby.com",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C005.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
       "provenance": "authored"
     },
     {
