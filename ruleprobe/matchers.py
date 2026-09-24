@@ -19,12 +19,26 @@ The matchers, by the shape they read:
   the tool's input. `field` may be dotted, and may be a list, in which case any of them
   satisfying every constraint is a match.
 - `command` - `name`, `starts_with`, `contains`, `none_of`, `arg_count`, `sole_segment`,
-  `redirect`, `unparsed`, `regex`: a Bash command, through the shared parse in
-  `ruleprobe.shell`. Every key but `regex` and `unparsed` is read against one pipeline
-  segment, and they must hold of the *same* segment - which is why two constraints on one
-  command belong in one `command` block and not in an `all` of two.
-- `git` - `subcommand`, `args_any`, `args_none`, `token_prefix`: a `git` call, with its
-  flags and `-C`/`-c` options already stepped over.
+  `redirect`, `unparsed`, `regex`, `program`, `first_operand`: a Bash command, through the
+  shared parse in `ruleprobe.shell`. Every key but `regex` and `unparsed` is read against one
+  pipeline segment, and they must hold of the *same* segment - which is why two constraints
+  on one command belong in one `command` block and not in an `all` of two. `program` is a
+  regex that must match the whole basename of the segment's first word once leading
+  `NAME=value` assignments are stepped over (`pip[0-9.]*` holds of `.venv/bin/pip3.12`), and
+  `first_operand` one that must match the whole of that command's first operand, flags
+  stepped over (`install` in `pip -q install ruff`), and with them the value of a
+  `--cwd`, `-C`, `--prefix`, `--dir`, `-f` or `--file` given as the next word (`test` in
+  `make -C src test`, and not in `yarn --cwd test install`).
+- `git` - `subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`,
+  `message_regex`: a `git` call, with its flags and `-C`/`-c` options already stepped over.
+  `arg_regex` is searched in each parsed argument after the subcommand on its own, so a
+  pattern never sees a neighbouring argument or segment. `message_regex` is searched in the
+  call's first message - the value of its first `-m`, `-m<text>`, `--message`,
+  `--message=<text>`, or of an `m` behind a cluster of the valueless `-a`, `-e`, `-i`, `-n`,
+  `-o`, `-p`, `-q`, `-s`, `-v` and `-z` (`-am`, `-sm`, `-amfoo`); a call with none has no
+  message and does not match, and one whose message holds a `$`, a backtick, a substitution
+  or a heredoc is undecided, since nobody can read it - a `$` a single quote made literal
+  included, since the parse keeps no quoting.
 - `env` - `name`, `command`: a `NAME=value` assignment in front of a named command.
 - `text` - `source` (`command`, `heredocs`, `payload`, `assistant`), `regex`, `contains`.
 - `message` - `role`, `final`, `regex`, `contains`: an assistant message.
@@ -105,7 +119,7 @@ from collections import namedtuple
 from .declarative import DeclarativeError
 from .events import hit, input_of, text_of
 from .registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, Detector, register_compiler
-from .shell import git_calls, has_redirect, operands, split_assignments
+from .shell import MARKER_RE, SUB_PLACEHOLDER, git_calls, has_redirect, operands, split_assignments
 
 __all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
            "compile_matcher", "is_undecided"]
@@ -451,7 +465,8 @@ def _m_command(value, where, owner, key):
     value = _allowed(
         _mapping(value, where, owner, key, "command"),
         ("name", "starts_with", "contains", "none_of", "arg_count", "sole_segment",
-         "redirect", "unparsed", "regex"), where, owner, key, "command")
+         "redirect", "unparsed", "regex", "program", "first_operand"), where, owner, key,
+        "command")
     names = frozenset(_strings(value.get("name"), where, value, "name", "command name"))
     starts = list(_strings(value.get("starts_with"), where, value, "starts_with",
                            "command starts_with"))
@@ -463,8 +478,11 @@ def _m_command(value, where, owner, key):
     sole = _flag(value.get("sole_segment"), where, value, "sole_segment")
     redirect = _flag(value.get("redirect"), where, value, "redirect")
     unparsed = _flag(value.get("unparsed"), where, value, "unparsed")
+    programs = _regexes(value.get("program"), where, value, "program")
+    first_operands = _regexes(value.get("first_operand"), where, value, "first_operand")
     per_segment = bool(names or starts or contains or none_of or count is not None
-                       or sole is not None or redirect is not None)
+                       or sole is not None or redirect is not None or programs
+                       or first_operands)
 
     def segment_ok(segment):
         if names and (not segment or segment[0] not in names):
@@ -482,6 +500,17 @@ def _m_command(value, where, owner, key):
             return False
         if count is not None and not count(len(operands(segment))):
             return False
+        if programs or first_operands:
+            words = split_assignments(segment)[1]
+            if not words:
+                return False
+            if programs and not any(rx.fullmatch(words[0].rsplit("/", 1)[-1])
+                                    for rx in programs):
+                return False
+            if first_operands:
+                given = operands(_without_flag_values(words))
+                if not given or not any(rx.fullmatch(given[0]) for rx in first_operands):
+                    return False
         return True
 
     def match(event, env):
@@ -512,8 +541,8 @@ def _m_command(value, where, owner, key):
 
 def _m_git(value, where, owner, key):
     value = _allowed(_mapping(value, where, owner, key, "git"),
-                     ("subcommand", "args_any", "args_none", "token_prefix"),
-                     where, owner, key, "git")
+                     ("subcommand", "args_any", "args_none", "token_prefix", "arg_regex",
+                      "message_regex"), where, owner, key, "git")
     subs = tuple(_strings(value.get("subcommand"), where, value, "subcommand",
                           "git subcommand"))
     if not subs:
@@ -524,6 +553,8 @@ def _m_git(value, where, owner, key):
                                    "git args_none"))
     prefixes = _strings(value.get("token_prefix"), where, value, "token_prefix",
                         "git token_prefix")
+    arg_regexes = _regexes(value.get("arg_regex"), where, value, "arg_regex")
+    message_regexes = _regexes(value.get("message_regex"), where, value, "message_regex")
 
     def match(event, env):
         if event.get("kind") != "tool_use" or event.get("name") != "Bash":
@@ -533,6 +564,7 @@ def _m_git(value, where, owner, key):
             return False
         if parsed.skipped:
             return _UNDECIDED
+        undecided = False
         for segment, _sub, args in git_calls(parsed, subs):
             if args_any and not any(arg in args_any for arg in args):
                 continue
@@ -540,9 +572,71 @@ def _m_git(value, where, owner, key):
                 continue
             if prefixes and not any(t.startswith(p) for t in segment for p in prefixes):
                 continue
+            if arg_regexes and not any(rx.search(arg) for arg in args for rx in arg_regexes):
+                continue
+            if message_regexes:
+                message = _git_message(args)
+                if message is None:
+                    continue
+                if _unreadable(message):
+                    undecided = True
+                    continue
+                if not any(rx.search(message) for rx in message_regexes):
+                    continue
             return True
-        return False
+        return _UNDECIDED if undecided else False
     return match
+
+
+#: The flags whose value, given as the next word, `first_operand` steps over with them: a
+#: working directory, a prefix or a file, which reads as an operand and is not one.
+_VALUED_FLAGS = frozenset(("--cwd", "-C", "--prefix", "--dir", "-f", "--file"))
+
+
+def _without_flag_values(words):
+    """`words` less each `_VALUED_FLAGS` flag and the word after it."""
+    kept, skip = [], False
+    for index, word in enumerate(words):
+        if skip:
+            skip = False
+        elif index and word in _VALUED_FLAGS:
+            skip = True
+        else:
+            kept.append(word)
+    return kept
+
+
+#: The short flags `git commit` takes without a value, which may lead an `m` in a cluster.
+_VALUELESS_SHORT = frozenset("aeinopqsvz")
+#: A heredoc marker anywhere in a token, not only as the whole of one.
+_MARKER_IN = re.compile(MARKER_RE.pattern.lstrip("^").rstrip("$"))
+
+
+def _git_message(args):
+    """The first message a git call's arguments give, or None. Nothing after `--` is an
+    option, and an `m` in a cluster is read only behind flags that take no value."""
+    for index, arg in enumerate(args):
+        if arg == "--":
+            return None
+        if arg in ("-m", "--message"):
+            return args[index + 1] if index + 1 < len(args) else None
+        if arg.startswith("--message="):
+            return arg[len("--message="):]
+        if arg.startswith("-") and not arg.startswith("--") and "m" in arg:
+            letters = arg[1:]
+            at = letters.index("m")
+            if set(letters[:at]) <= _VALUELESS_SHORT:
+                if at + 1 < len(letters):
+                    return letters[at + 1:]
+                return args[index + 1] if index + 1 < len(args) else None
+    return None
+
+
+def _unreadable(text):
+    """Whether `text` holds what the parse could not resolve: a variable, a substitution
+    or a heredoc body."""
+    return ("$" in text or "`" in text or SUB_PLACEHOLDER in text
+            or _MARKER_IN.search(text) is not None)
 
 
 def _m_env(value, where, owner, key):
@@ -686,30 +780,48 @@ def _a_order(value, where, owner, key):
     def evaluate(events, env):
         # Every event `first` does not decidedly miss, with whether `then` followed it. A
         # hit is one followed; `run` and `opportunities` both read this one result.
+        #
+        # The window after an opened event `i` runs to the `within`-th later event that is
+        # not a `tool_result`: a `tool_result` is the answer to the call before it, not a
+        # step the agent took, and on a Claude Code transcript there is one after every
+        # call, so left in the budget `within: 2` meant one tool use. It is still read for
+        # `then`. `followed` is True when `then` is true anywhere in the window, else None
+        # when it is undecided anywhere in it, else False. One pass evaluates `first`, one
+        # evaluates `then`, and a reverse pass gives each index the next true and the next
+        # undecided `then` at or after it, so the cost is linear in the session rather than
+        # the opened events times the window.
+        n = len(events)
+        opened = [first(event, env) for event in events]
+        if not any(o is _UNDECIDED or o for o in opened):
+            return []
+        steps = [i for i, event in enumerate(events) if event.get("kind") != "tool_result"]
+        # counted[i]: how many non-`tool_result` events sit at or before index i.
+        counted, running = [], 0
+        for event in events:
+            if event.get("kind") != "tool_result":
+                running += 1
+            counted.append(running)
+        start = min(i for i, o in enumerate(opened) if o is _UNDECIDED or o) + 1
+        next_true, next_undecided = [n] * (n + 1), [n] * (n + 1)
+        for j in range(n - 1, start - 1, -1):
+            seen = then(events[j], env)
+            next_true[j] = j if (seen is not _UNDECIDED and seen) else next_true[j + 1]
+            next_undecided[j] = j if seen is _UNDECIDED else next_undecided[j + 1]
         out = []
         for i, event in enumerate(events):
-            opened = first(event, env)
-            if opened is _UNDECIDED:
+            if opened[i] is _UNDECIDED:
                 out.append((_hit(event), None))
                 continue
-            if not opened:
+            if not opened[i]:
                 continue
-            followed, distance = False, 0
-            for later in events[i + 1:]:
-                seen = then(later, env)
-                if seen is _UNDECIDED:
-                    followed = None
-                elif seen:
-                    followed = True
-                    break
-                # A `tool_result` is the answer to the call before it, not a step the agent
-                # took, and on a Claude Code transcript there is one after every call. Left
-                # in the budget, `within: 2` meant one tool use.
-                if later.get("kind") == "tool_result":
-                    continue
-                distance += 1
-                if distance >= within:
-                    break
+            last = counted[i] + within - 1
+            end = steps[last] if last < len(steps) else n - 1
+            if next_true[i + 1] <= end:
+                followed = True
+            elif next_undecided[i + 1] <= end:
+                followed = None
+            else:
+                followed = False
             out.append((_hit(event), followed))
         return out
 

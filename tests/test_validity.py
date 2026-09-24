@@ -21,6 +21,7 @@ from unittest import mock
 
 from ruleprobe import DEFAULT, Registry, contract_data
 from ruleprobe.cli import main
+from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
 from ruleprobe.validity import (CorpusError, DEFAULT_FLOOR, Score, below_floor, corpus_dir,
@@ -477,7 +478,9 @@ class ReadmeTests(unittest.TestCase):
         os.environ.pop("RULEPROBE_CORPUS", None)
         with open(README, encoding="utf-8") as handle:
             body = handle.read()
-        printed = validity_table(score_corpus(DEFAULT))
+        out = io.StringIO()
+        main(["corpus", "--no-config"], out=out)
+        printed = out.getvalue().rstrip("\n")
         self.assertIn("\n```\n" + printed + "\n```\n", body,
                       "README.md does not quote the current `ruleprobe corpus` table")
 
@@ -507,7 +510,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 1)
         data = json.loads(text)
         self.assertEqual(data["floor"], 1.01)
-        self.assertEqual(sorted(data["below_floor"]), sorted(DEFAULT.ids()))
+        catalog = [entry["detector"]["id"] for entry in ENTRIES]
+        self.assertEqual(sorted(data["below_floor"]), sorted(set(DEFAULT.ids() + catalog)))
 
     def test_a_broken_corpus_is_exit_two_and_a_message_on_stderr(self):
         errors = io.StringIO()
@@ -534,7 +538,9 @@ class CliTests(unittest.TestCase):
             handle.write("\n".join(cc_lines(CASE_EVENTS)) + "\n")
         code, text = self.run_cli("corpus", "--no-config", "--corpus", base)
         self.assertEqual(code, 0)
-        self.assertEqual(text.count("no examples"), len(DEFAULT.ids()))
+        # A catalog entry restating a shipped detector scores it by its own examples.
+        restated = [e["detector"]["id"] for e in ENTRIES if e["detector"]["id"] in DEFAULT]
+        self.assertEqual(text.count("no examples"), len(DEFAULT.ids()) - len(restated))
 
     def test_the_report_carries_no_validity_column_by_default(self):
         code, text = self.run_cli("report", "--root", os.path.join(ROOT, "docs"),

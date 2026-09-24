@@ -661,5 +661,148 @@ class SnippetTurnTests(unittest.TestCase):
         self.assertIsNotNone(compile_detector(spec, "<test>", lines).opportunities)
 
 
+# --- the keys the catalog added: `program`, `first_operand`, `arg_regex`, `message_regex` --
+
+
+def count_bash(when, command):
+    """The hits a one-matcher detector finds on one Bash command."""
+    return count(when, [bash(command)])
+
+
+class ProgramTests(unittest.TestCase):
+    """`command`'s `program` and `first_operand`: the first word by basename, past leading
+    assignments, and the first operand past flags and the value of a directory or file
+    flag, each matched whole."""
+
+    def test_the_basename_past_assignments_is_matched_whole(self):
+        when = {"command": {"program": r"pytest"}}
+        for command in ("pytest", "/usr/local/bin/pytest -x", "CI=1 A=b pytest",
+                        "cd a && .venv/bin/pytest"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 1)
+        for command in ("pytest-watch", "echo pytest", "CI=1", "cat bin/pytest"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 0)
+
+    def test_the_first_operand_skips_flags_and_is_matched_whole(self):
+        when = {"command": {"program": r"pip[0-9.]*", "first_operand": r"install"}}
+        for command in ("pip install x", "pip3.12 -q install x", "pip --user install x"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 1)
+        for command in ("pip uninstall x", "pip", "pip -q", "pip show install"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 0)
+
+    def test_the_first_operand_steps_over_the_value_of_a_directory_or_file_flag(self):
+        when = {"command": {"program": r"yarn|go|npm|g?make|mvn",
+                            "first_operand": r"test"}}
+        for command in ("make -C src test", "mvn -f pom.xml test", "go test ./...",
+                        "make --file ci.mk test"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 1)
+        for command in ("yarn --cwd test install", "go -C test build",
+                        "npm --prefix test ci", "make -f test all", "make --dir test all"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(when, command), 0)
+
+    def test_both_hold_of_one_segment(self):
+        when = {"command": {"program": r"pip", "first_operand": r"install"}}
+        self.assertEqual(count_bash(when, "pip list; npm install"), 0)
+
+    def test_over_a_command_the_parse_skipped_it_is_undecided(self):
+        negated = {"tool": "Bash", "not": {"command": {"program": r"pytest"}}}
+        self.assertEqual(count_bash(negated, "echo 'unterminated"), 0)
+        self.assertEqual(count_bash(negated, "ls"), 1)
+
+    def test_a_bad_pattern_is_a_spec_error(self):
+        for key in ("program", "first_operand"):
+            with self.subTest(key=key), self.assertRaises(DeclarativeError):
+                compile_detector({"id": "t/x", "rule": "t", "event": "tool_use",
+                                  "when": {"command": {key: "("}}})
+
+
+class ArgRegexTests(unittest.TestCase):
+    """`git`'s `arg_regex`: read against one parsed argument at a time, never the raw
+    command."""
+
+    WHEN = {"git": {"subcommand": "add", "arg_regex": r"^(?:[^/]*/)*\.env\Z"}}
+
+    def test_an_argument_matching_the_pattern_hits(self):
+        self.assertEqual(count_bash(self.WHEN, "git add src config/.env"), 1)
+        self.assertEqual(count_bash(self.WHEN, "git -C app add -- \".env\""), 1)
+
+    def test_the_pattern_reads_one_argument_at_a_time(self):
+        spanning = {"git": {"subcommand": "add", "arg_regex": r"src \.env"}}
+        self.assertEqual(count_bash(spanning, "git add src .env"), 0)
+        self.assertEqual(count_bash(spanning, "git add 'src .env'"), 1)
+
+    def test_text_in_another_segment_or_before_the_subcommand_is_not_an_argument(self):
+        self.assertEqual(count_bash(self.WHEN, "git add src; echo .env"), 0)
+        self.assertEqual(count_bash(self.WHEN, "git -c core.x=.env add src"), 0)
+        self.assertEqual(count_bash(self.WHEN, "git status .env"), 0)
+
+    def test_a_list_is_alternatives(self):
+        when = {"git": {"subcommand": "add", "arg_regex": [r"\.key\Z", r"\.env\Z"]}}
+        self.assertEqual(count_bash(when, "git add a.key"), 1)
+        self.assertEqual(count_bash(when, "git add .env"), 1)
+        self.assertEqual(count_bash(when, "git add a.txt"), 0)
+
+    def test_a_bad_pattern_is_a_spec_error(self):
+        with self.assertRaises(DeclarativeError):
+            compile_detector({"id": "t/x", "rule": "t", "event": "tool_use",
+                              "when": {"git": {"subcommand": "add", "arg_regex": "("}}})
+
+
+class MessageRegexTests(unittest.TestCase):
+    """`git`'s `message_regex`: read against the call's first message."""
+
+    WHEN = {"git": {"subcommand": "commit", "message_regex": r"^wip"}}
+
+    def test_every_form_of_the_first_message_is_read(self):
+        for command in ("git commit -m wip", "git commit --message wip",
+                        "git commit --message=wip", "git commit -mwip", "git commit -am wip",
+                        "git commit -sm wip", "git commit -asm wip",
+                        "git commit -m wip -m 'feat: x'"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(self.WHEN, command), 1)
+
+    def test_every_valueless_flag_may_lead_the_m_and_text_may_follow_it(self):
+        for flag in "aeinopqsvz":
+            with self.subTest(flag=flag):
+                self.assertEqual(count_bash(self.WHEN, "git commit -%sm wip" % flag), 1)
+        self.assertEqual(count_bash(self.WHEN, "git commit -amwip"), 1)
+        self.assertEqual(count_bash(self.WHEN, "git commit -amfeat"), 0)
+        self.assertEqual(count_bash(self.WHEN, "git commit -Fm wip"), 0)
+
+    def test_a_heredoc_marker_inside_a_message_is_unreadable(self):
+        command = "git commit -m \"wip $(cat <<'EOF'\nbody\nEOF\n)\""
+        self.assertEqual(count_bash(self.WHEN, command), 0)
+
+    def test_a_single_quoted_dollar_is_an_unread_message(self):
+        # A stated under-count: the parse keeps no quoting, so `$` is unreadable anywhere.
+        self.assertEqual(count_bash(self.WHEN, "git commit -m 'wip costs $5'"), 0)
+
+    def test_a_later_message_or_a_quoted_flag_is_not_the_subject(self):
+        for command in ("git commit -m 'feat: x' -m wip", "git commit --author='A -m wip'",
+                        "git commit --author='A' -m 'feat: -m wip'",
+                        "git commit -- -m wip", "git commit -F msg.txt",
+                        "git commit -Cm wip", "git commit -m"):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(self.WHEN, command), 0)
+
+    def test_an_unreadable_message_is_undecided_so_a_negation_never_counts_it(self):
+        negated = {"git": {"subcommand": "commit"},
+                   "not": {"git": {"subcommand": "commit", "message_regex": r"^feat"}}}
+        self.assertEqual(count_bash(negated, "git commit -m 'fix: x'"), 1)
+        for command in ('git commit -m "$MSG"', 'git commit -m "$(cat msg)"',
+                        "git commit -m \"$(cat <<'EOF'\nfeat: x\nEOF\n)\""):
+            with self.subTest(command=command):
+                self.assertEqual(count_bash(negated, command), 0)
+                self.assertEqual(count_bash({"git": {"subcommand": "commit",
+                                                "message_regex": ""}}, command), 0)
+
+    def test_a_readable_call_beside_an_unreadable_one_still_decides(self):
+        self.assertEqual(count_bash(self.WHEN, 'git commit -m "$MSG" && git commit -m wip'), 1)
+
 if __name__ == "__main__":
     unittest.main()

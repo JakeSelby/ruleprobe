@@ -109,6 +109,22 @@ the policy.
   under the directory it is given. It refuses a hit on a whole session, a gated detector, a hit
   that redaction would change, an existing file and a corpus that does not load, and on any
   failure it undoes what it wrote. `load_corpus` reads an `.events.jsonl` session as written.
+- A shipped catalog of seven common rule shapes binds a rule section no front matter binds, so a
+  stranger's own rules are measured without a detector written
+  ([#49](https://github.com/JakeSelby/ruleprobe/issues/49)): running the tests after a change,
+  skipping hooks, force-pushing the default branch, installing with pip where another manager
+  is named, reading a whole file, a non-conventional commit subject, and committing a
+  secret-shaped file. A section binds the one entry whose anchored pattern matches its heading or
+  a sentence of its text; none or several leave it unmeasured, and a rule that states an
+  exception or permission, or a condition in the matching sentence, binds nothing. A file with no
+  heading, or no rule section, binds by its whole text. The report notes each bound rule
+  `catalog-bound`, `report --json`'s `coverage` counts them as `catalog`, and `ruleprobe detectors`
+  marks the catalog's entries. `testing/test-after-change` counts followed opportunities as its
+  hits, so its compliance columns carry the rate a change was tested.
+- Four declarative matcher keys: `git.arg_regex` and `git.message_regex` read one parsed argument
+  and the first commit message, and `command.program` and `command.first_operand` read a
+  segment's program by its basename and its first operand past flags
+  ([#49](https://github.com/JakeSelby/ruleprobe/issues/49)).
 
 ### Changed
 
@@ -121,6 +137,10 @@ the policy.
 - `load_corpus` refuses two session files of the same name in different subdirectories of
   `sessions/` with a `CorpusError`, where the later one silently replaced the earlier
   ([#52](https://github.com/JakeSelby/ruleprobe/issues/52)).
+- `RuleEntry` gains a sixth field, `source` (`own` or `catalog`), and `load_bundle().detectors`
+  leads with the catalog detectors a rule bound; code that unpacks a rule entry into five names
+  needs a sixth ([#49](https://github.com/JakeSelby/ruleprobe/issues/49)). An `order` detector now
+  evaluates in one pass over the session, with the same hits and opportunities.
 
 ## 0.1.0 (2026-09-22)
 

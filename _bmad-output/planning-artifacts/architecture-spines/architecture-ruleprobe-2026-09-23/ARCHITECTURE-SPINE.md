@@ -87,8 +87,10 @@ Read-only. A local AD that weakens either is a conflict to surface, not an overr
     `report._redact` importing `detectors.common` for `redact` (AD-13). The explain pair is
     implemented under #51 and ships in v0.2.0.
   - A new module takes a place in this graph in the change that adds it, and the spine is updated.
-  - `detectors.catalog` (planned, v0.2.0, story 3.5) is a Python literal module under AD-9's package
-    data rule. `rules` imports it; it imports `matchers` to compile its entries and nothing else.
+  - `detectors.catalog` (v0.2.0, story 3.5) is a Python literal module under AD-9's package data
+    rule, and imports nothing. `rules` imports it and compiles its entries with `matchers`.
+    Every other package module, `cli` included, reads catalog entries through
+    `rules.catalog_detectors()`, never by importing `detectors.catalog`.
 
 ```mermaid
 flowchart TD
@@ -106,7 +108,6 @@ flowchart TD
   rules --> registry
   rules --> declarative
   rules --> detectors_catalog[detectors.catalog]
-  detectors_catalog --> matchers
   matchers --> registry
   matchers --> shell
   matchers --> declarative
@@ -123,6 +124,11 @@ flowchart TD
 
 Amended 2026-09-23: `contract_data` joins the graph as a leaf imported only by `registry`, which
 exposes its fold map to `report` and `validity` through `fold_map` (#34)
+
+Amended 2026-09-23: `detectors.catalog` is a leaf holding only literals, as its literals-only test
+requires; `rules`, which already imports `matchers`, compiles the entries, so the planned
+`detectors.catalog --> matchers` edge is dropped; `cli` lists catalog entries through
+`rules.catalog_detectors()`, over its existing `cli --> rules` edge (#49)
 
 ### AD-2: The event schema is the one contract between readers and detectors [ADOPTED]
 
@@ -291,7 +297,7 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
     the module holds only literals. [ASSUMPTION: the module is `ruleprobe/contract_data.py`]
   - **Catalog.** The shipped catalog's entries are Python literals in `ruleprobe/detectors/catalog.py`
     under the same rule, compiled with `compile_detector`, never a data file read when a bundle builds
-    a `Registry` (planned, v0.2.0).
+    a `Registry` (implemented under #49, unreleased, shipping in v0.2.0).
   - **Corpus.** The corpus stays a directory, read only by validity and `ruleprobe corpus`, never at
     import or registry build. A caller that imports from a zip sets `RULEPROBE_CORPUS` or unpacks it,
     as the harness does. [ADOPTED]
@@ -358,7 +364,7 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
   - A Python detector declares opportunities through this keyword-only callable, not a second return
     value (PRD Q10, decided 2026-09-23).
 
-### AD-12: Rule binding and rule ids [ADOPTED per file; PROPOSED per section and catalog]
+### AD-12: Rule binding and rule ids [ADOPTED; per section implemented under #48 and the catalog under #49, ship in v0.2.0]
 
 - **Binds:** FR-13, FR-14, FR-15, FR-16.
 - **Prevents:** two parts of the package computing a rule's id differently, or a catalog entry that
@@ -366,7 +372,8 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
 - **Rule:**
   - `ruleprobe/rules.py` owns binding and the rule id. The report reads its `Bundle` and never binds.
   - A rule is `measured`, `dark` or `unmeasured` (`STATES`), and a binding records its source: own or
-    catalog.
+    catalog. `report --json`'s `coverage` carries `catalog`, the count of measured rules whose source
+    is still catalog once the registry is built; it is not a state and stays out of the share's total.
   - A file bound in its front matter (FR-13) keeps one rule, named by its front-matter `rule:` key,
     else by its file name without extension. A `rule:` with no value is ignored; any other value
     that is not a non-empty, slash-free string is a finding, and the file name stands. On an
@@ -376,10 +383,17 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
     repeated in one file takes an ordinal suffix in document order (`CLAUDE.md#testing`,
     `CLAUDE.md#testing-2`); a collision that remains is a finding.
     The split unit is the heading only, for 0.2 (PRD Q2, decided 2026-09-23); list items are not split,
-    so a section of bullet rules is one rule.
-  - Detector precedence is fixed: shipped, then catalog, then the three discovery places in
-    `load_bundle`'s order; a later id replaces an earlier one (`Registry.add`). A rule bound to a
-    catalog id the user replaced is reported as bound to the user's own.
+    so a section of bullet rules is one rule. A file its front matter does not bind that has no
+    heading, or whose sections include no rule, stays one rule, and its whole text binds the
+    catalog as one unit.
+  - Detector precedence is fixed: the base registry (shipped, plus plugins when asked), then the
+    catalog entries a rule bound, then the three discovery places in `load_bundle`'s order; a later
+    id replaces an earlier one (`Registry.add`), except that a catalog entry never replaces an id
+    already held. An entry restating a shipped detector (`verification/no-verify`,
+    `transcript-hygiene/whole-file-cat`) leaves the shipped one in place, and its rule stays
+    catalog-bound. A plugin or base registry already holding a catalog id wins, and the rule is
+    reported as bound to that detector, source own. A user's detector with a catalog id replaces
+    the entry, and the rule is reported as bound to the user's own.
   - A catalog entry carries one anchored pattern. A rule binds an entry only when exactly one entry
     matches; none or several leaves it unmeasured. Binding reads text; no model.
   - The 0.2 catalog is a small set of six to eight shapes, each with `examples:` at the floor, listed
@@ -413,7 +427,8 @@ exposes its fold map to `report` and `validity` through `fold_map` (#34)
 - **Rule:**
   - `DEFAULT` holds the shipped detectors, registered once at import by `registry.py`'s tail. Package
     code never adds to it afterwards; a bundle, the catalog or entry points build a new registry from
-    `DEFAULT.copy()`, as `Bundle.registry` does (`ruleprobe/rules.py:53`, the copy at `:57`).
+    `DEFAULT.copy()`, as `Bundle.registry` in `ruleprobe/rules.py` does through `base.copy()`, whose
+    `base` is `DEFAULT` unless a caller passes one built from it.
   - `COMPILERS` is written only by `register_compiler` at import time.
 
 ## Consistency Conventions

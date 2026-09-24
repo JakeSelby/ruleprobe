@@ -169,10 +169,10 @@ class ComplianceCommandTests(unittest.TestCase):
 
 
 class OtherCommandTests(unittest.TestCase):
-    def test_detectors_lists_the_shipped_six(self):
+    def test_detectors_lists_the_shipped_six_and_the_catalog(self):
         code, text = run_cli("detectors", "--no-config")
         self.assertEqual(code, 0)
-        self.assertEqual(len([x for x in text.strip().split("\n") if x]), 6)
+        self.assertEqual(len([x for x in text.strip().split("\n") if x]), 11)
         self.assertIn("secrets/secret-in-write", text)
 
     def test_no_command_prints_the_help_and_exits_non_zero(self):

@@ -43,10 +43,11 @@ from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
                      session_address)
-from .rules import load_bundle
+from .rules import catalog_detectors, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
                        DEFAULT_FLOOR, below_floor, event_key, hit_key, load_corpus,
-                       read_events, score_corpus, scores_as_dict, validity, validity_table)
+                       read_events, score_corpus, score_examples, scores_as_dict, validity,
+                       validity_table)
 
 
 def build_parser():
@@ -215,15 +216,46 @@ def _gate_note(detector):
     return "gated on --stance %s=%s" % (dimension, "|".join(variants))
 
 
-def _bundle_and_registry(args, plugins=None):
+def _catalog_note(detector, registry):
+    """`catalog` for a registered detector a catalog entry supplies, or the shipped one an
+    entry restates; `""` for one a plugin or a detector file replaced it with."""
+    for entry in catalog_detectors(registry.fold_map()):
+        if entry.id == detector.id:
+            held = registry.get(detector.id)
+            return "catalog" if held is entry or held is DEFAULT.get(detector.id) else ""
+    return ""
+
+
+def _score_restated(scores, registry):
+    """Score a shipped detector the corpus did not score by the `examples:` of the catalog
+    entry that restates it, so every entry's own examples are scored, and fall under the
+    floor with it, and say so in the row's `source`. A row the corpus scored is left as it
+    is: `validity()` reads corpus labels for the detectors a corpus labels and examples for
+    the rest, and a restated detector is no exception. A shipped id a plugin or a detector
+    file replaced takes nothing: the entry does not describe that detector. `report
+    --validity` and `corpus` both go through this, so the two print one score for a
+    detector."""
+    for entry in catalog_detectors(registry.fold_map()):
+        held = registry.get(entry.id)
+        if not entry.examples or held is None or held is entry \
+                or held is not DEFAULT.get(entry.id):
+            continue
+        current = scores.get(entry.id)
+        if current is None or not current.scored:
+            scores[entry.id] = score_examples([entry])[entry.id]
+    return scores
+
+
+def _bundle_and_registry(args, plugins=None, whole_catalog=False):
     """The declarative bundle for this invocation, and the registry to run: the shipped
-    detectors, plus plugins when asked, plus everything the bundle loaded."""
+    detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
+    them with `whole_catalog`, plus everything the bundle loaded."""
     bundle = load_bundle(paths=args.detectors, rules_dir=args.rules,
                          config=not args.no_config)
     if plugins is None:
         plugins = getattr(args, "plugins", False)
     base = Registry.from_entry_points() if plugins else DEFAULT
-    return bundle, bundle.registry(base)
+    return bundle, bundle.registry(base, whole_catalog=whole_catalog)
 
 
 def _read_errors_line(errors):
@@ -250,7 +282,7 @@ def cmd_report(args, out):
     scores = None
     if args.validity:
         try:
-            scores = validity(registry=registry)
+            scores = _score_restated(validity(registry=registry), registry)
         except CorpusError as exc:
             sys.stderr.write("corpus: %s\n" % exc)
             return 2
@@ -286,11 +318,14 @@ def cmd_corpus(args, out):
 
     The floor is this repository's CI gate, not a runtime failure for a user: nothing in
     `ruleprobe report` reads it, and a detector nobody labelled is passed over rather than
-    failed.
+    failed. Every catalog entry is scored, whether a rule bound it or not, and an entry
+    restating a shipped detector scores that detector's row when the corpus labels none of
+    it.
     """
-    bundle, registry = _bundle_and_registry(args)
+    bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:
-        scores = validity(registry=registry, directory=args.corpus)
+        scores = _score_restated(validity(registry=registry, directory=args.corpus),
+                                 registry)
     except CorpusError as exc:
         sys.stderr.write("corpus: %s\n" % exc)
         return 2
@@ -311,9 +346,11 @@ def cmd_corpus(args, out):
 
 
 def cmd_detectors(args, out):
-    bundle, registry = _bundle_and_registry(args, plugins=True)
+    bundle, registry = _bundle_and_registry(args, plugins=True, whole_catalog=True)
     for detector in registry:
-        out.write("%-40s%-20s%s\n" % (detector.id, detector.event, _gate_note(detector)))
+        notes = [n for n in (_catalog_note(detector, registry), _gate_note(detector)) if n]
+        out.write(("%-40s%-20s%s" % (detector.id, detector.event, "; ".join(notes))).rstrip()
+                  + "\n")
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")
