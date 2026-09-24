@@ -38,7 +38,7 @@ import unicodedata
 from . import __version__
 from .declarative import DeclarativeError, emit, load, parse
 from .detectors.common import REDACTED, SECRET_PATTERNS, redact
-from .readers import RUNTIMES, iter_sessions
+from .readers import COPY, RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
@@ -260,13 +260,31 @@ def _bundle_and_registry(args, plugins=None, whole_catalog=False):
 
 def _read_errors_line(errors):
     """What to say about the transcripts that never became a row. A swallowed per-item
-    error is unknown, not absent, so the count is printed even when every row is fine."""
-    if not errors:
-        return ""
-    named = ", ".join("%s (%s)" % (os.path.basename(e["path"]), e["error"])
-                      for e in errors[:3])
-    more = "" if len(errors) <= 3 else ", and %d more" % (len(errors) - 3)
-    return "%d transcript(s) produced no session: %s%s" % (len(errors), named, more)
+    error is unknown, not absent, so the count is printed even when every row is fine. A
+    copy set aside is counted apart, so a copied project folder is not read as a failure."""
+    failed = [e for e in errors if e["error"] != COPY]
+    copies = [e for e in errors if e["error"] == COPY]
+    parts = []
+    if failed:
+        named = ", ".join("%s (%s)" % (os.path.basename(e["path"]), e["error"])
+                          for e in failed[:3])
+        more = "" if len(failed) <= 3 else ", and %d more" % (len(failed) - 3)
+        parts.append("%d transcript(s) produced no session: %s%s" % (len(failed), named, more))
+    if copies:
+        # A copy and the file kept often share a name, so each is named with its folder.
+        named = ", ".join("%s (kept %s)" % (_folder_and_name(e["path"]),
+                                            _folder_and_name(e["kept"]))
+                          for e in copies[:3])
+        more = "" if len(copies) <= 3 else ", and %d more" % (len(copies) - 3)
+        parts.append("%d transcript(s) set aside as copies of a session read from another "
+                     "file: %s%s" % (len(copies), named, more))
+    return "; ".join(parts)
+
+
+def _folder_and_name(path):
+    """`<folder>/<file>` of `path`: enough to tell two copies of one transcript apart."""
+    folder, name = os.path.split(path)
+    return os.path.join(os.path.basename(folder), name)
 
 
 def cmd_report(args, out):
@@ -541,8 +559,9 @@ def _label_name(name):
 def _labelled_event(args, registry, detector_id, key, read_errors):
     """The one event behind `detector_id`'s hit at `key`, rerun from the transcripts.
 
-    An address can still name more than one session, as when a transcript was copied; the
-    one with the hit at `key` is taken, and more than one is refused as ambiguous."""
+    `iter_sessions` reads one session per runtime and id, copies set aside, so an address
+    names one session at most; more than one with the hit would still be refused as
+    ambiguous rather than guessed between."""
     matches, hits, found = 0, 0, None
     for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since,
                                  errors=read_errors):

@@ -2,7 +2,7 @@
 title: "PRD: ruleprobe"
 status: final
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-24
 issue: 13
 bmad_id: RP-S004
 milestone: v0.2.0
@@ -199,7 +199,10 @@ The CLI and library read Claude Code transcripts under `~/.claude/projects/`. **
 (0.1.0).
 
 **Consequences (testable):**
-- `iter_sessions(runtime="claude-code")` yields one session per transcript file.
+- `iter_sessions(runtime="claude-code")` yields one session per runtime and session id; a
+  transcript with no events is none. Of several files carrying one id, the one with the most
+  events is read, the first in path order on a tie, and the rest are counted as copies set
+  aside (implemented under #87, unreleased, shipping in v0.2.0).
 - A line that does not parse is skipped, and the rest of the file still reads.
 - A file that cannot be read is recorded in `errors` with its path, not dropped silently.
 

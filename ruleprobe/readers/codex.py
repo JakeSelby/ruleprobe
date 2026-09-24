@@ -10,7 +10,8 @@ Two names are translated so a detector sees one vocabulary across runtimes: Code
 `cmd` gains a `command` key beside it.
 
 A thread spawned as a subagent inherits its parent's history and carries the parent's
-`session_meta` further down the file. Only the first one is this rollout's own.
+`session_meta` further down the file. Only the first one is this rollout's own, and its id
+is the session's; `session_key(path)` reads it without reading the rest.
 
 A user message is a `user_prompt`, and the last assistant message before one - or before the
 end - is the final one. Both are derived the way the Claude Code reader derives them, rather
@@ -45,7 +46,7 @@ def read(path, empty=False):
     date before it reports the rest."""
     events = []
     meta = {}
-    session_id = cwd = model_now = ""
+    cwd = model_now = ""
     started = ended = ""
     tool_names = {}
     turn = 0
@@ -55,14 +56,7 @@ def read(path, empty=False):
     except OSError:
         return None
     with handle:
-        for line in handle:
-            try:
-                item = json.loads(line)
-                payload = item.get("payload") or {}
-                if not isinstance(payload, dict):
-                    raise ValueError("invalid payload")
-            except (ValueError, AttributeError):
-                continue
+        for item, payload in _items(handle):
             timestamp = item.get("timestamp") or ""
             started = started or timestamp
             ended = timestamp or ended
@@ -71,7 +65,6 @@ def read(path, empty=False):
                 if meta:
                     continue
                 meta = payload
-                session_id = session_id or meta.get("id", "")
                 cwd = cwd or meta.get("cwd", "")
             elif kind == "turn_context":
                 turn += 1
@@ -118,12 +111,46 @@ def read(path, empty=False):
                                    "text": _text(payload)})
     if pending_final is not None:
         pending_final["final"] = True
+    session_id = meta.get("id", "")
     if not events and not (empty and session_id):
         return None
-    return Session(id=session_id or os.path.basename(path)[:-6],
+    return Session(id=_key(meta, path),
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="codex", events=events, path=path,
                    started=started, ended=ended)
+
+
+def session_key(path):
+    """The id `read(path)` gives its session, from the rollout's own `session_meta`, or None
+    when the file cannot be opened. It stops at that line, a rollout's first."""
+    try:
+        handle = open(path, encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    with handle:
+        for item, payload in _items(handle):
+            if item.get("type") == "session_meta" and payload:
+                return _key(payload, path)
+    return _key({}, path)
+
+
+def _key(meta, path):
+    """A rollout's session id: its own `session_meta`'s id, else the file's stem."""
+    return meta.get("id", "") or os.path.basename(path)[:-6]
+
+
+def _items(lines):
+    """`(item, payload)` for each line of `lines` that parses to an object with an object
+    payload, in order; any other line is skipped."""
+    for line in lines:
+        try:
+            item = json.loads(line)
+            payload = item.get("payload") or {}
+            if not isinstance(payload, dict):
+                raise ValueError("invalid payload")
+        except (ValueError, AttributeError):
+            continue
+        yield item, payload
 
 
 def _text(payload):
