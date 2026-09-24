@@ -298,6 +298,13 @@ def run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None):
     gated detectors only. `errors`, when a list is passed, collects
     `{"detector": id, "error": exception name}` for every detector that raised.
     """
+    return _run(events, stances, registry, strict, errors)[0]
+
+
+def _run(events, stances, registry, strict, errors):
+    """`run()`, also returning the `Context` it built (`None` when analysis failed) and the
+    detectors it found enabled, in registry order, so a caller asking the same detectors
+    for more reuses both rather than analysing the session again."""
     try:
         ctx = analyse(events)
     except Exception as exc:  # pragma: no cover - analyse() defends its own input
@@ -305,11 +312,10 @@ def run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None):
             raise
         if errors is not None:
             errors.append({"detector": "analysis", "error": type(exc).__name__})
-        return {}  # a session keeps its record even when its transcript is odd
+        return {}, None, []  # a session keeps its record even when its transcript is odd
+    enabled = [detector for detector in registry if detector.enabled(stances)]
     out = {}
-    for detector in registry:
-        if not detector.enabled(stances):
-            continue
+    for detector in enabled:
         try:
             raw = detector.fn(ctx.events, ctx)
         except Exception as exc:
@@ -321,7 +327,7 @@ def run(events, stances=None, *, registry=DEFAULT, strict=False, errors=None):
         if raw:
             out[detector.id] = [Hit(detector.id, turn, tool_use_id)
                                 for turn, tool_use_id in raw]
-    return out
+    return out, ctx, enabled
 
 
 # Imported last, and by the module that owns the registry rather than the other way round,

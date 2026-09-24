@@ -2,12 +2,13 @@
 """The report: the denominator, the notes, and the three groupings."""
 import inspect
 import json
+import os
 import unittest
 from unittest import mock
 
 from corpus import bash, prompt
-from ruleprobe import (DEFAULT, Detector, Registry, compile_detector, contract_data, measure,
-                       report, run)
+from ruleprobe import (DEFAULT, Detector, Registry, compile_detector, contract_data, matchers,
+                       measure, report, run)
 from ruleprobe.events import Hit, Session
 from ruleprobe.readers import claude_code
 from ruleprobe.report import (KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, errored_detectors,
@@ -325,6 +326,8 @@ class NoFileReadTests(unittest.TestCase):
 
 
 UNREAD_PUSH = "git push origin 'main"
+README = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                      "README.md")
 
 
 def fixed(*triples):
@@ -403,7 +406,7 @@ class ComplianceTests(unittest.TestCase):
                            registry=registry)
         self.assertEqual(measured["compliance"]["a/gated"]["followed"], 1)
 
-    def test_a_raising_opportunities_costs_only_its_own_detector(self):
+    def test_a_raising_opportunities_costs_only_its_own_compliance_entry(self):
         def boom(events, ctx):
             raise ValueError("no")
 
@@ -412,13 +415,16 @@ class ComplianceTests(unittest.TestCase):
             Detector("a/fine", "a", "session", lambda e, c: [(1, "t1"), (2, "t2")],
                      opportunities=fixed((1, "t1", True)))])
         measured = measure(self.session(), registry=registry)
-        self.assertEqual(measured["rules_errors"],
-                         [{"detector": "a/boom", "error": "ValueError"}])
+        self.assertEqual(measured["rules_errors"], [
+            {"detector": "a/boom", "error": "ValueError", "hook": "opportunities"}])
         self.assertEqual(measured["compliance"],
                          {"a/fine": {"opportunities": 1, "followed": 1, "undecided": 0}})
         self.assertEqual(measured["rules"], {"a/boom": 1, "a/fine": 2})
-        self.assertIn("1 detector(s) raised in 1 session(s): a/boom (1)",
-                      report([measured], registry=registry))
+        # Its `fn` ran, so its hits and its denominator stand and the report is unchanged.
+        data = report_data([measured], registry=registry)
+        self.assertEqual([(d["detector"], d["hits"], d["of"]) for d in data["detectors"]],
+                         [("a/boom", 1, 1), ("a/fine", 2, 1)])
+        self.assertNotIn("raised", report([measured], registry=registry))
 
     def test_a_malformed_result_is_the_detectors_error(self):
         malformed = {
@@ -441,11 +447,22 @@ class ComplianceTests(unittest.TestCase):
                     Detector("a/fine", "a", "session", lambda e, c: [],
                              opportunities=fixed((1, "t1", None)))])
                 measured = measure(self.session(), registry=registry)
-                self.assertEqual(measured["rules_errors"],
-                                 [{"detector": "a/bad", "error": "TypeError"}])
+                self.assertEqual(measured["rules_errors"], [
+                    {"detector": "a/bad", "error": "MalformedOpportunities",
+                     "hook": "opportunities"}])
                 self.assertEqual(measured["compliance"],
                                  {"a/fine": {"opportunities": 0, "followed": 0,
                                              "undecided": 1}})
+
+    def test_a_typeerror_the_callable_raises_is_not_called_malformed(self):
+        def broken(events, ctx):
+            raise TypeError("a bug of its own")
+
+        registry = Registry([Detector("a/bad", "a", "session", lambda e, c: [],
+                                      opportunities=broken)])
+        measured = measure(self.session(), registry=registry)
+        self.assertEqual(measured["rules_errors"], [
+            {"detector": "a/bad", "error": "TypeError", "hook": "opportunities"}])
 
     def test_an_empty_result_or_a_tuple_of_lists_is_well_formed(self):
         registry = Registry([
@@ -486,14 +503,53 @@ class ComplianceTests(unittest.TestCase):
         self.assertEqual([e["detector"] for e in measured["rules_errors"]], asked)
         self.assertEqual(measured["compliance"], {})
 
+    def test_a_compiled_detector_evaluates_once_per_session(self):
+        specs = [{"id": "o/commit-then-push", "event": "session", "when": {"order": {
+                     "first": {"git": {"subcommand": "commit"}},
+                     "then": {"git": {"subcommand": "push"}}, "within": 3}}},
+                 {"id": "a/test-per-turn", "event": "session", "when": {"absent": {
+                     "of": {"command": {"name": "pytest"}}, "scope": "turn"}}}]
+        registry = Registry([compile_detector(spec) for spec in specs])
+        events = [bash("git commit -m a", turn=1, id="tu1"), bash("git push", turn=1, id="tu2"),
+                  prompt(turn=2), bash("pytest -q", turn=2, id="tu3")]
+        session = Session("s", "demo", "claude-code", events, None, None, None)
+        with mock.patch.object(matchers, "_Env", wraps=matchers._Env) as env:
+            measured = measure(session, registry=registry)
+        # One evaluation per detector: `fn` and `opportunities` read the same one.
+        self.assertEqual(env.call_count, 2)
+        self.assertEqual(sorted(measured["compliance"]), ["a/test-per-turn",
+                                                          "o/commit-then-push"])
+
+    def test_opportunities_is_handed_the_context_fn_was(self):
+        seen = {}
+
+        def fn(events, ctx):
+            seen["fn"] = (events, ctx)
+            return []
+
+        def pushes(events, ctx):
+            seen["opportunities"] = (events, ctx)
+            return [(p.turn, p.id, "--force" not in p.command)
+                    for p in ctx.bash if p.command.startswith("git push")]
+
+        events = [bash("git push", turn=1, id="tu1"), bash("git push --force", turn=2, id="tu2"),
+                  bash("ls", turn=2, id="tu3")]
+        session = Session("s", "demo", "claude-code", events, None, None, None)
+        registry = Registry([Detector("a/force", "a", "bash", fn, opportunities=pushes)])
+        measured = measure(session, registry=registry)
+        self.assertEqual(measured["compliance"],
+                         {"a/force": {"opportunities": 2, "followed": 1, "undecided": 0}})
+        self.assertIs(seen["opportunities"][0], seen["fn"][0])
+        self.assertIs(seen["opportunities"][1], seen["fn"][1])
+
     def test_run_is_unchanged_and_never_asks_for_opportunities(self):
-        params = inspect.signature(run).parameters.values()
-        self.assertEqual([(p.name, p.kind, p.default) for p in params], [
-            ("events", inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.empty),
-            ("stances", inspect.Parameter.POSITIONAL_OR_KEYWORD, None),
-            ("registry", inspect.Parameter.KEYWORD_ONLY, DEFAULT),
-            ("strict", inspect.Parameter.KEYWORD_ONLY, False),
-            ("errors", inspect.Parameter.KEYWORD_ONLY, None)])
+        # The call shape the README declares, not a copy of today's signature.
+        with open(README, encoding="utf-8") as handle:
+            declared = [line.split("#")[0].strip() for line in handle
+                        if line.startswith("run(")]
+        self.assertEqual(len(declared), 1)
+        actual = "run" + str(inspect.signature(run)).replace(repr(DEFAULT), "DEFAULT")
+        self.assertEqual(actual, declared[0])
         registry = Registry([Detector("a/opp", "a", "session", lambda e, c: [(1, "t1")],
                                       opportunities=never_called(self))])
         errors = []

@@ -21,8 +21,7 @@ written by a newer release, or a value that is not a known version at all - is e
 every count and denominator and counted apart, as a row with no `rules` map is: its hits may
 not mean what this release's hits mean.
 """
-from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, run
-from .shell import analyse
+from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run
 
 #: Above this share of measured sessions, an observable is common enough that the rule it
 #: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
@@ -41,21 +40,32 @@ def _validity_note(scores, detector_id):
     return validity_note(scores, detector_id)
 
 
+class MalformedOpportunities(TypeError):
+    """An `opportunities` result that is not `(turn, tool_use_id, followed)` triples with
+    `followed` exactly `True`, `False` or `None`. Its name is what a row records, so a
+    malformed result reads apart from a callable that raised a `TypeError` of its own."""
+
+
 def _tally(triples):
     """`{"opportunities", "followed", "undecided"}` from one `opportunities` result.
 
     An undecided triple counts in `undecided` alone, never as an opportunity not followed.
-    Anything but an iterable of `(turn, tool_use_id, followed)` triples with `followed`
-    exactly `True`, `False` or `None` raises `TypeError`: a malformed result is the
-    detector's error, never a guess at what it meant.
+    A malformed result raises `MalformedOpportunities`: it is the detector's error, never a
+    guess at what it meant.
     """
     if triples is None or isinstance(triples, (str, bytes, dict)):
-        raise TypeError("opportunities returned %s, not a list of triples"
-                        % type(triples).__name__)
+        raise MalformedOpportunities("opportunities returned %s, not a list of triples"
+                                     % type(triples).__name__)
+    try:
+        triples = iter(triples)
+    except TypeError:
+        raise MalformedOpportunities("opportunities returned %s, not a list of triples"
+                                     % type(triples).__name__)
     tally = {"opportunities": 0, "followed": 0, "undecided": 0}
     for triple in triples:
         if not isinstance(triple, (tuple, list)) or len(triple) != 3:
-            raise TypeError("not a (turn, tool_use_id, followed) triple: %r" % (triple,))
+            raise MalformedOpportunities("not a (turn, tool_use_id, followed) triple: %r"
+                                         % (triple,))
         followed = triple[2]
         if followed is None:
             tally["undecided"] += 1
@@ -63,28 +73,28 @@ def _tally(triples):
             tally["opportunities"] += 1
             tally["followed"] += followed
         else:
-            raise TypeError("followed is %r, not True, False or None" % (followed,))
+            raise MalformedOpportunities("followed is %r, not True, False or None"
+                                         % (followed,))
     return tally
 
 
-def _compliance(events, stances, registry, errors):
-    """`{detector_id: tally}` for every enabled detector that defines `opportunities`, or
-    `None` when there is no such detector. Isolated as `run()` isolates `fn`: a raise or a
-    malformed result is appended to `errors` against that detector, which gets no entry."""
-    defining = [d for d in sorted(registry, key=lambda d: d.id)
-                if getattr(d, "opportunities", None) is not None and d.enabled(stances)]
-    if not defining:
-        return None
-    try:
-        ctx = analyse(events)
-    except Exception:  # pragma: no cover - run() has recorded it already
+def _compliance(ctx, enabled, errors):
+    """`{detector_id: tally}` for every detector in `enabled` that defines `opportunities`,
+    or `None` when none does. Each is handed the `ctx` its `fn` was, so a compiled detector
+    counts from the evaluation that gave its hits. A raise or a malformed result is appended
+    to `errors` against that detector, tagged `"hook": "opportunities"` so the report's hit
+    figures ignore it, and the detector gets no entry."""
+    defining = sorted((d for d in enabled if getattr(d, "opportunities", None) is not None),
+                      key=lambda d: d.id)
+    if ctx is None or not defining:
         return None
     out = {}
     for detector in defining:
         try:
             out[detector.id] = _tally(detector.opportunities(ctx.events, ctx))
         except Exception as exc:
-            errors.append({"detector": detector.id, "error": type(exc).__name__})
+            errors.append({"detector": detector.id, "error": type(exc).__name__,
+                           "hook": "opportunities"})
     return out
 
 
@@ -97,8 +107,8 @@ def measure(session, stances=None, registry=DEFAULT):
     here rather than in `run()`, so `run()` and its return keep their shape.
     """
     errors = []
-    hits = run(session.events, stances, registry=registry, errors=errors)
-    compliance = _compliance(session.events, stances, registry, errors)
+    hits, ctx, enabled = _run(session.events, stances, registry, False, errors)
+    compliance = _compliance(ctx, enabled, errors)
     row = {
         "schema_version": SCHEMA_VERSION,
         "session_id": session.id,
@@ -155,10 +165,14 @@ def errored_detectors(row, renamed):
 
     A session an entry names is subtracted from that detector's denominator and from no
     other's, which is the whole difference between "this detector has no evidence here" and
-    "this session has no evidence at all". `renamed` is read as `folded_rules` reads it.
+    "this session has no evidence at all". An entry tagged `"hook": "opportunities"` is not
+    counted: it costs the detector its compliance entry, not its hits. `renamed` is read as
+    `folded_rules` reads it.
     """
     out = set()
     for entry in (row.get("rules_errors") or ()):
+        if isinstance(entry, dict) and entry.get("hook") == "opportunities":
+            continue  # its `fn` ran, so its hits stand; only its compliance entry is gone
         if isinstance(entry, dict) and isinstance(entry.get("detector"), str):
             out.add(_current(entry["detector"], renamed))
     return out
