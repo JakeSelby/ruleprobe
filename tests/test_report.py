@@ -56,13 +56,13 @@ class NoteTests(unittest.TestCase):
     def test_no_note_is_printed_until_there_are_enough_sessions(self):
         rows = [row({"a/one": 1}) for _ in range(5)]
         text = report(rows, min_sessions=20, registry=REGISTRY)
-        self.assertNotIn("promote?", text)
+        self.assertNotIn("frequent", text)
         self.assertNotIn("unobserved", text)
 
-    def test_a_common_observable_is_flagged_for_promotion(self):
+    def test_a_common_observable_is_marked_frequent(self):
         rows = [row({"a/one": 1}) for _ in range(5)] + [row({}) for _ in range(5)]
         text = report(rows, min_sessions=10, promote_share=0.30, registry=REGISTRY)
-        self.assertIn("promote?", text.split("a/one")[1].split("\n")[0])
+        self.assertIn("frequent", text.split("a/one")[1].split("\n")[0])
         self.assertIn("unobserved", text.split("a/two")[1])
 
     def test_the_share_is_sessions_that_fired_over_measured_sessions(self):

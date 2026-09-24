@@ -246,7 +246,7 @@ class GatingFindingTests(unittest.TestCase):
         data = json.loads(text)
         self.assertEqual(data["min_sessions"], 1)
         notes = dict((d["detector"], d["note"]) for d in data["detectors"])
-        self.assertIn("promote?", set(notes.values()))
+        self.assertIn("frequent", set(notes.values()))
         self.assertEqual(data["detectors"][0]["of"], data["measured"])
 
     def test_finding_11_json_folds_a_rename_the_way_the_table_does(self):

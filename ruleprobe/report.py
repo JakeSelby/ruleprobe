@@ -19,7 +19,8 @@ nobody attributed cannot be attributed here either.
 
 A row may also carry `compliance`, detector id to `{"opportunities", "followed",
 "undecided"}`, for each enabled detector that defines `opportunities`; `measure()` below
-says how it is counted.
+says how it is counted, and `report_data()` how it is summed. Compliance travels beside the
+hit figures and never replaces them.
 
 Every row and every `report_data` result carries `schema_version`, an integer; a row without
 one was written by 0.1 and is schema 1. A row whose version this package does not know - one
@@ -29,11 +30,17 @@ not mean what this release's hits mean.
 """
 from .registry import DEFAULT, KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, _run, run
 
-#: Above this share of measured sessions, an observable is common enough that the rule it
-#: belongs to is worth stating more loudly - or is wrong. Either way it wants a look.
+#: Above this share of measured sessions, a detector's line is marked `frequent`. The marker
+#: describes the share; it advises nothing about the rule.
 RULE_PROMOTE_SHARE = 0.30
 #: Below this many measured sessions, no share means anything and the note is left blank.
 RULE_MIN_SESSIONS = 20
+#: Below this many opportunities in a printed line or group, the counts print and no
+#: compliance rate does: a rate over three opportunities is noise, as a share over five
+#: sessions is.
+RULE_MIN_OPPORTUNITIES = 20
+
+_TALLY_KEYS = ("opportunities", "followed", "undecided")
 
 BY = ("rule", "repo", "stance")
 
@@ -179,6 +186,72 @@ def folded_rules(row, renamed):
     return out
 
 
+def _is_tally(tally):
+    """Whether `tally` is a `compliance` entry that can be summed: the three counts, each a
+    non-negative integer, with `followed` no more than `opportunities`."""
+    if not isinstance(tally, dict):
+        return False
+    for key in _TALLY_KEYS:
+        n = tally.get(key)
+        if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+            return False
+    return tally["followed"] <= tally["opportunities"]
+
+
+def folded_compliance(row, renamed):
+    """One row's `compliance`, with a renamed detector counted under its successor.
+
+    Each id is followed through `renamed` exactly as `folded_rules` follows it, and the
+    tallies of ids that fold together are summed. An entry that is not a well-formed tally
+    is left out rather than read as zero: a guess at a broken count would be a false figure.
+    """
+    out = {}
+    compliance = row.get("compliance")
+    if not isinstance(compliance, dict):
+        return out
+    for did, tally in compliance.items():
+        if not isinstance(did, str) or not _is_tally(tally):
+            continue
+        acc = out.setdefault(_current(did, renamed), dict.fromkeys(_TALLY_KEYS, 0))
+        for key in _TALLY_KEYS:
+            acc[key] += tally[key]
+    return out
+
+
+def opportunity_errors(row, renamed):
+    """The detector ids whose `opportunities` raised or was malformed on `row`, under their
+    current names: the entries `errored_detectors` passes over. Such a session is out of
+    that detector's compliance figures, and its hit figures stand."""
+    out = set()
+    for entry in (row.get("rules_errors") or ()):
+        if (isinstance(entry, dict) and entry.get("hook") == "opportunities"
+                and isinstance(entry.get("detector"), str)):
+            out.add(_current(entry["detector"], renamed))
+    return out
+
+
+def _usable_compliance(row, renamed, errored):
+    """The folded compliance of `row` that may be summed: every detector's but one that
+    raised on this session, in its `fn` (`errored`) or in its `opportunities`."""
+    failed = errored | opportunity_errors(row, renamed)
+    return dict((did, tally) for did, tally in folded_compliance(row, renamed).items()
+                if did not in failed)
+
+
+def _compliance_figures(tallies, min_opportunities):
+    """The summed counts of `tallies`, plus `compliance_rate`: `followed / opportunities`,
+    or `None` below `min_opportunities` - or with no opportunity at all, where no rate
+    exists."""
+    out = dict.fromkeys(_TALLY_KEYS, 0)
+    for tally in tallies:
+        for key in _TALLY_KEYS:
+            out[key] += tally[key]
+    n = out["opportunities"]
+    out["compliance_rate"] = (out["followed"] / float(n)
+                              if n and n >= min_opportunities else None)
+    return out
+
+
 def errored_detectors(row, renamed):
     """The detector ids that raised on `row`, under their current names.
 
@@ -226,7 +299,8 @@ def rule_ids(rows, registry, folds=None):
 
 
 def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
-                promote_share=RULE_PROMOTE_SHARE, registry=DEFAULT, validity=None):
+                promote_share=RULE_PROMOTE_SHARE, registry=DEFAULT, validity=None,
+                min_opportunities=RULE_MIN_OPPORTUNITIES):
     """The report as data: the same numbers `report()` prints, in the same order.
 
     `report()` renders this and `ruleprobe report --json` dumps it, so the table and the
@@ -234,16 +308,28 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
 
     - `schema_version` - the schema this result is written under.
     - `by`, `measured`, `unmeasured`, `unknown_schema`, `unattributed`, `errors`,
-      `min_sessions`, `promote_share` - what was counted and under which settings.
+      `opportunity_errors`, `min_sessions`, `promote_share`, `min_opportunities` - what was
+      counted and under which settings. `opportunity_errors` counts, per detector, the
+      sessions whose `opportunities` raised or was malformed; each is out of that detector's
+      compliance figures, never its hits.
     - `notes` - the preamble lines, in order.
     - `renamed` - the effective fold map the counts were read through, `{retired_id:
       current_id}`, resolved once for this call. It is complete: a stored result folds a
       retired id by applying it as it stands, and it is never re-merged with the shipped map
       of a later release, which would undo a consumer's override.
     - `detectors` - one entry per detector when `by="rule"`: `detector`, `hits`,
-      `sessions`, `of`, `share`, `note`, and `validity` when scores were passed.
+      `sessions`, `of`, `share`, `note`, and `validity` when scores were passed. `note` is
+      `frequent` above `promote_share` and `unobserved` with no hit, both from
+      `min_sessions` measured sessions. A detector some row carries compliance for also has
+      `opportunities`, `followed`, `undecided` and `compliance_rate`; one with none has
+      none of the four.
     - `groups` - one entry per repository or stance otherwise: `key`, `sessions`, `hits`,
-      `top`.
+      `top`, and `compliance`, detector id to the same four figures.
+
+    The compliance figures sum each measured row's `compliance`, folded as its hits are,
+    over the sessions in the line or group, leaving out a session in which that detector
+    raised. `compliance_rate` is `followed / opportunities`, and `None` until the line or
+    group holds `min_opportunities` opportunities.
     """
     if by not in BY:
         raise ValueError("unknown grouping %r; one of %s" % (by, ", ".join(BY)))
@@ -263,11 +349,16 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
         else:
             measured.append(row)
     errors, errored_rows = {}, 0
+    opp_errors, opp_errored_rows = {}, 0
     for row in measured:
         found = errored_detectors(row, renamed)
         errored_rows += 1 if found else 0
         for did in found:
             errors[did] = errors.get(did, 0) + 1
+        failed = opportunity_errors(row, renamed)
+        opp_errored_rows += 1 if failed else 0
+        for did in failed:
+            opp_errors[did] = opp_errors.get(did, 0) + 1
     notes = []
     if unmeasured:
         notes.append("%d session(s) carry no rule data" % unmeasured)
@@ -284,30 +375,49 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
         notes.append("%d detector(s) raised in %d session(s): %s%s"
                      % (len(errors), errored_rows, named, more))
         notes.append("each is out of its own denominator for those sessions, and no other's")
+    if opp_errors:
+        named = ", ".join("%s (%d)" % (d, n) for d, n in sorted(opp_errors.items())[:5])
+        more = "" if len(opp_errors) <= 5 else ", and %d more" % (len(opp_errors) - 5)
+        notes.append("%d detector(s) failed to count opportunities in %d session(s): %s%s"
+                     % (len(opp_errors), opp_errored_rows, named, more))
+        notes.append("each is out of its own compliance figures for those sessions;"
+                     " its hits stand")
     data = {"schema_version": SCHEMA_VERSION, "by": by, "measured": len(measured),
             "unmeasured": unmeasured, "unknown_schema": unknown_schema,
             "unattributed": unattributed, "errors": dict(errors),
+            "opportunity_errors": dict(sorted(opp_errors.items())),
             "min_sessions": min_sessions, "promote_share": promote_share,
-            "notes": notes, "renamed": dict(renamed), "detectors": [], "groups": []}
+            "min_opportunities": min_opportunities, "notes": notes, "renamed": dict(renamed), "detectors": [], "groups": []}
     if not measured:
         notes.append("no measured sessions")
         return data
-    counted = [(r, folded_rules(r, renamed), errored_detectors(r, renamed))
-               for r in measured]
+    counted = []
+    for r in measured:
+        errored = errored_detectors(r, renamed)
+        counted.append((r, folded_rules(r, renamed), errored,
+                        _usable_compliance(r, renamed, errored)))
+    # A detector reports compliance when a row carries it or its `opportunities` failed, so
+    # a detector whose every count failed still shows its zero and the note above.
+    with_compliance = set(opp_errors)
+    for r in measured:
+        with_compliance.update(folded_compliance(r, renamed))
 
     if by == "rule":
         for did in rule_ids(measured, registry, renamed):
-            rows_for = [(h, e) for _r, h, e in counted if did not in e]
+            rows_for = [(h, e) for _r, h, e, _c in counted if did not in e]
             total = len(rows_for)
             hits = sum(h.get(did, 0) for h, _e in rows_for)
             seen = sum(1 for h, _e in rows_for if h.get(did, 0) > 0)
             share = seen / float(total) if total else 0.0
             note = ""
             if total >= min_sessions:
-                note = "promote?" if share > promote_share else ("unobserved" if not hits
+                note = "frequent" if share > promote_share else ("unobserved" if not hits
                                                                  else "")
             entry = {"detector": did, "hits": hits, "sessions": seen, "of": total,
                      "share": share, "note": note}
+            if did in with_compliance:
+                entry.update(_compliance_figures(
+                    [c[did] for _r, _h, _e, c in counted if did in c], min_opportunities))
             if validity is not None:
                 entry["validity"] = _validity_note(validity, did)
             data["detectors"].append(entry)
@@ -316,7 +426,7 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
     if by == "stance":
         # A row whose stances were guessed after the fact would be filed under a variant the
         # session may never have run under, so it is excluded rather than misattributed.
-        guessed = [r for r, _h, _e in counted if r.get("stances_source") == "rescan"]
+        guessed = [r for r, _h, _e, _c in counted if r.get("stances_source") == "rescan"]
         if guessed:
             notes.append("%d rescanned session(s) excluded: stance not known at the time"
                          % len(guessed))
@@ -326,37 +436,46 @@ def report_data(rows, by="rule", min_sessions=RULE_MIN_SESSIONS,
             return data
 
     groups = {}
-    for row, hits_of, _errored in counted:
+    for row, hits_of, _errored, compliance_of in counted:
         if by == "stance":
             stances = row.get("stances") if isinstance(row.get("stances"), dict) else {}
             keys = ["%s=%s" % (k, v) for k, v in sorted(stances.items())] or ["(no stances)"]
         else:
             keys = [row.get("repo") or "(no repo)"]
         for key in keys:
-            acc = groups.setdefault(key, [0, {}])
+            acc = groups.setdefault(key, [0, {}, {}])
             acc[0] += 1
             for did, n in hits_of.items():
                 acc[1][did] = acc[1].get(did, 0) + n
+            for did, tally in compliance_of.items():
+                acc[2].setdefault(did, []).append(tally)
     for key in sorted(groups):
-        sessions, counts = groups[key]
+        sessions, counts, tallies = groups[key]
         top = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
         data["groups"].append({"key": key, "sessions": sessions,
                                "hits": sum(counts.values()),
-                               "top": [[did, n] for did, n in top]})
+                               "top": [[did, n] for did, n in top],
+                               "compliance": dict(
+                                   (did, _compliance_figures(tallies[did], min_opportunities))
+                                   for did in sorted(tallies))})
     return data
 
 
 def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_PROMOTE_SHARE,
-           registry=DEFAULT, validity=None):
+           registry=DEFAULT, validity=None, min_opportunities=RULE_MIN_OPPORTUNITIES):
     """The report as text, ready to print.
 
     - `by="rule"` - one line per detector: hits, the sessions it fired in, the denominator,
-      the share, and a note. `promote?` means the observable is common enough to be worth a
-      look; `unobserved` means the detector has never fired in this window. Both are blank
-      until there are `min_sessions` measured sessions, because a share over five sessions
-      is noise. A detector that raised in a session is out of its own `of` column for that
-      session and out of nobody else's.
-    - `by="repo"` - one line per repository: sessions, hits, and its top three detectors.
+      the share, and a note. `frequent` means the detector fired in more than
+      `promote_share` of the sessions; `unobserved` means it has never fired in this window.
+      Both are blank until there are `min_sessions` measured sessions, because a share over
+      five sessions is noise. A detector that raised in a session is out of its own `of`
+      column for that session and out of nobody else's. When any detector reports
+      compliance, four columns follow the share - `opportunities`, `followed`, `undecided`
+      and `rate` - blank for a detector with none, and `rate` is `-` below
+      `min_opportunities`.
+    - `by="repo"` - one line per repository: sessions, hits, and its top three detectors,
+      then one indented line per detector with compliance in that repository.
     - `by="stance"` - the same, grouped by each `dimension=variant` a row ran under.
 
     `validity`, when a `{detector_id: Score}` mapping from `ruleprobe.validity` is passed,
@@ -367,22 +486,36 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
     `report_data()` is the same thing as a dict, and is what `--json` prints.
     """
     data = report_data(rows, by=by, min_sessions=min_sessions,
-                       promote_share=promote_share, registry=registry, validity=validity)
+                       promote_share=promote_share, registry=registry, validity=validity,
+                       min_opportunities=min_opportunities)
     lines = list(data["notes"])
     if not data["detectors"] and not data["groups"]:
         return "\n".join(lines)
 
     if data["by"] == "rule":
-        head = "%-38s%7s%10s%6s%8s  note" % ("detector", "hits", "sessions", "of", "share")
+        # The compliance columns appear only when some detector has figures for them, so a
+        # report over detectors without opportunities reads exactly as it always has.
+        compliance = any("opportunities" in entry for entry in data["detectors"])
+        head = "%-38s%7s%10s%6s%8s" % ("detector", "hits", "sessions", "of", "share")
+        if compliance:
+            head += "%15s%10s%11s%6s" % ("opportunities", "followed", "undecided", "rate")
+        head += "  note"
         width = len(head)
         if validity is not None:
             head = "%-*s  validity" % (width, head)
         lines.append(head)
         lines.append("-" * len(head))
         for entry in data["detectors"]:
-            line = "%-38s%7d%10d%6d%8.0f%%  %s" % (
+            line = "%-38s%7d%10d%6d%8.0f%%" % (
                 entry["detector"][:38], entry["hits"], entry["sessions"], entry["of"],
-                entry["share"] * 100, entry["note"])
+                entry["share"] * 100)
+            if compliance and "opportunities" in entry:
+                line += "%14d%10d%11d%6s" % (entry["opportunities"], entry["followed"],
+                                            entry["undecided"],
+                                            _rate(entry["compliance_rate"]))
+            elif compliance:
+                line += " " * 41
+            line += "  %s" % entry["note"]
             if validity is not None:
                 line = "%-*s  %s" % (width, line.rstrip(), entry.get("validity", ""))
             lines.append(line.rstrip())
@@ -395,7 +528,16 @@ def report(rows, by="rule", min_sessions=RULE_MIN_SESSIONS, promote_share=RULE_P
         lines.append("%-42s%9d%7d  %s"
                      % (group["key"][:42], group["sessions"], group["hits"],
                         ", ".join("%s %d" % (did, n) for did, n in group["top"]) or "-"))
+        for did, figures in group["compliance"].items():
+            lines.append("  %s: opportunities %d, followed %d, undecided %d, rate %s"
+                         % (did, figures["opportunities"], figures["followed"],
+                            figures["undecided"], _rate(figures["compliance_rate"]).strip()))
     return "\n".join(lines)
+
+
+def _rate(rate):
+    """A compliance rate as the table prints it: a whole percentage, or `-` for none."""
+    return "-" if rate is None else "%.0f%%" % (rate * 100)
 
 
 #: The most of one event's text explain prints; the rest is cut and counted.

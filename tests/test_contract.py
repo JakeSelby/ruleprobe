@@ -487,6 +487,13 @@ class ValidityTests(unittest.TestCase):
         self.assertIsInstance(report([], by="rule", min_sessions=20, promote_share=0.30), str)
         self.assertIsInstance(report_data([], by="rule"), dict)
 
+    # Covers: the 0.2.0 `min_opportunities` keyword of `report` and `report_data`.
+    def test_report_and_report_data_take_min_opportunities(self):
+        self.assertIsInstance(report([], by="rule", min_sessions=20, promote_share=0.30,
+                                     min_opportunities=20), str)
+        self.assertEqual(report_data([], by="rule", min_opportunities=5)["min_opportunities"],
+                         5)
+
     # Covers: the 0.1.0 names `iter_sessions`, `Registry.add` and `Registry.from_entry_points`.
     def test_iter_sessions_and_registry_methods(self):
         errors = []
