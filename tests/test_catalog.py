@@ -356,7 +356,8 @@ class HostileInputTests(unittest.TestCase):
     LIMIT = 5.0
     #: Every key a catalog entry may hold a regular expression under: its binding pattern,
     #: and each matcher key `ruleprobe.matchers` compiles as one.
-    KEYS = ("pattern", "regex", "arg_regex", "message_regex", "program", "first_operand")
+    KEYS = ("pattern", "regex", "arg_regex", "config_regex", "message_regex", "program",
+            "first_operand")
 
     def regexes(self, value, found):
         if isinstance(value, dict):
@@ -440,7 +441,7 @@ class HostileInputTests(unittest.TestCase):
                     with self.subTest(shape=entry["shape"], key=key):
                         self.assertIn(pattern, patterns)
         self.assertLessEqual({"pattern", "program", "first_operand", "arg_regex",
-                              "message_regex"}, seen)
+                              "config_regex", "message_regex"}, seen)
 
     def test_no_pattern_spans_a_clause_with_a_wildcard(self):
         for entry in catalog.ENTRIES:

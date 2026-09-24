@@ -97,7 +97,7 @@ sessions:
         note: escaped parentheses group the name predicates, and head bounds the output
 
   - session: verification-hooks.jsonl
-    note: six hook bypasses, then the gate and a clean push
+    note: six hook bypasses, then the gate, a clean push and commits that ran every hook
     labels:
       - at: "1:tu-v1"
         fire: [verification/no-verify]
@@ -135,6 +135,9 @@ sessions:
       - at: "4:tu-w6"
         near: [verification/no-verify]
         note: an amend with no bypass
+      - at: "4:tu-w7"
+        near: [verification/no-verify]
+        note: the hooks path pointed at the repository's own hooks, which turns them on
 
   - session: secrets-writes.jsonl
     note: six credentials written to disk, then six ways of not writing one

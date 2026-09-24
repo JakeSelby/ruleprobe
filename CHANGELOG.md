@@ -137,6 +137,9 @@ the policy.
   and one on a Windows root that checks no shell detector fires there
   ([#56](https://github.com/JakeSelby/ruleprobe/issues/56)). Every applicable detector scores at or
   above the 0.9 floor on them.
+- The declarative `git` matcher gains `config_regex`, matched against the effective value of each
+  `-c key=value` given before the subcommand, and `ruleprobe.shell.git_config` returns those values
+  ([#88](https://github.com/JakeSelby/ruleprobe/issues/88)).
 
 ### Changed
 
@@ -183,6 +186,12 @@ the policy.
   it keeps its native tool name and its text is dropped from the event, so it is not measured as a
   write ([#102](https://github.com/JakeSelby/ruleprobe/issues/102)). Gemini records the user's
   version in the call and cannot be relied on to keep the model's.
+- `verification/no-verify` counts a `core.hooksPath` override only when it disables hooks, an empty
+  value or `/dev/null`, reading the last value given for the key; pointing it at a tracked hooks
+  directory such as `.githooks` turns the repository's hooks on and no longer counts
+  ([#88](https://github.com/JakeSelby/ruleprobe/issues/88)). Every git detector now steps over
+  git's valued global options (`--git-dir`, `--work-tree`, `--namespace` and the like), so
+  `git --git-dir .git push --force` is read as the push it is.
 
 ## 0.1.0 (2026-09-22)
 

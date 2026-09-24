@@ -61,7 +61,8 @@ detectors:
           - -print0
 
   # A commit or push that walks past the repository's hooks, in its three spellings: the
-  # flag, a `-c core.hooksPath=` override, and the assignment pre-commit reads.
+  # flag, a `-c core.hooksPath=` override that turns hooks off (empty or /dev/null; a
+  # tracked directory such as .githooks turns them on), and the assignment pre-commit reads.
   - id: verification/no-verify
     rule: verification
     event: tool_use
@@ -75,7 +76,7 @@ detectors:
             args_any: ["-n"]
         - git:
             subcommand: [commit, push]
-            token_prefix: "core.hooksPath="
+            config_regex: "^(?i:core\\.hookspath)=(?:/dev/null)?$"
         - env:
             name: [SKIP, PRE_COMMIT_ALLOW_NO_CONFIG]
             command: [git, pre-commit]

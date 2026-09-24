@@ -508,19 +508,57 @@ def split_assignments(segment):
     return segment[:i], segment[i:]
 
 
+#: The global options `git` reads a value for as the next word, which a walk to the
+#: subcommand steps over with them: `git --git-dir .git commit` is a commit.
+_GIT_VALUED = frozenset(("-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                         "--super-prefix", "--config-env", "--attr-source"))
+
+
+def _git_head(segment):
+    """`(rest, i, configs)` for a `git` segment, else None: the words after `git`, the index
+    of the subcommand in them, and every `-c` value before it, in order."""
+    words = split_assignments(segment)[1]
+    if not words or words[0] != "git":
+        return None
+    rest, i, configs = words[1:], 0, []
+    while i < len(rest) and rest[i].startswith("-"):
+        if rest[i] in _GIT_VALUED:
+            if rest[i] == "-c" and i + 1 < len(rest):
+                configs.append(rest[i + 1])
+            i += 2
+        else:
+            i += 1
+    return rest, i, configs
+
+
 def git_calls(parsed, subcommands):
     """`(segment, subcommand, args)` for every `git <subcommand>` in a parsed command."""
     for pipe in parsed.pipelines:
         for segment in pipe:
-            _, words = split_assignments(segment)
-            if not words or words[0] != "git":
+            head = _git_head(segment)
+            if head is None:
                 continue
-            rest = words[1:]
-            i = 0
-            while i < len(rest) and rest[i].startswith("-"):
-                i += 2 if rest[i] in ("-C", "-c") else 1
+            rest, i, _ = head
             if i < len(rest) and rest[i] in subcommands:
                 yield segment, rest[i], rest[i + 1:]
+
+
+def git_config(segment):
+    """The effective `-c` settings a `git` segment gives before its subcommand.
+
+    Git keeps the last value of a key, so each key appears once, as its last `-c` spelled
+    it, in the order of those last occurrences; keys compare case-insensitively. A segment
+    that is not a `git` call gives `[]`. Settings given by `--config-env` or by the
+    `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_<n>` and `GIT_CONFIG_VALUE_<n>` environment are not
+    read, an under-count.
+    """
+    head = _git_head(segment)
+    if head is None:
+        return []
+    last = {}
+    for index, token in enumerate(head[2]):
+        last[token.split("=", 1)[0].lower()] = index
+    return [head[2][index] for index in sorted(last.values())]
 
 
 # --- the parsed view ---------------------------------------------------------------

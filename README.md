@@ -282,7 +282,8 @@ can never fire.
 The matchers, in one list: `tool` (`name`, `glob`), `arg` (`field`, `regex`, `path_glob`,
 `contains`, `equals`, `exists`), `command` (`name`, `starts_with`, `contains`, `none_of`,
 `arg_count`, `sole_segment`, `redirect`, `unparsed`, `regex`, `program`, `first_operand`),
-`git` (`subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`, `message_regex`),
+`git` (`subcommand`, `args_any`, `args_none`, `token_prefix`, `arg_regex`, `config_regex`,
+`message_regex`),
 `env` (`name`, `command`), `text` (`source`, `regex`, `contains`), `message` (`role`,
 `final`, `regex`, `contains`), `kind`, and the three session matchers `order`, `absent` and
 `change`. `ruleprobe/matchers.py` documents each in one line. The shipped six in
@@ -478,9 +479,9 @@ secrets/secret-in-write                  15   13   15    0    0   1.00    1.00  
 testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find       10   15   10    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
-verification/no-verify                   11   12   11    0    0   1.00    1.00   1.00
+verification/no-verify                   11   13   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    87  110   87    0    0   1.00    1.00   1.00  floor 0.90
+total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector

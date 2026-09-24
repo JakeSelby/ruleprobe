@@ -779,6 +779,19 @@
       "parent_github_number": null,
       "lifecycle": "active",
       "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-B005",
+      "github_number": 88,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/88",
+      "title": "fix(detectors): no-verify counts a hooksPath override only when it disables hooks",
+      "type": "bug",
+      "native_type": "Bug",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-B005.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
     }
   ]
 }
