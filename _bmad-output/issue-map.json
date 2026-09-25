@@ -8,7 +8,7 @@
     "story": 21,
     "task": 8,
     "bug": 13,
-    "chore": 7,
+    "chore": 8,
     "spike": 4,
     "decision": 14
   },
@@ -898,6 +898,19 @@
       "provenance": "authored"
     },
     {
+      "bmad_id": "RP-C006",
+      "github_number": 117,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/117",
+      "title": "docs(changelog): move the Documentation URL entry from 0.2.0 to Unreleased",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C006.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
       "bmad_id": "RP-D013",
       "github_number": 119,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/119",
@@ -911,13 +924,13 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-C006",
-      "github_number": 117,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/117",
-      "title": "docs(changelog): move the Documentation URL entry from 0.2.0 to Unreleased",
+      "bmad_id": "RP-C007",
+      "github_number": 122,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/122",
+      "title": "docs(solutions): record two issue-map traps from the 0.2.0 build",
       "type": "chore",
       "native_type": "Task",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-C006.md",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C007.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
