@@ -39,4 +39,4 @@ version = { attr = "ruleprobe.__version__" }
 include = ["ruleprobe*"]
 
 [tool.setuptools.package-data]
-ruleprobe = ["detectors/*.yaml", "corpus/*.yaml", "corpus/sessions/**/*.jsonl", "corpus/sessions/**/.project_root"]
+ruleprobe = ["detectors/*.yaml", "corpus/*.yaml", "corpus/*.json", "corpus/sessions/**/*.jsonl", "corpus/sessions/**/.project_root"]

@@ -625,6 +625,25 @@ class BindingTests(Temp):
                 self.assertEqual((entry.state, entry.source), ("unmeasured", None))
                 self.assertIn("exception or condition", entry.reason)
 
+    def test_an_exemption_in_the_next_sentence_unbinds_the_rule(self):
+        """The rules zoo's one false bind before "exempt" joined the exception words."""
+        for text in ("# Testing\n\nRun the tests before finishing.\n"
+                     "Docs-only changes are exempt.\n",
+                     "# Testing\n\nRun the tests before finishing. Typo fixes are exempted.\n",
+                     "# Testing\n\nRun the tests before finishing. "
+                     "The release script exempts docs.\n",
+                     "# Testing\n\nRun the tests before finishing, exempting docs.\n",
+                     "# Testing\n\nRun the tests before finishing.\n\n"
+                     "- Exemptions: generated files.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+                self.assertIn("(exempt", entry.reason)
+        # The near miss: a word that only starts with "exempt" is not one of them.
+        [entry] = self.rules("# Testing\n\nRun the tests before finishing. "
+                             "Exemptive clauses belong in the licence.\n").rules
+        self.assertEqual(entry.detectors, ["testing/test-after-change"])
+
     def test_a_heading_less_file_binds_by_its_matching_sentence_despite_conditions(self):
         bundle = self.rules("Never force-push to main.\n\nIf a hook fails, fix it. "
                             "When in doubt, ask. Keep it short, but clear.\n")

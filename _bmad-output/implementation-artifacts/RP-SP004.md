@@ -286,3 +286,4 @@ if __name__ == "__main__":
 - 2026-09-25: written from the planning corpus; question, experiment and exit criterion fixed and the zoo frozen before the run.
 - 2026-09-25: run; failed on false binds (5), recall 0.73; variant B run as the next cheapest experiment; decision left to the maintainer.
 - 2026-09-25: decision taken under the maintainer's delegation: variant B plus "exempt" for 8.3, the recall bar moves to Epic 8, and the refer-back refinement waits for held-out near-misses. Flagged to the maintainer for confirm or override.
+- 2026-09-25, amendment: story 8.2 moved the zoo byte for byte to `ruleprobe/corpus/rules-zoo.json` in #140, so `tests/fixtures/rules-zoo/zoo.json` is gone. To reproduce, run the script from a checkout with that path: `PYTHONPATH=. python3 score_zoo.py ruleprobe/corpus/rules-zoo.json --variant-b`. The reproduction command above is left as it was run.

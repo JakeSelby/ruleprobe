@@ -28,7 +28,16 @@ file, `<name>.events.jsonl`, holding one event dict per line: the shape `rulepro
 writes. `load_events` reads one without a runtime reader and takes each event's `turn` and
 `final` as written, so a label keyed to turn 37 still names its event. The suffix is
 reserved under `sessions/`: a native transcript named that way is never read by a reader.
+
+The corpus also scores the rule binder, the text reading that binds a rule to a catalog
+entry. `rules-zoo.json` beside `labels.yaml` holds synthetic rule sections, every line
+labelled with the catalog detector it should bind, or null; `score_binding()` binds each
+section as a rule file's section binds and compares. A false bind is a failure at any
+count, because a rule bound to the wrong detector is measured wrongly. On the shipped zoo,
+recall is also held by `BINDING_RECALL_FLOOR`, the recall the shipped binder measured, which
+only goes up; any other zoo's recall is reported and holds nothing.
 """
+import hashlib
 import json
 import os
 
@@ -36,6 +45,7 @@ from .declarative import DeclarativeError, load
 from .events import Hit, Session  # noqa: F401  - Hit is named in the docstring's contract
 from .readers import iter_file_sessions
 from .registry import DEFAULT, fold_map, run
+from . import rules as _rules
 
 __all__ = ["CorpusError", "Score", "DEFAULT_FLOOR", "corpus_dir", "load_corpus",
            "load_events", "read_events", "score_corpus", "score_examples", "validity",
@@ -56,6 +66,19 @@ EVENTS_RUNTIME = "events"
 
 _LABEL_KEYS = ("at", "fire", "near", "note")
 _SESSION_KEYS = ("session", "note", "labels")
+
+#: The rules zoo the binder is scored on, beside `LABELS_FILE`.
+ZOO_FILE = "rules-zoo.json"
+#: The binding recall the shipped binder measured on the shipped zoo, rounded down to two
+#: places. `corpus` fails under it on that zoo alone, known by `SHIPPED_ZOO_SHA256`. It is a
+#: ratchet, not a bar: a binder or catalog change that raises recall raises it in the same
+#: change, and the suite says when it is stale.
+BINDING_RECALL_FLOOR = 0.43
+#: The sha256 of the shipped zoo's bytes. A zoo with other bytes - a corpus of your own, or
+#: the shipped one edited - gets no recall floor; a change to the shipped zoo updates this.
+SHIPPED_ZOO_SHA256 = "0a22f9b27d3601654c6535f83d3cf9c7a5ea30427733aede127fddb554a0325a"
+_ZOO_KEYS = ("about", "items")
+_ITEM_KEYS = ("id", "kind", "heading", "heading_label", "lines")
 
 
 class CorpusError(Exception):
@@ -155,6 +178,10 @@ def corpus_dir(directory=None):
     from_env = os.environ.get("RULEPROBE_CORPUS")
     if from_env:
         return os.path.abspath(os.path.expanduser(from_env))
+    return _shipped_dir()
+
+
+def _shipped_dir():
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), CORPUS_DIRNAME)
 
 
@@ -439,6 +466,204 @@ def scores_as_dict(scores, floor=DEFAULT_FLOOR):
             "below_floor": below_floor(scores, floor)}
 
 
+# --- binding -----------------------------------------------------------------------------
+
+
+class Binding(object):
+    """The binder's tally over the rules zoo.
+
+    `entries` is `{detector_id: Score}` for every catalog entry the binder can bind. Per
+    section: a positive is an entry its labels name, a true positive one it bound as
+    labelled, a false positive one it bound unlabelled - a false bind - and a false negative
+    a labelled one it did not bind. `false_binds` and `misses` name those as `(section id,
+    detector id)` pairs, in zoo order. `outside` counts the labels naming a detector no
+    catalog entry binds yet: no binder can meet them, so none is scored on them.
+    `recall_floor` is `BINDING_RECALL_FLOOR` for the shipped zoo and None for any other.
+    """
+
+    __slots__ = ("entries", "false_binds", "misses", "sections", "labels", "outside",
+                 "recall_floor")
+
+    def __init__(self, entries, recall_floor=None):
+        self.entries = entries
+        self.false_binds = []
+        self.misses = []
+        self.sections = 0
+        self.labels = 0
+        self.outside = 0
+        self.recall_floor = recall_floor
+
+    @property
+    def total(self):
+        whole = total(self.entries)
+        whole.source = "zoo"
+        return whole
+
+
+def load_zoo(directory=None):
+    """The rules zoo's items, a list of sections, or None when a corpus directory of your
+    own holds no `ZOO_FILE`. The shipped corpus always holds one, so its absence there is a
+    `CorpusError`, as is anything in the file that is not a labelled section.
+
+    An item is `{"id", "heading", "lines": [[text, label], ...]}`, with an optional
+    `heading_label` when the heading states a rule itself and an optional `kind`; a label
+    is a detector id or null.
+    """
+    loaded = _read_zoo(directory)
+    return None if loaded is None else loaded[0]
+
+
+def _read_zoo(directory=None):
+    """`(items, sha256 of the file's bytes)` for `load_zoo`, or None."""
+    base = corpus_dir(directory)
+    path = os.path.join(base, ZOO_FILE)
+    if not os.path.isfile(path):
+        if os.path.normcase(base) == os.path.normcase(_shipped_dir()):
+            raise CorpusError("%s: the shipped corpus has no rules zoo" % path)
+        return None
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        document = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise CorpusError("%s: cannot read: %s" % (path, exc))
+    if not isinstance(document, dict) or not isinstance(document.get("items"), list):
+        raise CorpusError("%s: expected an object with an items list" % path)
+    _only(document, _ZOO_KEYS, path, "zoo")
+    seen = set()
+    for item in document["items"]:
+        _check_item(item, seen, path)
+    return document["items"], hashlib.sha256(raw).hexdigest()
+
+
+def _check_item(item, seen, path):
+    if not isinstance(item, dict):
+        raise CorpusError("%s: a zoo item is an object" % path)
+    _only(item, _ITEM_KEYS, path, "zoo item")
+    ident = item.get("id")
+    if not isinstance(ident, str) or not ident or ident in seen:
+        raise CorpusError("%s: every zoo item has an id of its own; %r is not one"
+                          % (path, ident))
+    seen.add(ident)
+    heading = item.get("heading")
+    if not isinstance(heading, str) or not heading.strip() or "\n" in heading:
+        raise CorpusError("%s: zoo item %s has no one-line heading" % (path, ident))
+    lines = item.get("lines")
+    if not isinstance(lines, list) or not lines or not all(
+            isinstance(line, list) and len(line) == 2 and isinstance(line[0], str)
+            and _is_label(line[1]) for line in lines):
+        raise CorpusError("%s: zoo item %s needs lines of [text, detector id or null]"
+                          % (path, ident))
+    if not _is_label(item.get("heading_label")):
+        raise CorpusError("%s: zoo item %s: heading_label is a detector id or null"
+                          % (path, ident))
+
+
+def _is_label(value):
+    return value is None or (isinstance(value, str) and bool(value))
+
+
+def _zoo_section(item):
+    """`(heading, paragraphs)` for one zoo item, as `rules` parses the section it writes: a
+    heading and the item's lines joined by newlines, so plain lines form one paragraph and
+    a `- ` line is a list item."""
+    body = "## %s\n\n%s\n" % (item["heading"], "\n".join(text for text, _l in item["lines"]))
+    units = _rules._units(body)
+    if len(units) != 1 or not units[0][2]:
+        raise CorpusError("zoo item %s is not one rule section" % item["id"])
+    return units[0][0], units[0][3]
+
+
+def score_binding(directory=None, zoo=None):
+    """The binder over the rules zoo (`load_zoo`), as a `Binding`, or None when there is no
+    zoo. Each item binds as a section of a rule file binds, against the shipped catalog and
+    fold map, and a label naming a retired id counts under its current one. Only the shipped
+    zoo, known by its bytes, carries a recall floor; `zoo` passed as items carries none."""
+    floor = None
+    if zoo is None:
+        loaded = _read_zoo(directory)
+        if loaded is None:
+            return None
+        zoo, digest = loaded
+        if digest == SHIPPED_ZOO_SHA256:
+            floor = BINDING_RECALL_FLOOR
+    items = zoo
+    folds = fold_map()
+    ids = [detector.id for detector in _rules.catalog_detectors(folds)]
+    catalog = set(ids)
+    binding = Binding(dict((i, Score(i, source="zoo")) for i in ids), floor)
+    for item in items:
+        heading, paragraphs = _zoo_section(item)
+        labels = [label for _text, label in item["lines"]]
+        if "heading_label" in item:
+            labels.append(item["heading_label"])
+        binding.sections += 1
+        binding.labels += len(labels)
+        wanted = set(folds.get(label, label) for label in labels if label)
+        expected = wanted & catalog
+        binding.outside += len(wanted - catalog)
+        entry = _rules._bind(item["id"], ZOO_FILE, heading, paragraphs)
+        bound = set(entry.detectors) if entry.state == "measured" else set()
+        for detector_id in sorted(expected | bound):
+            score = binding.entries[detector_id]
+            if detector_id in expected:
+                score.positives += 1
+                if detector_id in bound:
+                    score.tp += 1
+                else:
+                    score.fn += 1
+                    binding.misses.append((item["id"], detector_id))
+            else:
+                score.fp += 1
+                binding.false_binds.append((item["id"], detector_id))
+    return binding
+
+
+def binding_failures(binding, recall_floor=None):
+    """Why the binder fails the corpus gate, one line each, or `[]`: any false bind, and
+    recall under `recall_floor`, the binding's own when not given, and none when that is
+    None. No zoo is no failure, as an unscored detector is none."""
+    if binding is None:
+        return []
+    if recall_floor is None:
+        recall_floor = binding.recall_floor
+    out = []
+    if binding.false_binds:
+        out.append("%d false bind(s): %s" % (len(binding.false_binds), ", ".join(
+            "%s %s" % pair for pair in binding.false_binds)))
+    whole = binding.total
+    if recall_floor is not None and whole.recall < recall_floor:
+        out.append("binding recall %.2f is under the recorded %.2f"
+                   % (whole.recall, recall_floor))
+    return out
+
+
+def _binding_row(score):
+    out = score.as_dict()
+    out["precision"] = round(score.precision, 4) if score.tp + score.fp else None
+    out["recall"] = round(score.recall, 4) if score.tp + score.fn else None
+    out.pop("f1", None)
+    out.pop("negatives", None)
+    return out
+
+
+def binding_as_dict(binding, recall_floor=None):
+    """The binder's figures as plain data, for `corpus --json`, or None with no zoo. A
+    precision or recall with nothing to divide is null rather than a number, and so is the
+    recall floor of a zoo that has none."""
+    if binding is None:
+        return None
+    if recall_floor is None:
+        recall_floor = binding.recall_floor
+    return {"zoo": ZOO_FILE, "sections": binding.sections, "labels": binding.labels,
+            "outside_catalog": binding.outside, "recall_floor": recall_floor,
+            "entries": dict((did, _binding_row(s)) for did, s in binding.entries.items()),
+            "total": _binding_row(binding.total),
+            "false_binds": [{"section": s, "detector": d} for s, d in binding.false_binds],
+            "misses": [{"section": s, "detector": d} for s, d in binding.misses],
+            "failures": binding_failures(binding, recall_floor)}
+
+
 # --- the table ---------------------------------------------------------------------------
 
 _HEAD = "%-38s%5s%5s%5s%5s%5s%7s%8s%7s  note"
@@ -467,6 +692,41 @@ def validity_table(scores, floor=DEFAULT_FLOOR):
                           whole.fn, whole.precision, whole.recall, whole.f1,
                           "floor %.2f" % floor)).rstrip())
     return "\n".join(lines)
+
+
+_BIND_HEAD = "%-38s%5s%5s%5s%5s%7s%8s  note"
+_BIND_ROW = "%-38s%5d%5d%5d%5d%7s%8s  %s"
+
+
+def binding_table(binding, recall_floor=None):
+    """The binder section `ruleprobe corpus` prints under the detector table: one row per
+    catalog entry, `pos` the zoo sections labelled with it, and a total held to no false
+    bind and, on the shipped zoo, to its recall floor."""
+    if binding is None:
+        return "binder: this corpus has no %s, so binding is not scored" % ZOO_FILE
+    if recall_floor is None:
+        recall_floor = binding.recall_floor
+    head = _BIND_HEAD % ("catalog entry", "pos", "tp", "fp", "fn", "prec", "recall")
+    rule = "-" * len(head)
+    lines = ["binder over the rules zoo: %d sections, %d labels"
+             % (binding.sections, binding.labels), head, rule]
+    for did in sorted(binding.entries):
+        score = binding.entries[did]
+        lines.append(_bind_row(did[:38], score, "false bind" if score.fp else ""))
+    lines.append(rule)
+    lines.append(_bind_row("total", binding.total, "no recall floor" if recall_floor is None
+                           else "recall floor %.2f" % recall_floor))
+    if binding.outside:
+        lines.append("%d label(s) name a detector no catalog entry binds yet; not scored"
+                     % binding.outside)
+    return "\n".join(lines)
+
+
+def _bind_row(name, score, note):
+    precision = "%.2f" % score.precision if score.tp + score.fp else "-"
+    recall = "%.2f" % score.recall if score.tp + score.fn else "-"
+    return (_BIND_ROW % (name, score.positives, score.tp, score.fp, score.fn, precision,
+                         recall, note)).rstrip()
 
 
 def validity_note(scores, detector_id):

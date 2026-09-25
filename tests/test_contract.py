@@ -873,6 +873,7 @@ class WheelTests(unittest.TestCase):
         with zipfile.ZipFile(self.wheel) as archive:
             names = set(archive.namelist())
         self.assertIn("ruleprobe/corpus/labels.yaml", names)
+        self.assertIn("ruleprobe/corpus/rules-zoo.json", names)
         self.assertTrue(any(n.startswith("ruleprobe/corpus/sessions/") for n in names))
         self.assertFalse([n for n in names if n.endswith((".so", ".pyd"))])
 
@@ -891,7 +892,10 @@ class WheelTests(unittest.TestCase):
         with zipfile.ZipFile(self.wheel) as archive:
             members = [n for n in archive.namelist() if n.startswith("ruleprobe/corpus/")]
             archive.extractall(target, members)
-        return os.path.join(target, "ruleprobe", "corpus")
+        corpus = os.path.join(target, "ruleprobe", "corpus")
+        # A copy without the rules zoo scores no binding and says nothing is wrong.
+        self.assertTrue(os.path.isfile(os.path.join(corpus, "rules-zoo.json")))
+        return corpus
 
 
 if __name__ == "__main__":

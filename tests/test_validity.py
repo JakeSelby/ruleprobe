@@ -10,6 +10,7 @@ Three separate things are under test here and they fail for different reasons:
 
 Run: python3 -m unittest discover -s tests
 """
+import hashlib
 import io
 import json
 import os
@@ -24,10 +25,12 @@ from ruleprobe.cli import main
 from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
-from ruleprobe.validity import (CorpusError, DEFAULT_FLOOR, Score, below_floor, corpus_dir,
-                                event_key, hit_key, load_corpus, score_corpus,
-                                score_examples, scores_as_dict, total, validity,
-                                validity_note, validity_table)
+from ruleprobe.validity import (BINDING_RECALL_FLOOR, SHIPPED_ZOO_SHA256, ZOO_FILE, CorpusError, DEFAULT_FLOOR,
+                                Score, below_floor, binding_as_dict, binding_failures,
+                                binding_table, corpus_dir, event_key, hit_key, load_corpus,
+                                load_zoo, score_binding, score_corpus, score_examples,
+                                scores_as_dict, total, validity, validity_note,
+                                validity_table)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 README = os.path.join(ROOT, "README.md")
@@ -578,6 +581,224 @@ class CliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         row = [l for l in text.splitlines() if l.startswith("x/sudo")][0]
         self.assertIn("1.00", row)
+
+
+#: Zoo items for the binder cases: one each the section binder binds as labelled, misses,
+#: binds when the label says it should not, and leaves unbound as labelled.
+BOUND = {"id": "b1", "heading": "Testing",
+         "lines": [["Run the tests before finishing.", "testing/test-after-change"]]}
+MISSED = {"id": "b2", "heading": "Testing",
+          "lines": [["Before you hand back, run the tests.", "testing/test-after-change"]]}
+FALSE_BIND = {"id": "b3", "heading": "Pushing",
+              "lines": [["Never force-push to main.", None]]}
+NEAR = {"id": "b4", "heading": "Pushing",
+        "lines": [["Never force-push to main.", None], ["Hotfixes excepted.", None]]}
+
+
+class BindingTests(Temp):
+    """The binder over a rules zoo: the arithmetic, the gate and the loader."""
+
+    def zoo_corpus(self, items, raw=None):
+        """A corpus of my own that holds only a rules zoo beside an empty labels file."""
+        base = self.corpus("version: 1\nsessions: []\n", {})
+        with open(os.path.join(base, ZOO_FILE), "w", encoding="utf-8") as handle:
+            handle.write(raw if raw is not None else json.dumps({"items": items}))
+        return base
+
+    def run_cli(self, *argv):
+        out, errors = io.StringIO(), io.StringIO()
+        old, sys.stderr = sys.stderr, errors
+        try:
+            code = main(list(argv), out=out)
+        finally:
+            sys.stderr = old
+        return code, out.getvalue(), errors.getvalue()
+
+    def test_each_cell_of_the_tally_is_what_the_labels_and_the_binds_make_it(self):
+        binding = score_binding(zoo=[BOUND, MISSED, FALSE_BIND, NEAR])
+        tests = binding.entries["testing/test-after-change"]
+        push = binding.entries["git-safety/force-push-default"]
+        self.assertEqual((tests.positives, tests.tp, tests.fp, tests.fn), (2, 1, 0, 1))
+        self.assertEqual((push.positives, push.tp, push.fp, push.fn), (0, 0, 1, 0))
+        self.assertEqual(binding.false_binds, [("b3", "git-safety/force-push-default")])
+        self.assertEqual(binding.misses, [("b2", "testing/test-after-change")])
+        self.assertEqual((binding.sections, binding.labels), (4, 5))
+
+    def test_a_heading_label_counts_and_an_uncatalogued_label_is_set_apart(self):
+        item = {"id": "h1", "heading": "Run the tests before finishing",
+                "heading_label": "testing/test-after-change",
+                "lines": [["Keep the suite fast.", "x/no-pattern-yet"]]}
+        binding = score_binding(zoo=[item])
+        self.assertEqual(binding.entries["testing/test-after-change"].tp, 1)
+        self.assertEqual((binding.labels, binding.outside), (2, 1))
+        self.assertNotIn("x/no-pattern-yet", binding.entries)
+
+    def test_a_label_under_a_retired_id_counts_under_the_current_one(self):
+        item = dict(BOUND, lines=[["Run the tests before finishing.", "x/old-tests"]])
+        with mock.patch.dict(contract_data.RENAMED,
+                             {"x/old-tests": "testing/test-after-change"}):
+            binding = score_binding(zoo=[item])
+        self.assertEqual(binding.entries["testing/test-after-change"].tp, 1)
+        self.assertEqual(binding.outside, 0)
+
+    def test_any_false_bind_fails_even_over_the_detector_floor(self):
+        """Nineteen right and one wrong is a precision of 0.95, over 0.9, and still fails."""
+        binding = score_binding(zoo=[dict(BOUND, id="b%d" % n) for n in range(19)]
+                                + [FALSE_BIND])
+        self.assertGreater(binding.total.precision, DEFAULT_FLOOR)
+        self.assertEqual(binding_failures(binding, 0.0),
+                         ["1 false bind(s): b3 git-safety/force-push-default"])
+
+    def test_recall_under_the_recorded_floor_fails_and_at_it_passes(self):
+        binding = score_binding(zoo=[BOUND, MISSED])
+        self.assertEqual(binding_failures(binding, 0.5), [])
+        self.assertEqual(binding_failures(binding, 0.51),
+                         ["binding recall 0.50 is under the recorded 0.51"])
+
+    def test_no_zoo_is_no_failure(self):
+        self.assertEqual(binding_failures(None), [])
+        self.assertIsNone(binding_as_dict(None))
+        self.assertIn("not scored", binding_table(None))
+
+    def test_a_rate_with_nothing_to_divide_is_a_dash_and_null_not_a_number(self):
+        binding = score_binding(zoo=[MISSED, FALSE_BIND])
+        data = binding_as_dict(binding)
+        self.assertIsNone(data["entries"]["testing/test-after-change"]["precision"])
+        self.assertIsNone(data["entries"]["git-safety/force-push-default"]["recall"])
+        rows = dict((l.split()[0], l) for l in binding_table(binding).splitlines()[3:10])
+        self.assertIn(" -    0.00", rows["testing/test-after-change"])
+        self.assertTrue(rows["git-safety/force-push-default"].endswith("-  false bind"))
+
+    def test_the_cli_exits_non_zero_on_a_false_bind_as_table_and_as_json(self):
+        base = self.zoo_corpus([BOUND, FALSE_BIND])
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base,
+                                        "--floor", "0.9")
+        self.assertEqual(code, 1)
+        self.assertIn("binder: 1 false bind(s): b3 git-safety/force-push-default", text)
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base, "--json")
+        self.assertEqual(code, 1)
+        data = json.loads(text)
+        self.assertEqual(data["binding"]["false_binds"],
+                         [{"section": "b3", "detector": "git-safety/force-push-default"}])
+        self.assertEqual(data["below_floor"], [])
+
+    def test_a_zoo_of_my_own_with_low_recall_and_no_false_bind_exits_zero(self):
+        """The recall floor belongs to the shipped zoo: another zoo's recall is reported and
+        holds nothing, and only a false bind fails it."""
+        base = self.zoo_corpus([MISSED, dict(MISSED, id="b5"), NEAR])
+        binding = score_binding(base)
+        self.assertLess(binding.total.recall, BINDING_RECALL_FLOOR)
+        self.assertIsNone(binding.recall_floor)
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base)
+        self.assertEqual(code, 0)
+        self.assertIn("0.00  no recall floor", text)
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base, "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(text)["binding"]
+        self.assertEqual((data["recall_floor"], data["failures"]), (None, []))
+
+    def test_the_recall_floor_follows_the_shipped_zoo_by_its_bytes(self):
+        with open(os.path.join(corpus_dir(None), ZOO_FILE), "rb") as handle:
+            raw = handle.read()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), SHIPPED_ZOO_SHA256)
+        copied = self.zoo_corpus(None, raw=raw.decode("utf-8"))
+        self.assertEqual(score_binding(copied).recall_floor, BINDING_RECALL_FLOOR)
+        # The near miss: one byte more and it is a zoo of its own, with no floor.
+        edited = self.zoo_corpus(None, raw=raw.decode("utf-8") + "\n")
+        self.assertIsNone(score_binding(edited).recall_floor)
+
+    def test_the_cli_exits_zero_on_a_clean_zoo_and_prints_the_binder_section(self):
+        base = self.zoo_corpus([BOUND, NEAR])
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base)
+        self.assertEqual(code, 0)
+        self.assertIn("binder over the rules zoo: 2 sections, 3 labels", text)
+
+    def test_a_corpus_of_my_own_with_no_zoo_scores_no_binding(self):
+        base = self.corpus("version: 1\nsessions: []\n", {})
+        self.assertIsNone(load_zoo(base))
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base, "--json")
+        self.assertEqual(code, 0)
+        self.assertIsNone(json.loads(text)["binding"])
+
+    def test_the_shipped_corpus_without_its_zoo_is_fatal(self):
+        base = self.corpus("version: 1\nsessions: []\n", {})
+        # By module object: `ruleprobe.validity` as a dotted name is the function on 3.9.
+        module = sys.modules["ruleprobe.validity"]
+        with mock.patch.object(module, "_shipped_dir", return_value=base):
+            with self.assertRaises(CorpusError) as caught:
+                load_zoo(base)
+        self.assertIn("no rules zoo", str(caught.exception))
+
+    def test_a_broken_zoo_is_fatal_and_exit_two(self):
+        cases = {"not json": "{",
+                 "not an items list": json.dumps({"sections": []}),
+                 "an unknown top-level key": json.dumps({"items": [], "extra": 1}),
+                 "an unknown item key": json.dumps({"items": [dict(BOUND, note="x")]}),
+                 "two items of one id": json.dumps({"items": [BOUND, BOUND]}),
+                 "a line that is not a pair": json.dumps(
+                     {"items": [dict(BOUND, lines=[["Run the tests."]])]}),
+                 "a label that is not an id": json.dumps(
+                     {"items": [dict(BOUND, lines=[["Run the tests.", 3]])]}),
+                 "a heading of two lines": json.dumps(
+                     {"items": [dict(BOUND, heading="A\nB")]}),
+                 "a section with no text": json.dumps(
+                     {"items": [dict(BOUND, lines=[["", None]])]})}
+        for name, raw in cases.items():
+            with self.subTest(case=name):
+                base = self.zoo_corpus(None, raw=raw)
+                with self.assertRaises(CorpusError):
+                    score_binding(base)
+                code, text, err = self.run_cli("corpus", "--no-config", "--corpus", base)
+                self.assertEqual((code, text), (2, ""))
+                self.assertIn("corpus:", err)
+
+
+class ShippedBindingTests(unittest.TestCase):
+    """The binder over the shipped zoo: the gate CI runs, and the ratchet on its recall."""
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.pop("RULEPROBE_CORPUS", None)
+        cls.binding = score_binding()
+
+    def test_the_shipped_zoo_is_package_data_in_the_shipped_corpus(self):
+        self.assertTrue(os.path.isfile(os.path.join(corpus_dir(), ZOO_FILE)))
+        self.assertEqual((self.binding.sections, self.binding.labels), (65, 84))
+
+    def test_the_shipped_binder_makes_no_false_bind_on_the_zoo(self):
+        self.assertEqual(self.binding.false_binds, [])
+        self.assertEqual(self.binding.total.precision, 1.0)
+        self.assertEqual(binding_failures(self.binding), [])
+
+    def test_the_recall_floor_is_todays_recall_rounded_down(self):
+        """The ratchet: when binding improves, raise `BINDING_RECALL_FLOOR` with it."""
+        recall = self.binding.total.recall
+        self.assertEqual(self.binding.recall_floor, BINDING_RECALL_FLOOR)
+        self.assertGreaterEqual(recall, BINDING_RECALL_FLOOR)
+        self.assertEqual(BINDING_RECALL_FLOOR, int(recall * 100) / 100.0,
+                         "binding recall is now %.4f: raise BINDING_RECALL_FLOOR to %.2f"
+                         % (recall, int(recall * 100) / 100.0))
+
+    def test_the_json_carries_the_binder_beside_the_detectors(self):
+        out = io.StringIO()
+        self.assertEqual(main(["corpus", "--no-config", "--json"], out=out), 0)
+        data = json.loads(out.getvalue())
+        self.assertIn("detectors", data)
+        binding = data["binding"]
+        self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
+                          binding["total"]["fn"]), (18, 0, 23))
+        self.assertEqual(binding["total"]["precision"], 1.0)
+        self.assertEqual(binding["total"]["source"], "zoo")
+        self.assertEqual(set(row["source"] for row in binding["entries"].values()),
+                         set(["zoo"]))
+        self.assertEqual((binding["recall_floor"], binding["outside_catalog"],
+                          binding["failures"]), (BINDING_RECALL_FLOOR, 4, []))
+
+    def test_two_runs_print_the_same_bytes(self):
+        first, second = io.StringIO(), io.StringIO()
+        main(["corpus", "--no-config", "--json"], out=first)
+        main(["corpus", "--no-config", "--json"], out=second)
+        self.assertEqual(first.getvalue(), second.getvalue())
 
 
 class FoldTests(Temp):
