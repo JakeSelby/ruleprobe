@@ -9,7 +9,7 @@
     "task": 10,
     "bug": 13,
     "chore": 9,
-    "spike": 4,
+    "spike": 5,
     "decision": 14
   },
   "items": [
@@ -1076,6 +1076,19 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-E017.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-SP004",
+      "github_number": 137,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/137",
+      "title": "spike(rules): score the section binder and a per-sentence binder on a rules zoo",
+      "type": "spike",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-SP004.md",
+      "parent_bmad_id": "RP-E010",
+      "parent_github_number": 128,
       "lifecycle": "active",
       "provenance": "authored"
     }
