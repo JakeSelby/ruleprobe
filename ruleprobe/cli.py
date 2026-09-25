@@ -45,8 +45,9 @@ from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUEN
                      session_address)
 from .rules import catalog_detectors, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
-                       DEFAULT_FLOOR, below_floor, event_key, hit_key, load_corpus,
-                       read_events, score_corpus, score_examples, scores_as_dict, validity,
+                       DEFAULT_FLOOR, below_floor, binding_as_dict, binding_failures,
+                       binding_table, event_key, hit_key, load_corpus, read_events,
+                       score_binding, score_corpus, score_examples, scores_as_dict, validity,
                        validity_table)
 
 
@@ -91,7 +92,8 @@ def build_parser():
                                         help="list the detectors that would run"))
 
     corpus_cmd = sub.add_parser(
-        "corpus", help="score every detector against the labelled corpus")
+        "corpus", help="score every detector, and the rule binder, against the labelled "
+                  "corpus")
     corpus_cmd.add_argument("--floor", type=float, default=DEFAULT_FLOOR, metavar="F",
                             help="exit non-zero when a scored detector's precision or "
                                  "recall is under this (default: %.2f)" % DEFAULT_FLOOR)
@@ -341,28 +343,37 @@ def cmd_corpus(args, out):
     failed. Every catalog entry is scored, whether a rule bound it or not, and an entry
     restating a shipped detector scores that detector's row when the corpus labels none of
     it.
+
+    The binder is scored too, over the corpus's rules zoo, and fails the gate on any false
+    bind or on recall under its recorded floor, whatever `--floor` says: one wrong bind is a
+    rule measured by the wrong detector.
     """
     bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:
         scores = _score_restated(validity(registry=registry, directory=args.corpus),
                                  registry)
+        binding = score_binding(directory=args.corpus)
     except CorpusError as exc:
         sys.stderr.write("corpus: %s\n" % exc)
         return 2
     failed = below_floor(scores, args.floor)
+    unbound = binding_failures(binding)
     if args.json:
-        out.write(json.dumps(scores_as_dict(scores, args.floor), indent=2,
-                             sort_keys=True) + "\n")
-        return 1 if failed else 0
+        data = scores_as_dict(scores, args.floor)
+        data["binding"] = binding_as_dict(binding)
+        out.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
+        return 1 if failed or unbound else 0
     out.write(validity_table(scores, args.floor) + "\n")
+    out.write("\n" + binding_table(binding) + "\n")
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")
     if failed:
         out.write("\n%d detector(s) under the %.2f floor: %s\n"
                   % (len(failed), args.floor, ", ".join(failed)))
-        return 1
-    return 0
+    for line in unbound:
+        out.write("\nbinder: %s\n" % line)
+    return 1 if failed or unbound else 0
 
 
 def cmd_detectors(args, out):

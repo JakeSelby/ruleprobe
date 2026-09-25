@@ -123,12 +123,12 @@ unmeasured, and the coverage block names the entries when it matched several. A 
 never reaches across a clause break (`;`, `,`, `:`, a run of hyphens between spaces such as
 ` - ` or ` -- `, a dash), except the comma of its own contrast ("use uv, not pip"). A rule
 carrying an exception or a permission anywhere, its heading included - except (excepted,
-exception), unless, other than, apart from, excluding, allowed, fine, okay, ok - binds
-nothing, so "Never force-push to main. Hotfixes excepted." is left unmeasured rather than
-read as a rule it is not. A condition or a contrast - if, when, but, however, without -
-unbinds a rule only in the sentence the pattern matched: "Never force-push to main when
-others share it" binds nothing, while "Run the tests before finishing. If one fails, fix
-it." binds. `only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
+exception), exempt (exempted, exemption), unless, other than, apart from, excluding, allowed,
+fine, okay, ok - binds nothing, so "Never force-push to main. Hotfixes excepted." is left
+unmeasured rather than read as a rule it is not. A condition or a contrast - if, when, but,
+however, without - unbinds a rule only in the sentence the pattern matched: "Never force-push to
+main when others share it" binds nothing, while "Run the tests before finishing. If one fails,
+fix it." binds. `only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
 own with a catalog id replaces it, `ruleprobe corpus` scores every entry, and
 `ruleprobe detectors` lists every entry marked `catalog`.
 
@@ -483,6 +483,20 @@ transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00  
 verification/no-verify                   11   13   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
+
+binder over the rules zoo: 65 sections, 84 labels
+catalog entry                           pos   tp   fp   fn   prec  recall  note
+-------------------------------------------------------------------------------
+commits/non-conventional-subject          5    2    0    3   1.00    0.40
+git-safety/force-push-default             8    3    0    5   1.00    0.38
+package-manager/pip-install               5    2    0    3   1.00    0.40
+secrets/secret-file-add                   4    2    0    2   1.00    0.50
+testing/test-after-change                 9    3    0    6   1.00    0.33
+transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
+verification/no-verify                    6    3    0    3   1.00    0.50
+-------------------------------------------------------------------------------
+total                                    41   18    0   23   1.00    0.44  recall floor 0.43
+4 label(s) name a detector no catalog entry binds yet; not scored
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
@@ -496,6 +510,15 @@ detector, so they stay true of it.
 and CI in this repository runs exactly that. It is a gate on the repository, not on a run:
 nothing in `ruleprobe report` reads the floor, and no report of yours will ever fail because
 a detector scored badly. `--json` prints the same numbers as data.
+
+The second table scores the rule binder, the text reading that binds a rule section to a
+catalog entry, over `ruleprobe/corpus/rules-zoo.json`: synthetic rule sections with every
+line labelled with the catalog detector it should bind, or none, beside near-misses for
+exceptions, conditions and contrasts. `pos` counts the sections labelled with an entry. Any
+false bind fails the command, whatever `--floor` says, because a rule bound to the wrong
+detector is measured wrongly; recall fails only under the recorded floor, the recall the
+shipped binder measured, which rises as binding improves. Labels naming a detector no catalog
+entry binds yet are counted apart. `--json` carries the same figures under `binding`.
 
 `ruleprobe report --validity` puts each detector's `p=` and `r=` beside its row. It is off
 by default because the report is meant to be read in a minute and an eight-column table is

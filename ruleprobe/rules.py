@@ -525,9 +525,10 @@ def _file_prose(body):
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 #: An exception or a permission. Anywhere in a rule, its heading included, it unbinds the
 #: rule: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools"
-#: are not the rules the catalog patterns read.
-_EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|unless|other\s+than|apart\s+from|"
-                        r"excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
+#: are not the rules the catalog patterns read, and nor is "Run the tests before finishing.
+#: Docs-only changes are exempt."
+_EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ions?)?|unless|other\s+than|"
+                        r"apart\s+from|excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
 #: A condition or a contrast. It unbinds a rule only in a sentence a pattern matched ("Never
 #: force-push to main when others share it"): elsewhere it qualifies another sentence, as
 #: "If one fails, fix it." does beside "Run the tests before finishing.", and a file bound

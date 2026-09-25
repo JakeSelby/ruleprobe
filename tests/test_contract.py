@@ -873,6 +873,7 @@ class WheelTests(unittest.TestCase):
         with zipfile.ZipFile(self.wheel) as archive:
             names = set(archive.namelist())
         self.assertIn("ruleprobe/corpus/labels.yaml", names)
+        self.assertIn("ruleprobe/corpus/rules-zoo.json", names)
         self.assertTrue(any(n.startswith("ruleprobe/corpus/sessions/") for n in names))
         self.assertFalse([n for n in names if n.endswith((".so", ".pyd"))])
 

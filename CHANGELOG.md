@@ -11,6 +11,17 @@ All notable changes to this project are documented here. The format follows
 - The package metadata links the reference site, <https://ruleprobe.jakeselby.com>, as its
   `Documentation` URL ([#67](https://github.com/JakeSelby/ruleprobe/issues/67)). The site is built
   from the README, this changelog and the planning corpus at each release tag.
+- `ruleprobe corpus` scores the rule binder over a synthetic rules zoo shipped at
+  `ruleprobe/corpus/rules-zoo.json`, and prints its precision and recall per catalog entry under
+  the detector table; `--json` carries them under `binding`. Any false bind fails the command
+  whatever `--floor` says, and recall fails under a recorded floor that rises as binding improves
+  ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
+
+### Changed
+
+- "exempt", "exempted" and "exemptions" join the exception words, so "Run the tests before
+  finishing. Docs-only changes are exempt." leaves its section unmeasured rather than binding it
+  ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
 
 ## 0.2.0 (2026-09-24)
 
