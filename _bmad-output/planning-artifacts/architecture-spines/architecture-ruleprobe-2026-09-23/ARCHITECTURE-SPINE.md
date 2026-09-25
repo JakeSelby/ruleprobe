@@ -7,7 +7,7 @@ paradigm: 'pipes-and-filters, batch per session: readers -> event list -> one sh
 scope: 'The ruleprobe package: readers, event schema, shell parse, registry, matchers, declarative format, rule binding, report, validity and CLI. 0.1.0 as built, the v0.2.0 PRD, and the proposed v0.3.0 and v0.4.0 roadmap.'
 status: final
 created: '2026-09-23'
-updated: '2026-09-25'
+updated: '2026-09-29'
 binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, FR-39, FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48, FR-49, FR-50, FR-51, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, agent-harness AD-13, agent-harness AD-21]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/prd.md
@@ -410,6 +410,9 @@ native (#55)
     with their detector kinds in PRD FR-16 (PRD Q3, decided 2026-09-23).
   - Amended 2026-09-25 [PROPOSED, v0.3.0]: AD-18 makes the sentence the binding unit; the rule id
     above is unchanged.
+  - Amended 2026-09-29 [PROPOSED, v0.3.0]: the catalog holds eleven shapes (story 8.4, #143), adding
+    one entry for each shipped default the seven left unbound, so every detector in `DEFAULT` has a
+    restating entry and keeps its place in the registry as above.
 
 ### AD-13: Explain, label and redaction [ADOPTED; explain implemented under #51 and label under #52, ship in v0.2.0]
 

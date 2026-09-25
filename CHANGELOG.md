@@ -16,6 +16,15 @@ All notable changes to this project are documented here. The format follows
   the detector table; `--json` carries them under `binding`. Any false bind fails the command
   whatever `--floor` says, and on the shipped zoo recall fails under a recorded floor that rises as
   binding improves ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
+- The catalog binds rules about the four shipped detectors it left unbound: never compact the
+  context mid-task (`cache-hygiene/compact`), never switch models mid-session
+  (`cache-hygiene/model-switch`), never write a secret into a file (`secrets/secret-in-write`)
+  and filter every `find` (`transcript-hygiene/unfiltered-find`). A bound rule is measured by the
+  shipped detector, and a rule that narrows the shape, such as "never compact more than once",
+  binds nothing, and `ruleprobe detectors` now marks all six shipped detectors `catalog`. The
+  rules zoo gains positives and near-misses for each; binding recall on it
+  rises to 0.75 with no false bind, and the recorded recall floor with it
+  ([#143](https://github.com/JakeSelby/ruleprobe/issues/143)).
 
 ### Changed
 

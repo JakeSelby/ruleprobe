@@ -711,7 +711,7 @@ class BindingTests(Temp):
         data = binding_as_dict(binding)
         self.assertIsNone(data["entries"]["testing/test-after-change"]["precision"])
         self.assertIsNone(data["entries"]["git-safety/force-push-default"]["recall"])
-        rows = dict((l.split()[0], l) for l in binding_table(binding).splitlines()[3:10])
+        rows = dict((l.split()[0], l) for l in binding_table(binding).splitlines()[3:3 + len(binding.entries)])
         self.assertIn(" -    0.00", rows["testing/test-after-change"])
         self.assertTrue(rows["git-safety/force-push-default"].endswith("-  false bind"))
 
@@ -809,7 +809,7 @@ class ShippedBindingTests(unittest.TestCase):
 
     def test_the_shipped_zoo_is_package_data_in_the_shipped_corpus(self):
         self.assertTrue(os.path.isfile(os.path.join(corpus_dir(), ZOO_FILE)))
-        self.assertEqual((self.binding.sections, self.binding.labels), (71, 103))
+        self.assertEqual((self.binding.sections, self.binding.labels), (111, 147))
 
     def test_the_shipped_binder_makes_no_false_bind_on_the_zoo(self):
         self.assertEqual(self.binding.false_binds, [])
@@ -832,13 +832,13 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertIn("detectors", data)
         binding = data["binding"]
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
-                          binding["total"]["fn"]), (27, 0, 14))
+                          binding["total"]["fn"]), (43, 0, 14))
         self.assertEqual(binding["total"]["precision"], 1.0)
         self.assertEqual(binding["total"]["source"], "zoo")
         self.assertEqual(set(row["source"] for row in binding["entries"].values()),
                          set(["zoo"]))
         self.assertEqual((binding["recall_floor"], binding["outside_catalog"],
-                          binding["failures"]), (BINDING_RECALL_FLOOR, 4, []))
+                          binding["failures"]), (BINDING_RECALL_FLOOR, 0, []))
 
     def test_two_runs_print_the_same_bytes(self):
         first, second = io.StringIO(), io.StringIO()

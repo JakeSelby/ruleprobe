@@ -28,3 +28,19 @@ Use Conventional Commits for every commit subject.
 ## Secrets
 
 - Never commit a `.env` file or a private key.
+
+## Sessions
+
+Never compact the context mid-task. Start a new session instead.
+
+## Models
+
+Do not switch models in the middle of a session.
+
+## Credentials
+
+Never hardcode an API key.
+
+## Searching
+
+Filter every `find` by name, type or depth.

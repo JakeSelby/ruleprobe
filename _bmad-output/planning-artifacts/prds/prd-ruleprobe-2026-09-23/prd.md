@@ -2,7 +2,7 @@
 title: "PRD: ruleprobe"
 status: final
 created: 2026-09-23
-updated: 2026-09-25
+updated: 2026-09-29
 issue: 13
 bmad_id: RP-S004
 milestone: v0.2.0
@@ -382,6 +382,15 @@ kind:
 6. Conventional Commit subjects: event matcher on the `git` commit message.
    `[ASSUMPTION: subject parsing fits a matcher]`
 7. Never commit a secret-shaped file: event matcher on the `git add` path.
+
+Amended 2026-09-29 (story 8.4, #143, v0.3.0): the catalog holds eleven shapes, adding one for each shipped
+default detector the seven left unbound. Each restates the shipped detector under its id, so a bound rule is
+measured by it:
+
+8. Never compact the context mid-task: `kind` on compaction, as the shipped `compact`.
+9. Never switch models mid-session: `change` on the assistant's model, as the shipped `model-switch`.
+10. Never write a secret into a file: `arg` and `text` on a secret shape, as the shipped `secret-in-write`.
+11. Filter every `find`: event matcher on `command`, as the shipped `unfiltered-find`.
 
 **Consequences (testable):**
 - Every catalog detector carries `examples:` and scores at or above the floor in CI.
@@ -1102,7 +1111,8 @@ transcript giving a different report. Any one is a failure regardless of the oth
 2. **Section-level binding: split on headings, list items, or both?** Closed 2026-09-23: headings only
    for 0.2 (RP-D008, #45).
 3. **How many rule shapes must the catalog hold before SM-1 can pass?** Closed 2026-09-23: a small set
-   of six to eight shapes, listed in FR-16, each clearing the floor (RP-D009, #46).
+   of six to eight shapes, listed in FR-16, each clearing the floor (RP-D009, #46). Amended 2026-09-29:
+   eleven shapes after story 8.4 (#143), each still clearing the floor.
 4. **Does the drafting command belong in 0.2.0, a later minor, or nowhere?** Closed 2026-09-23: nowhere
    in ruleprobe; FR-34 is withdrawn and drafting moves to the judge library tracked in #21 (RP-D011,
    #59).

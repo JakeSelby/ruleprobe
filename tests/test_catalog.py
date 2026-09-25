@@ -49,7 +49,11 @@ FIXTURE = [("team/CLAUDE.md#testing", "testing/test-after-change"),
            ("team/CLAUDE.md#dependencies", "package-manager/pip-install"),
            ("team/CLAUDE.md#reading-files", "transcript-hygiene/whole-file-cat"),
            ("team/CLAUDE.md#commits", "commits/non-conventional-subject"),
-           ("team/CLAUDE.md#secrets", "secrets/secret-file-add")]
+           ("team/CLAUDE.md#secrets", "secrets/secret-file-add"),
+           ("team/CLAUDE.md#sessions", "cache-hygiene/compact"),
+           ("team/CLAUDE.md#models", "cache-hygiene/model-switch"),
+           ("team/CLAUDE.md#credentials", "secrets/secret-in-write"),
+           ("team/CLAUDE.md#searching", "transcript-hygiene/unfiltered-find")]
 
 
 def matched(text):
@@ -75,8 +79,9 @@ class Temp(unittest.TestCase):
 
 
 class EntryTests(unittest.TestCase):
-    def test_the_catalog_holds_six_to_eight_shapes_each_with_three_keys(self):
-        self.assertTrue(6 <= len(catalog.ENTRIES) <= 8)
+    def test_the_catalog_holds_eleven_shapes_each_with_three_keys(self):
+        # The seven 0.2 shapes, and one for each shipped default the seven left unbound.
+        self.assertEqual(len(catalog.ENTRIES), 11)
         for entry in catalog.ENTRIES:
             self.assertEqual(sorted(entry), ["detector", "pattern", "shape"])
 
@@ -106,8 +111,7 @@ class EntryTests(unittest.TestCase):
         doc, _lines = load(os.path.join(ROOT, "ruleprobe", "detectors", "common.yaml"))
         twins = dict((d["id"], d["when"]) for d in doc["detectors"])
         restated = [e["detector"] for e in catalog.ENTRIES if e["detector"]["id"] in DEFAULT]
-        self.assertEqual(sorted(d["id"] for d in restated),
-                         ["transcript-hygiene/whole-file-cat", "verification/no-verify"])
+        self.assertEqual(sorted(d["id"] for d in restated), sorted(DEFAULT.ids()))
         for spec in restated:
             with self.subTest(detector=spec["id"]):
                 self.assertEqual(spec["when"], twins[spec["id"]])
@@ -346,7 +350,11 @@ HOSTILE = ("cd a && " * 2000 + "echo done",
            "git push " + "-f " * 4000 + "mainx", "git push " + "+HEAD:" * 2500,
            "run the tests " + "a " * 7000, "never force-push " + "x " * 7000,
            "use uv " + "not " * 3500, "use uv" + " -" * 7000,
-           "never commit " + "a " * 7000, "echo \"" + "\\\"" * 4000)
+           "never commit " + "a " * 7000, "echo \"" + "\\\"" * 4000,
+           "never compact the context" + " mid-task" * 3000, "never compact " + "x" * 8000,
+           "stay on one model for " + "the " * 5000, "never switch models" + " -" * 7000,
+           "never hardcode " + "api " * 5000, "never write a secret into " + "a " * 7000,
+           "filter " + "every " * 5000, "never run " + "a " * 7000 + "bare")
 
 
 class HostileInputTests(unittest.TestCase):
@@ -486,7 +494,7 @@ class BindingTests(Temp):
                          CATALOG_RULES, "--json"], out=out)
         self.assertEqual(code, 0)
         coverage = json.loads(out.getvalue())["coverage"]
-        self.assertEqual((coverage["measured"], coverage["unmeasured"]), (7, 0))
+        self.assertEqual((coverage["measured"], coverage["unmeasured"]), (len(FIXTURE), 0))
         for rule, did in FIXTURE:
             self.assertRegex(err.getvalue(), r"measured +%s .*: catalog-bound, %s\n"
                              % (re.escape(rule), re.escape(did)))
@@ -552,6 +560,98 @@ class BindingTests(Temp):
                      "Write short commit subjects.", "Never commit to main directly."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
+
+    def test_each_default_shape_binds_its_shipped_detector_catalog_bound(self):
+        cases = [
+            ("cache-hygiene/compact", ("Never compact the conversation.",
+                                       "Do not run `/compact` mid-task.",
+                                       "Avoid compacting the context window.",
+                                       "Start a new session instead of compacting.")),
+            ("cache-hygiene/model-switch", ("Never switch models mid-session.",
+                                            "Don't change the model in the middle of a task.",
+                                            "Stick with the same model throughout the "
+                                            "conversation.")),
+            ("secrets/secret-in-write", ("Never write a secret to disk.",
+                                         "Do not hard-code access tokens in config files.",
+                                         "Never embed credentials.")),
+            ("transcript-hygiene/unfiltered-find", ("Filter each find command.",
+                                                    "Narrow every `find` by name or type.",
+                                                    "Do not run an unbounded find.")),
+        ]
+        for did, texts in cases:
+            for text in texts:
+                with self.subTest(text=text):
+                    bundle = self.rules("# Rule\n\n%s\n" % text)
+                    [entry] = bundle.rules
+                    self.assertEqual((entry.state, entry.detectors, entry.source),
+                                     ("measured", [did], "catalog"))
+                    registry = bundle.registry()
+                    self.assertIs(registry.get(did), DEFAULT.get(did))
+                    self.assertEqual(registry.ids(), DEFAULT.ids())
+                    self.assertIn(": catalog-bound, %s" % did, bundle.summary())
+
+    def test_a_near_miss_of_each_default_shape_binds_nothing(self):
+        """An exception, a condition, a permission, a mention, a narrowing the pattern cannot
+        read, and a neighbouring topic, for each of the four default shapes."""
+        for text in ("Never compact the context unless the task is nearly done.",
+                     "Do not compact when a task is half finished.",
+                     "Compacting is fine between tasks.",
+                     "Compaction replaces the conversation with a summary.",
+                     "Never compact more than once per session.",
+                     "Never compact the database during business hours.",
+                     "Never switch models except to recover from an outage.",
+                     "Do not switch models if the cache is warm.",
+                     "You may switch to a faster model for simple edits.",
+                     "A model switch rebuilds the cached prefix.",
+                     "Never switch models to save money.",
+                     "Stick with one model per task.",
+                     "Never switch branches in the middle of a rebase.",
+                     "Never hardcode tokens other than the public test key.",
+                     "Do not write a secret to a file if it will be committed.",
+                     "Writing a fake key into a test fixture is fine.",
+                     "A secret written to disk can leak through a backup.",
+                     "Never paste a secret into the chat.",
+                     "Never write passwords into a file.",
+                     "Never log secrets.",
+                     "Never run a bare find except in a scratch directory.",
+                     "Never run an unfiltered find when the tree is large.",
+                     "An unfiltered find is okay in a small directory.",
+                     "find walks every directory under its start point.",
+                     "Filter every grep through a path.",
+                     "Never run find with -delete.",
+                     "Filter the findings before you report them."):
+            with self.subTest(text=text):
+                [entry] = self.rules("# Rule\n\n%s\n" % text).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+
+    def test_a_default_shape_ends_at_a_clause_break_or_the_sentence_s_end(self):
+        for text in ("Never compact the context; start a new session.",
+                     "Never switch models mid-session - the cache is lost.",
+                     "Never hardcode API keys, tokens included.",
+                     "Never compact the conversation"):
+            with self.subTest(text=text):
+                self.assertEqual(len(matched(text)), 1)
+        for text in ("Never compact the context twice.", "Never switch models lightly.",
+                     "Never write a secret into a file twice."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+
+    def test_the_two_secret_shapes_bind_apart(self):
+        self.assertEqual(matched("Never commit secrets."), ["secrets/secret-file-add"])
+        self.assertEqual(matched("Never hardcode secrets."), ["secrets/secret-in-write"])
+        [entry] = self.rules("# Secrets\n\nNever hardcode secrets. Never commit a `.env` "
+                             "file.\n").rules
+        self.assertEqual(entry.detectors, ["secrets/secret-file-add",
+                                           "secrets/secret-in-write"])
+
+    def test_an_exception_after_a_default_shape_unbinds_it(self):
+        for body in ("Never run /compact.\nVery long research sessions are the exception.",
+                     "Never switch models mid-session.\nA smaller model for a summary is okay.",
+                     "Never hardcode secrets.\nThrowaway demo keys are allowed.",
+                     "Filter every find.\nListing a single folder is fine."):
+            with self.subTest(body=body):
+                [entry] = self.rules("# Rule\n\n%s\n" % body).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
 
     def test_a_file_bound_in_its_front_matter_is_its_own_and_never_catalog_bound(self):
         bundle = self.rules("---\nrule: git\ndetector:\n  id: git/push\n"
@@ -974,7 +1074,8 @@ class RegistryTests(Temp):
         for did in IDS:
             with self.subTest(detector=did):
                 self.assertTrue(lines[did].endswith("catalog"))
-        self.assertFalse(lines["secrets/secret-in-write"].endswith("catalog"))
+        self.assertEqual(sorted(did for did, line in lines.items() if line.endswith("catalog")),
+                         sorted(IDS))
 
     def test_a_shipped_row_the_corpus_scored_takes_no_catalog_examples(self):
         # Corpus labels for the detectors a corpus labels, `examples:` for the rest.
@@ -984,7 +1085,7 @@ class RegistryTests(Temp):
         corpus_only = score_corpus(DEFAULT)
         restated = [e["detector"]["id"] for e in catalog.ENTRIES
                     if e["detector"]["id"] in DEFAULT]
-        self.assertEqual(len(restated), 2)
+        self.assertEqual(len(restated), len(DEFAULT.ids()))
         for did in restated:
             with self.subTest(detector=did):
                 self.assertTrue(corpus_only[did].scored)
@@ -995,7 +1096,7 @@ class RegistryTests(Temp):
 
     def test_every_restating_entry_s_examples_pass_on_the_shipped_detector(self):
         restated = [d for d in catalog_detectors() if d.id in DEFAULT]
-        self.assertEqual(len(restated), 2)
+        self.assertEqual(len(restated), len(DEFAULT.ids()))
         for entry in restated:
             shipped = DEFAULT.get(entry.id)
             twin = Detector(shipped.id, shipped.rule, shipped.event, shipped.fn,

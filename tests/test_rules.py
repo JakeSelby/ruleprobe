@@ -17,7 +17,7 @@ import unittest
 from unittest import mock
 
 from corpus import bash, tool_use
-from ruleprobe import Registry, iter_sessions, run
+from ruleprobe import DEFAULT, Registry, iter_sessions, run
 from ruleprobe.cli import main
 from ruleprobe.rules import discover, load_bundle, load_file, load_rules_dir, read_rule_file
 from test_readers import FIXTURES
@@ -353,6 +353,21 @@ class CliTests(Temp):
         self.assertEqual((coverage["measured"], coverage["unmeasured"], coverage["catalog"]),
                          (1, 0, 1))
 
+    def test_a_default_shape_is_reported_by_the_one_shipped_detector(self):
+        self.write("rules/CLAUDE.md", DEFAULTS)
+        rules_dir = os.path.join(self.dir, "rules")
+        code, text = self.run_cli("report", "--root", FIXTURES, "--no-config",
+                                  "--rules", rules_dir)
+        self.assertEqual(code, 0)
+        self.assertIn("rules: 1 measured, 0 dark, 0 unmeasured (100% measured)", text)
+        self.assertRegex(text, r"measured +CLAUDE\.md#sessions .*: catalog-bound, "
+                               r"cache-hygiene/compact, cache-hygiene/model-switch, "
+                               r"secrets/secret-in-write, "
+                               r"transcript-hygiene/unfiltered-find\n")
+        table = text.split("rules:")[0]
+        for did in DEFAULTS_IDS:
+            self.assertEqual(table.count(did), 1, did)
+
 
 #: One section of three rules, each sentence binding a different catalog entry.
 MULTI = ("# Git\n\n- Use Conventional Commits.\n- Never force-push to main.\n"
@@ -360,6 +375,13 @@ MULTI = ("# Git\n\n- Use Conventional Commits.\n- Never force-push to main.\n"
 #: What `MULTI` binds, in catalog order, whatever order its sentences come in.
 MULTI_IDS = ["verification/no-verify", "git-safety/force-push-default",
              "commits/non-conventional-subject"]
+
+#: One section stating the four default shapes the 0.2 catalog left unbound.
+DEFAULTS = ("# Sessions\n\nFilter every `find`. Never hardcode API keys.\n"
+            "Do not switch models mid-session. Never compact the conversation.\n")
+#: What `DEFAULTS` binds, in catalog order.
+DEFAULTS_IDS = ["cache-hygiene/compact", "cache-hygiene/model-switch",
+                "secrets/secret-in-write", "transcript-hygiene/unfiltered-find"]
 
 
 class SentenceBindingTests(Temp):
@@ -404,6 +426,34 @@ class SentenceBindingTests(Temp):
         [entry] = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False).rules
         self.assertEqual((entry.rule, entry.state, entry.detectors),
                          ("git", "measured", ["package-manager/pip-install"]))
+
+    def test_the_four_default_shapes_bind_in_catalog_order_to_the_shipped_detectors(self):
+        bundle = self.load(DEFAULTS)
+        [entry] = bundle.rules
+        self.assertEqual((entry.rule, entry.state, entry.detectors, entry.source),
+                         ("CLAUDE.md#sessions", "measured", DEFAULTS_IDS, "catalog"))
+        registry = bundle.registry()
+        self.assertEqual(registry.ids(), DEFAULT.ids())
+        for did in DEFAULTS_IDS:
+            self.assertIs(registry.get(did), DEFAULT.get(did))
+
+    def test_a_default_shape_beside_a_0_2_shape_binds_both(self):
+        [entry] = self.load("# Git\n\nNever force-push to main. Never write a secret into "
+                            "a file.\n").rules
+        self.assertEqual(entry.detectors, ["git-safety/force-push-default",
+                                           "secrets/secret-in-write"])
+
+    def test_a_user_detector_replacing_a_default_s_id_makes_the_rule_its_own(self):
+        self.write("rules/CLAUDE.md", "# Sessions\n\nNever compact the conversation.\n")
+        path = self.write("d.json", json.dumps({"detectors": [
+            {"id": "cache-hygiene/compact", "rule": "cache-hygiene", "event": "session",
+             "when": {"kind": "compact"}}]}))
+        bundle = load_bundle(paths=[path], rules_dir=os.path.join(self.dir, "rules"),
+                             config=False)
+        bundle.registry()
+        [entry] = bundle.rules
+        self.assertEqual((entry.state, entry.detectors, entry.source),
+                         ("measured", ["cache-hygiene/compact"], "own"))
 
     def test_binding_is_the_same_on_every_load(self):
         first = [tuple(e) for e in self.load(MULTI).rules]
