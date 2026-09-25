@@ -692,9 +692,9 @@ class BindingTests(Temp):
                 [entry] = self.rules(text).rules
                 self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
 
-    def test_a_colon_lead_in_carries_its_exception_over_the_list_it_introduces(self):
-        """Review of #142: 0.2.0 left these unmeasured, and the first per-sentence cut bound
-        them."""
+    def test_an_exception_in_a_lead_in_or_anywhere_else_unbinds_every_rule(self):
+        """Both reviews of #142: 0.2.0 left these unmeasured, and a narrower exception reach
+        bound them, one markdown shape at a time."""
         for text in ("# Git\n\nExcept on release branches:\n\n- Never force-push to main.\n",
                      "# Testing\n\nUnless the lead says otherwise:\n\n"
                      "- Run the tests before finishing.\n",
@@ -703,17 +703,24 @@ class BindingTests(Temp):
                      "# Git\n\nKeep it tidy. Hotfixes are fine:\n\n- Keep commits small.\n"
                      "- Rebase often.\n- Never force-push to main.\n",
                      "# Git\n\nExcept on release branches:\n\nKeep commits small. Rebase "
-                     "often. Never force-push to main.\n"):
+                     "often. Never force-push to main.\n",
+                     "# Git\n\nExcept on release branches:\n\n- Keep commits small.\n"
+                     "- Rebase often.\n\nKeep it tidy.\n\nNever force-push to main.\n",
+                     "# Git\n\nExcept on release branches:\n\n- Keep commits small.\n\n"
+                     "  Squash first.\n- Never force-push to main.\n",
+                     "# Git\n\nThese apply except on release branches.\n\n"
+                     "- Keep commits small.\n- Never force-push to main.\n",
+                     "# Pushing\n\nNever force-push to main, incl. tags, e.g. v1.2. "
+                     "Release tags are fine.\n",
+                     "# Git\n\nUse uv, not pip. Never force-push to main. Keep commits "
+                     "small. Rebase often. Tags are fine.\n"):
             with self.subTest(text=text):
                 [entry] = self.rules(text).rules
                 self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
-        for text in ("# Git\n\nKeep it tidy:\n\n- Keep commits small.\n"
-                     "- Never force-push to main.\n",
-                     "# Git\n\nExcept on release branches:\n\n- Keep commits small.\n"
-                     "- Rebase often.\n\nKeep it tidy.\n\nNever force-push to main.\n"):
-            with self.subTest(text=text):
-                [entry] = self.rules(text).rules
-                self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
+                self.assertIn("exception or condition", entry.reason)
+        [entry] = self.rules("# Git\n\nKeep it tidy:\n\n- Keep commits small.\n"
+                             "- Never force-push to main.\n").rules
+        self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
 
     def test_a_sentence_never_ends_inside_parentheses_or_after_an_abbreviation(self):
         self.assertEqual(_sentences("", ["Never force-push to main (e.g. with --force). "
@@ -756,22 +763,21 @@ class BindingTests(Temp):
             source = handle.read()
         self.assertEqual([n for n, byte in enumerate(source) if byte > 127], [])
 
-    def test_unless_in_one_sentence_unbinds_that_sentence_and_the_ones_beside_it(self):
+    def test_unless_in_one_sentence_unbinds_every_rule_of_the_section(self):
         [entry] = self.rules("# Git\n\nUse uv, not pip. Keep commits small. Never force-push "
                              "to main unless the release lead asks.\n").rules
-        self.assertEqual((entry.state, entry.detectors),
-                         ("measured", ["package-manager/pip-install"]))
+        self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
         [entry] = self.rules("# Git\n\nUse uv, not pip. Never force-push to main unless "
                              "the release lead asks.\n").rules
         self.assertEqual((entry.state, entry.detectors, entry.source),
                          ("unmeasured", [], None))
         self.assertIn("(unless)", entry.reason)
 
-    def test_an_exception_two_sentences_on_leaves_the_rule_bound(self):
+    def test_an_exception_any_distance_away_unbinds_the_rule(self):
         [entry] = self.rules("# Pushing\n\nNever force-push to main. Keep commits small. "
-                             "A tag is fine.\n").rules
-        self.assertEqual((entry.state, entry.detectors),
-                         ("measured", ["git-safety/force-push-default"]))
+                             "Rebase often.\n\n- A tag is fine.\n").rules
+        self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+        self.assertIn("(fine)", entry.reason)
 
     def test_an_exception_in_the_heading_unbinds_every_sentence_under_it(self):
         [entry] = self.rules("# Allowed shortcuts\n\nKeep commits small. Never force-push "
@@ -809,8 +815,8 @@ class BindingTests(Temp):
     def test_each_near_miss_the_spike_named_binds_as_decided(self):
         """RP-SP004's named zoo sections, with what the per-sentence binder binds for each:
         the negated markers and multi-rule sections it gains, the next-sentence exceptions it
-        leaves unbound, the in-sentence conditions it misses, and the two true binds a
-        permission in the next sentence costs it (`x04`, `x05`)."""
+        leaves unbound, the in-sentence conditions it misses, and the true binds a permission
+        elsewhere in the section costs it (`x04` wholly, `x05`)."""
         force, verify = "git-safety/force-push-default", "verification/no-verify"
         tests, pip = "testing/test-after-change", "package-manager/pip-install"
         commits, secrets = "commits/non-conventional-subject", "secrets/secret-file-add"
@@ -824,7 +830,7 @@ class BindingTests(Temp):
             ("x02", "Python work", "Use uv, not pip.\nRun the tests before finishing.",
              [tests, pip]),
             ("x04", "Commits", "Use Conventional Commits.\nNever commit secrets.\n"
-                               "Squash merges are fine.", [commits]),
+                               "Squash merges are fine.", []),
             ("x05", "Pushing", "Never force-push to main.\n"
                                "Force-pushing your own feature branch is okay.", []),
             ("t11", "Testing", "Run the tests before finishing.\n"

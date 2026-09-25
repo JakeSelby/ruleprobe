@@ -73,10 +73,10 @@ ZOO_FILE = "rules-zoo.json"
 #: places. `corpus` fails under it on that zoo alone, known by `SHIPPED_ZOO_SHA256`. It is a
 #: ratchet, not a bar: a binder or catalog change that raises recall raises it in the same
 #: change, and the suite says when it is stale.
-BINDING_RECALL_FLOOR = 0.68
+BINDING_RECALL_FLOOR = 0.65
 #: The sha256 of the shipped zoo's bytes. A zoo with other bytes - a corpus of your own, or
 #: the shipped one edited - gets no recall floor; a change to the shipped zoo updates this.
-SHIPPED_ZOO_SHA256 = "fb8cbf74855bdab6f9ded788ce3757a9f895e5efa12329b9aea95b860f2fb3f5"
+SHIPPED_ZOO_SHA256 = "88da7e35438babf01e17fcd94ffae694ec684d77eb80fca23de8e20b69226ffc"
 _ZOO_KEYS = ("about", "items")
 _ITEM_KEYS = ("id", "kind", "heading", "heading_label", "lines")
 
@@ -576,9 +576,10 @@ def _zoo_section(item):
 
 def _attributed(item, heading, paragraphs):
     """`[set of detector ids]`, one per labelled unit of `item` - its heading, then each
-    line - holding what the binder bound through a sentence starting there. A sentence is
-    placed by the paragraph and offset `rules._match` gives it, against each line's own
-    normalized text found in turn in its paragraph's."""
+    line - holding what the binder bound through a sentence starting there. The binds are
+    the binder's own (`rules._binding`), each detector the entry lists placed by the
+    paragraph and offset of the sentence that bound it, against each line's own normalized
+    text found in turn in its paragraph's."""
     lines = [text for text, _label in item["lines"]]
     starts, cursor = {}, 0
     for index, paragraph in enumerate(paragraphs):
@@ -594,8 +595,10 @@ def _attributed(item, heading, paragraphs):
             starts.setdefault(index, []).append((found, cursor))
             offset, cursor = found + len(own), cursor + 1
     out = [set() for _unit in range(len(lines) + 1)]
-    for sentence in _rules._match(heading, paragraphs):
-        if len(sentence.detectors) != 1 or sentence.marker:
+    entry, binds = _rules._binding(item["id"], ZOO_FILE, heading, paragraphs)
+    listed = set(entry.detectors) if entry.state == "measured" else set()
+    for sentence, detector_id in binds:
+        if detector_id not in listed:
             continue
         unit = 0
         if sentence.paragraph >= 0:
@@ -605,7 +608,11 @@ def _attributed(item, heading, paragraphs):
                 raise CorpusError("zoo item %s: a bound sentence is on no line of it"
                                   % item["id"])
             unit = placed[-1] + 1
-        out[unit].add(sentence.detectors[0].id)
+        out[unit].add(detector_id)
+    unplaced = listed - set().union(*out)
+    if unplaced:
+        raise CorpusError("zoo item %s: the binder listed %s with no sentence to place"
+                          % (item["id"], ", ".join(sorted(unplaced))))
     return out
 
 

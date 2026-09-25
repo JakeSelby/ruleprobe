@@ -400,7 +400,7 @@ class SentenceBindingTests(Temp):
 
     def test_a_heading_less_file_binds_per_sentence_too(self):
         self.write("rules/git.md", "Use uv, not pip. Keep it short.\n\n"
-                                   "Never force-push to main. Tags are fine.\n")
+                                   "Never force-push to main when others share it.\n")
         [entry] = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False).rules
         self.assertEqual((entry.rule, entry.state, entry.detectors),
                          ("git", "measured", ["package-manager/pip-install"]))

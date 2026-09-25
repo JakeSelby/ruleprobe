@@ -1,5 +1,5 @@
 {
-  "about": "A synthetic rules zoo for RP-SP004: invented rule sections, each labelled line with the catalog detector id it should bind, or null. A section's body is its lines joined by newlines, so consecutive plain lines form one paragraph and a line starting '- ' is a list item. `heading_label` labels the heading as a sentence of its own when it states a rule. Ids outside today's catalog are the four default detectors with no catalog pattern yet (story 8.4). No line is taken from a real rule file or transcript. RP-SP004 scored the first 65 items; f11 and t13, exceptions in a lead-in ending with a colon, were added at story 8.3's review.",
+  "about": "A synthetic rules zoo for RP-SP004: invented rule sections, each labelled line with the catalog detector id it should bind, or null. A section's body is its lines joined by newlines, so consecutive plain lines form one paragraph and a line starting '- ' is a list item. `heading_label` labels the heading as a sentence of its own when it states a rule. Ids outside today's catalog are the four default detectors with no catalog pattern yet (story 8.4). No line is taken from a real rule file or transcript. RP-SP004 scored the first 65 items; f11 to f15 and t13, exceptions a lead-in, a list item of two paragraphs or an abbreviation carried away from the rule, were added at story 8.3's two reviews.",
   "items": [
     {"id": "t01", "kind": "positive", "heading": "Testing", "lines": [["Run the tests before finishing.", "testing/test-after-change"]]},
     {"id": "t02", "kind": "positive", "heading": "Testing", "lines": [["Always run the full test suite before you finish a task.", "testing/test-after-change"]]},
@@ -75,6 +75,10 @@
     {"id": "x05", "kind": "multi-rule", "heading": "Pushing", "lines": [["Never force-push to main.", "git-safety/force-push-default"], ["Force-pushing your own feature branch is okay.", null]]},
     {"id": "x06", "kind": "multi-rule", "heading": "Reading files", "lines": [["Never cat a whole file.", "transcript-hygiene/whole-file-cat"], ["Use `head`, `grep -n` or a `sed` range.", null], ["Filter every `find` with a name or a depth.", "transcript-hygiene/unfiltered-find"]]},
     {"id": "f11", "kind": "lead-in-exception", "heading": "Git", "lines": [["Except on release branches:", null], ["- Never force-push to main.", null]]},
-    {"id": "t13", "kind": "lead-in-exception", "heading": "Testing", "lines": [["Unless the lead says otherwise:", null], ["- Run the tests before finishing.", null]]}
+    {"id": "t13", "kind": "lead-in-exception", "heading": "Testing", "lines": [["Unless the lead says otherwise:", null], ["- Run the tests before finishing.", null]]},
+    {"id": "f12", "kind": "lead-in-exception", "heading": "Git", "lines": [["Except on release branches:", null], ["", null], ["- Keep commits small.", null], ["", null], ["  Squash first.", null], ["- Never force-push to main.", null]]},
+    {"id": "f13", "kind": "lead-in-exception", "heading": "Git", "lines": [["These apply except on release branches.", null], ["", null], ["- Keep commits small.", null], ["- Never force-push to main.", null]]},
+    {"id": "f14", "kind": "abbreviation", "heading": "Pushing", "lines": [["Never force-push to main, incl. tags, e.g. v1.2. Release tags are fine.", null]]},
+    {"id": "f15", "kind": "lead-in-exception", "heading": "Git", "lines": [["Except on release branches:", null], ["- Keep commits small.", null], ["- Rebase often.", null], ["- Never force-push to main.", null]]}
   ]
 }

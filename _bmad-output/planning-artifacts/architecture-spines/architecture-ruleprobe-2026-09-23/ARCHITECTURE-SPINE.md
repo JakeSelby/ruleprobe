@@ -521,15 +521,14 @@ native (#55)
     fences. [ASSUMPTION: sentence-final punctuation and list items end a sentence]
   - A sentence binds an entry only when exactly one entry's pattern matches it; none or several leaves
     it unbound.
-  - An exception or permission word unbinds its own sentence and the sentences either side of it,
-    since an exception stated next ("Never force-push to main. Release managers are the exception.")
-    or just before narrows the rule; in the heading it unbinds the whole section, and in a lead-in
-    ending with `:` the list or paragraph it introduces. A condition or contrast word unbinds only
-    its own sentence. A sentence never ends inside parentheses or after e.g., i.e., etc., vs. or cf.
+  - An exception or permission word anywhere in the section, heading included, unbinds every rule
+    in it, as the 0.2.0 binder did (variant S). A condition or contrast word unbinds only its own
+    sentence. A sentence does not end inside parentheses or after e.g., i.e., etc., vs. or cf.
     Negated markers such as "no exception" are a closed list in the catalog data
     (`NEGATED_EXCEPTIONS`) and never unbind where the clause ends after them.
   - An unsure sentence stays unbound (AD-4). The binder ships only at zero false binds on the zoo,
-    scored per labelled line, each bind on the line its sentence starts on, with its recall held by a ratchet at the recall measured (FR-37); the
+    scored per labelled line from the binder's own per-sentence output, each bind on the line its
+    sentence starts on, with its recall held by a ratchet at the recall measured (FR-37); the
     0.70 recall bar belongs to Epic 8 as a whole (RP-SP004). In 0.4, precision of at least 0.95 on at
     least 200 sections (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/`
     beside the detector corpus (AD-6).
@@ -538,6 +537,10 @@ native (#55)
     maintainer; a narrower refer-back scope waits for held-out near-misses. Amended again at #142's
     review: the scope also reaches the sentence before and a colon lead-in's list, sentences do not
     split in parentheses or after common abbreviations, and a negated marker must end its clause.
+    Amended at #142's second review to variant S: every narrower exception reach was carried past by
+    another markdown shape (a list item of two paragraphs, a lead-in ending in a period, an unlisted
+    abbreviation), so an exception unbinds the whole section again; the per-sentence multi-bind
+    stays, and the next-sentence, lead-in and refer-back scopes are retired.
   - Discovery (FR-38) lives in `rules.py`, reads and never writes, and the coverage block says the rule
     text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
     it.

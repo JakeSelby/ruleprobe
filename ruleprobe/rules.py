@@ -28,14 +28,13 @@ binds nothing, and a rule none of whose sentences binds is unmeasured and listed
 is visible rather than assumed; under-counting is the point, since a loose binding would
 lift the measured share on rules nobody would recognise. For the same reason a pattern
 never spans a clause break (see `ruleprobe.detectors.catalog`), and a word that narrows a
-rule unbinds the sentence it qualifies. An exception or a permission - except (excepted,
-exception), exempt, unless, other than, apart from, excluding, allowed, fine, okay, ok -
-unbinds the sentence it is in and the sentences either side of it, in the heading the whole
-rule, and in a lead-in ending with `:` the list or paragraph it introduces, so "Never
-force-push to main. Hotfixes excepted." is no force-push rule, and nor is "Except on release
-branches:" over "- Never force-push to main.". A condition or a contrast - if, when, but,
-however, without - unbinds only its own sentence. The catalog's negated markers ("no
-exceptions", "admit no exception") are neither where the clause ends after them. `only` is left out,
+rule unbinds it. An exception or a permission - except (excepted, exception), exempt, unless,
+other than, apart from, excluding, allowed, fine, okay, ok - anywhere in the rule, its heading
+included, unbinds every sentence of it, so "Never force-push to main. Hotfixes excepted." is no
+force-push rule, and nor is "Except on release branches:" over "- Never force-push to main.".
+A condition or a contrast - if, when, but, however, without - unbinds only its own sentence.
+The catalog's negated markers ("no exceptions", "admit no exception") are neither where the
+clause ends after them. `only` is left out,
 since it intensifies as often as it narrows ("use only uv"), and so are `instead` and
 `rather than`, which the pip shape itself uses. A rule bound in its front matter is `own`,
 and so is a catalog-bound one whose detector id a detector file of the user's replaced.
@@ -531,11 +530,12 @@ def _file_prose(body):
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 #: The abbreviations a sentence never ends after, however it is punctuated.
 _ABBREVIATION = re.compile(r"(?:^|[\s(\[])(?:e\.g|i\.e|etc|vs|cf)\.$", re.IGNORECASE)
-#: An exception or a permission. It unbinds the sentence it is in and the sentences either
-#: side of it: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for
-#: tools" are not the rules the catalog patterns read, and nor is "Run the tests before
-#: finishing. Docs-only changes are exempt." In a heading it unbinds the whole section under
-#: it, and in a paragraph or list item that ends with `:` the whole list it introduces.
+#: An exception or a permission. Anywhere in a rule, its heading included, it unbinds every
+#: sentence of the rule: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is
+#: fine for tools" are not the rules the catalog patterns read, and nor is "Run the tests
+#: before finishing. Docs-only changes are exempt." A narrower reach was tried and each
+#: markdown shape - a lead-in, a list item of two paragraphs, an abbreviation - carried an
+#: exception past it.
 _EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ing|s|ions?)?|unless|other\s+than|"
                         r"apart\s+from|excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
 #: A condition or a contrast. It unbinds only the sentence it is in ("Never force-push to
@@ -574,11 +574,10 @@ def _normalize(text):
 def _split(text):
     """`[(start, sentence)]` for normalized `text`. A sentence ends at `.`, `!` or `?`
     followed by a space, but never inside parentheses or after e.g., i.e., etc., vs. or cf.,
-    since a split there can carry an exception out of the rule's reach ("Never force-push to
-    main (e.g. with --force). Tags are fine."). An unmatched `(` keeps the rest of the text
-    one sentence. Another abbreviation still splits; with an exception reaching the
-    sentences either side of it, it takes two such splits to leave a rule bound that should
-    not be."""
+    so an aside stays in the sentence it qualifies; an unmatched `(` keeps the rest of the
+    text one sentence. An exception reaches the whole rule, so a split never moves one out
+    of reach; another abbreviation still splits, which can move a condition word out of the
+    rule's sentence and leave it bound - a known over-count."""
     out, start, last, depth = [], 0, 0, 0
     for found in _SENTENCE_END.finditer(text):
         chunk = text[last:found.start()]
@@ -609,59 +608,34 @@ def _sentences(heading, paragraphs):
 
 def _match(heading, paragraphs):
     """`[_Sentence]`, one per sentence of the rule, heading first. A matching sentence's
-    unbinding word is the first found of: an exception or permission (`_EXCEPTION`) or a
-    condition (`_CONDITION`) in the sentence itself; an exception or permission in the
-    sentence before it or after it, in a paragraph or list item ending with `:` that
-    introduces its own paragraph or list, or in the heading. A negated marker such as
-    "no exceptions" at the end of a clause is never one. Binding reads text and nothing
-    else, against the shipped fold map: a consumer's own renames are applied when
-    `Bundle.registry` is built."""
+    unbinding word is an exception or permission (`_EXCEPTION`) anywhere in the rule, else a
+    condition (`_CONDITION`) in the sentence itself. A negated marker such as "no exceptions"
+    at the end of a clause is never one. Binding reads text and nothing else, against the
+    shipped fold map: a consumer's own renames are applied when `Bundle.registry` is built."""
     pieces = _pieces(heading, paragraphs)
     plain = [_NEGATED.sub(" ", part) for _index, _start, part in pieces]
-    granted = [_EXCEPTION.search(text) for text in plain]
-    headed = next((found for (index, _s, _p), found in zip(pieces, granted)
-                   if index < 0 and found), None)
-    reach = _introduced(paragraphs, pieces, granted)
+    granted = next((found for found in map(_EXCEPTION.search, plain) if found), None)
     retired = fold_map()
     live = [(pattern, detector) for pattern, detector in _CATALOG
             if detector.id not in retired]
     out = []
     for n, (index, start, part) in enumerate(pieces):
         matched = [detector for pattern, detector in live if pattern.match(part)]
-        found = None
-        if matched:
-            found = (granted[n] or _CONDITION.search(plain[n])
-                     or (n and granted[n - 1]) or (n + 1 < len(pieces) and granted[n + 1])
-                     or reach.get(index) or headed)
+        found = (granted or _CONDITION.search(plain[n])) if matched else None
         out.append(_Sentence(index, start, part, matched,
                              found.group(0).lower() if found else None))
     return out
 
 
-def _introduced(paragraphs, pieces, granted):
-    """`{paragraph index: the exception or permission that reaches it}` from each paragraph
-    or list item ending with `:` that grants one: it introduces the list items straight
-    after it, or, when none follows, the next paragraph."""
-    reach = {}
-    for index, text in enumerate(paragraphs):
-        if not _normalize(text).endswith(":"):
-            continue
-        found = next((g for (i, _s, _p), g in zip(pieces, granted) if i == index and g), None)
-        if not found:
-            continue
-        covered = index + 1
-        while covered < len(paragraphs) and _LIST.match(paragraphs[covered]):
-            reach.setdefault(covered, found)
-            covered += 1
-        if covered == index + 1 and covered < len(paragraphs):
-            reach.setdefault(covered, found)
-    return reach
+def _binds(matches):
+    """`[(sentence, detector)]` for each of `_match`'s sentences that binds: it matches
+    exactly one entry and no word unbinds it."""
+    return [(s, s.detectors[0]) for s in matches if len(s.detectors) == 1 and not s.marker]
 
 
 def _bound(matches):
-    """The detectors `_match`'s sentences bind, in catalog order: each sentence that matches
-    exactly one entry and has no word unbinding it binds that entry."""
-    ids = set(s.detectors[0].id for s in matches if len(s.detectors) == 1 and not s.marker)
+    """The detectors `_match`'s sentences bind (`_binds`), in catalog order, once each."""
+    ids = set(detector.id for _sentence, detector in _binds(matches))
     return [detector for _pattern, detector in _CATALOG if detector.id in ids]
 
 
@@ -671,24 +645,32 @@ def _catalog_matches(heading, paragraphs):
 
 
 def _bind(rule, path, heading, paragraphs, reason=""):
-    """A rule's entry: measured and catalog-bound to every detector a sentence binds, in
-    catalog order, when at least one does. Else unmeasured, naming the word that unbound a
-    matching sentence, or else the entries a sentence matched together, or else `reason`."""
+    """A rule's entry (`_binding`)."""
+    return _binding(rule, path, heading, paragraphs, reason)[0]
+
+
+def _binding(rule, path, heading, paragraphs, reason=""):
+    """`(entry, [(sentence, detector id)])`: the rule's entry, and the sentences that bound
+    the detectors it lists, which `ruleprobe corpus` scores line by line. The entry is
+    measured and catalog-bound to every detector a sentence binds, in catalog order, when at
+    least one does. Else it is unmeasured, naming the word that unbound a matching sentence,
+    or else the entries a sentence matched together, or else `reason`, and lists none."""
     matches = _match(heading, paragraphs)
     bound = _bound(matches)
     if bound:
-        return RuleEntry(rule, path, "measured", "", [d.id for d in bound], "catalog")
+        return (RuleEntry(rule, path, "measured", "", [d.id for d in bound], "catalog"),
+                [(sentence, detector.id) for sentence, detector in _binds(matches)])
     for sentence in matches:
         if sentence.detectors and sentence.marker:
             return RuleEntry(rule, path, "unmeasured",
                              "a catalog shape with an exception or condition (%s)"
-                             % sentence.marker, [])
+                             % sentence.marker, []), []
     for sentence in matches:
         if len(sentence.detectors) > 1:
             return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
                              % (len(sentence.detectors),
-                                ", ".join(d.id for d in sentence.detectors)), [])
-    return RuleEntry(rule, path, "unmeasured", reason, [])
+                                ", ".join(d.id for d in sentence.detectors)), []), []
+    return RuleEntry(rule, path, "unmeasured", reason, []), []
 
 
 def _uncomment(line, open_comment):

@@ -635,6 +635,27 @@ class BindingTests(Temp):
         self.assertEqual(binding.false_binds, [("l1", "git-safety/force-push-default")])
         self.assertTrue(binding_failures(binding))
 
+    def test_the_gate_scores_the_binder_s_own_decision(self):
+        """A change in what `rules._bind` decides moves the tally: the gate re-derives
+        nothing."""
+        module = sys.modules["ruleprobe.rules"]
+        real = module._binding
+
+        def unmeasured(*args, **kwargs):
+            entry, binds = real(*args, **kwargs)
+            return entry._replace(state="unmeasured", detectors=[], source=None), binds
+
+        with mock.patch.object(module, "_binding", unmeasured):
+            tests = score_binding(zoo=[BOUND]).entries["testing/test-after-change"]
+        self.assertEqual((tests.tp, tests.fn), (0, 1))
+        with mock.patch.object(module, "_binds", lambda matches: []):
+            tests = score_binding(zoo=[BOUND]).entries["testing/test-after-change"]
+        self.assertEqual((tests.tp, tests.fn), (0, 1))
+        with mock.patch.object(module, "_binding",
+                               lambda *args, **kwargs: (real(*args, **kwargs)[0], [])):
+            with self.assertRaises(CorpusError):
+                score_binding(zoo=[BOUND])
+
     def test_a_bind_is_attributed_to_the_line_its_sentence_starts_on(self):
         joined = {"id": "l2", "heading": "Pushing",
                   "lines": [["Keep commits small.", None],
@@ -788,7 +809,7 @@ class ShippedBindingTests(unittest.TestCase):
 
     def test_the_shipped_zoo_is_package_data_in_the_shipped_corpus(self):
         self.assertTrue(os.path.isfile(os.path.join(corpus_dir(), ZOO_FILE)))
-        self.assertEqual((self.binding.sections, self.binding.labels), (67, 88))
+        self.assertEqual((self.binding.sections, self.binding.labels), (71, 103))
 
     def test_the_shipped_binder_makes_no_false_bind_on_the_zoo(self):
         self.assertEqual(self.binding.false_binds, [])
@@ -811,7 +832,7 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertIn("detectors", data)
         binding = data["binding"]
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
-                          binding["total"]["fn"]), (28, 0, 13))
+                          binding["total"]["fn"]), (27, 0, 14))
         self.assertEqual(binding["total"]["precision"], 1.0)
         self.assertEqual(binding["total"]["source"], "zoo")
         self.assertEqual(set(row["source"] for row in binding["entries"].values()),
