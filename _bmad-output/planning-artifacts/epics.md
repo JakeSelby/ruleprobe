@@ -13,7 +13,7 @@ parent: RP-E001 (#10)
 milestone: v0.2.0
 status: draft
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # ruleprobe - Epic Breakdown
@@ -28,6 +28,8 @@ No UX document exists; the CLI output shapes are in the PRD's FRs.
 Scope is what PRD §8 puts in 0.2.0 (planned, v0.2.0), plus Epic 7 for FR-34, which the maintainer withdrew on
 2026-09-23 and moved to #21; it is kept as the record. The planning corpus epic RP-E001 (#10) is not part of 0.2. Every item here is
 proposed until it is filed with `scripts/bmad_issue_sync.py new`. Inferences carry `[ASSUMPTION: ...]`.
+
+Amended 2026-09-25: Epics 8 to 15 for 0.3.0 and 0.4.0 follow the 0.2 record, under [0.3.0 and 0.4.0](#030-and-040).
 
 ## Requirements Inventory
 
@@ -878,3 +880,649 @@ A judge is tracked as a future capability under RP-E002
 proposed for 0.3, and later a separate, provider-neutral judge library that depends on ruleprobe and
 never the reverse. PRD FR-35 and the PRD's §8 "Beyond 0.2" note describe it. It has no stories here and
 is not scheduled.
+
+# 0.3.0 and 0.4.0
+
+Added 2026-09-25 under #127 (RP-T009), from the roadmap the maintainer approved that day. Epic 7 above is
+withdrawn but keeps its number and its issue (#28), so these epics start at 8. Every item is proposed.
+Epic issues are filed with `scripts/bmad_issue_sync.py new` (#128 to #135, RP-E010 to RP-E017); story issues are filed when each epic
+starts, and until then a story's title is its proposed issue title. Stories follow "How to read a story"
+above; AD ids are the ruleprobe spine's.
+
+## Requirements Inventory, 0.3 and 0.4
+
+### Functional Requirements
+
+- FR-35: Judge receipts: a versioned JSONL verdict format with provenance, a judge scored as one more
+  rater, judge-human agreement in `corpus`. Amended 2026-09-25 (proposed, v0.4.0, #21).
+- FR-36: Per-sentence binding, with exception and condition words scoped to their sentence, negated
+  markers recognised, and catalog patterns for the four unbound defaults. Proposed, v0.3.0.
+- FR-37: The binder scored like a detector on a synthetic zoo of about 60 rule sentences. Proposed,
+  v0.3.0.
+- FR-38: Rule discovery with no `--rules`, naming the nearest catalog entry and the blocking word, and
+  saying the rule text is today's. Proposed, v0.3.0.
+- FR-39: A version hash on every detector. Proposed, v0.3.0.
+- FR-40: `ruleprobe audit` samples hits and near-misses for judging. Proposed, v0.3.0.
+- FR-41: Content-free validity cards pooled into a shipped field figure, per source. Proposed, v0.3.0.
+- FR-42: Wilson and session-clustered bounds on every rate; notes read from bounds. Proposed, v0.3.0.
+- FR-43: Opt-in `snapshot DIR`, `report --rows`, and the `cleanupPeriodDays` warning. Proposed, v0.3.0.
+- FR-44: A deciding event for session-level and compliance hits (#112). Proposed, v0.3.0.
+- FR-45: Reader health counts. Proposed, v0.3.0.
+- FR-46: `ruleprobe compare` with Newcombe intervals, minimum detectable effect, controls and
+  confound warnings. Proposed, v0.4.0.
+- FR-47: A dark-rule slice as the judge's calibration set. Proposed, v0.4.0.
+- FR-48: `ruleprobe merge`. Proposed, v0.4.0.
+- FR-49: JSON Schemas for rows, cards, snapshots and verdicts. Proposed, v0.4.0.
+- FR-50: A mutation-tested corpus, at least 80% of mutants caught per detector. Proposed, v0.4.0.
+- FR-51: A binding corpus of at least 200 sections, precision at least 0.95. Proposed, v0.4.0.
+
+### NonFunctional Requirements
+
+- NFR-3: Deterministic output gains a two-hash-seed, reversed-order test and a seeded parse fuzz test.
+- NFR-5: `audit` and `snapshot` write, each only under a directory the user names.
+- NFR-10: The default-set field floor: point estimate at least 0.90, Wilson lower bound at least 0.80,
+  on at least 20 judged hits from at least 2 developers.
+- NFR-11: CI on ubuntu, macOS and Windows, on Python 3.9 and 3.x.
+
+### Additional Requirements
+
+- AD-15: cards and snapshot rows hold counts only, built from an allow-list.
+- AD-16: one detector hash function; no declared version means no hash, and `compare` refuses.
+- AD-17: one standard-library statistics module owns every interval.
+- AD-18: the sentence is the binding unit inside AD-12's section rule, under AD-4.
+
+### FR Coverage Map
+
+| FR | Stories |
+| --- | --- |
+| FR-35 | 15.1 |
+| FR-36 | 8.1, 8.3, 8.4 |
+| FR-37 | 8.1, 8.2 |
+| FR-38 | 8.5 |
+| FR-39 | 10.1 |
+| FR-40 | 10.2 |
+| FR-41 | 10.3, 10.4 |
+| FR-42 | 11.1 |
+| FR-43 | 11.2, 11.3 |
+| FR-44 | 11.4 (#112) |
+| FR-45 | 12.2 |
+| FR-46 | 14.1, 14.2, 14.3 |
+| FR-47 | 15.2 |
+| FR-48 | 15.3 |
+| FR-49 | 15.4 |
+| FR-50 | 15.5 |
+| FR-51 | 15.6 |
+| NFR-3 | 12.3, 12.4 |
+| NFR-10 | 9.5 |
+| NFR-11 | 12.1 |
+
+## Epic List, 0.3 and 0.4
+
+Milestone v0.3.0 holds Epics 8 to 13; v0.4.0 holds Epics 14 and 15. The field floor, rule discovery and
+history ship first, and five testers are recruited before `compare` is built. Housekeeping #121 and
+#124 lands before Epic 8 starts.
+
+### Epic 8: a first run with no configuration (#128, RP-E010)
+A stranger runs `ruleprobe report` with no flags and sees their own rules found, bound per sentence and
+measured inside a minute, with the binder scored like a detector.
+**FRs covered:** FR-36, FR-37, FR-38; AD-18, AD-12.
+
+### Epic 9: a field floor for the default detectors (#129, RP-E011)
+Every default detector has field evidence behind it or leaves the defaults. Existing items: #110, #111,
+#113 and #114.
+**FRs covered:** FR-8 (amended), NFR-10.
+
+### Epic 10: audit and validity cards (#130, RP-E012)
+Anyone can judge a sample of a detector's hits and near-misses locally and hand back a card that holds
+counts and no content; the cards become the shipped field figure.
+**FRs covered:** FR-39, FR-40, FR-41; AD-15, AD-16.
+
+### Epic 11: honest numbers and history (#131, RP-E013)
+Every rate carries a bound, and history outlives Claude Code's 30-day deletion. Existing item: #112.
+**FRs covered:** FR-42, FR-43, FR-44; AD-15, AD-17.
+
+### Epic 12: robustness on three operating systems (#132, RP-E014)
+The same transcripts give the same bytes on ubuntu, macOS and Windows, and the readers say what they set
+aside.
+**FRs covered:** FR-45, NFR-3, NFR-11.
+
+### Epic 13: the 0.3 beta and launch (#133, RP-E015)
+Five outside developers try a release candidate, 0.3.0 is tagged, agent-harness pins it (#27, alongside
+this epic), and the launch goes out with every public text approved first.
+**FRs covered:** SM-1, SM-2 (evidence); FR-31 (the Breaking heading).
+
+### Epic 14: compare, before and after (#134, RP-E016)
+A developer asks whether a rule change changed behaviour and gets detected, inconclusive or confounded.
+**FRs covered:** FR-46; AD-17, AD-16.
+
+### Epic 15: team roll-up, schemas and corpus proof (#135, RP-E017)
+Reports pool across a team without session keys, the formats are published, and the corpus is proven
+to catch a broken detector. #21 covers the judge receipts and the dark-rule slice; #115 records the
+judge's package boundary.
+**FRs covered:** FR-35, FR-47, FR-48, FR-49, FR-50, FR-51.
+
+## Epic 8: a first run with no configuration
+
+**Issue:** [#128](https://github.com/JakeSelby/ruleprobe/issues/128) (RP-E010).
+
+A developer with an unedited rule file sees rules measured with no flags. Binding is per sentence and
+under-counts (AD-18). Runs after housekeeping #121 and #124.
+
+### Story 8.1: `spike(rules): score the section binder and a per-sentence binder on a rules zoo`
+
+**Kind:** spike · **Binds:** FR-36, FR-37; AD-18, AD-4 · **Depends on:** none
+
+As the maintainer,
+I want both binders scored on labelled rule sentences before either ships,
+So that per-sentence binding is chosen on a number, not a hunch.
+
+**Acceptance Criteria:**
+
+1. **Given** a synthetic zoo of about 60 labelled rule sentences in common phrasings, with near-misses for conditions, exceptions and contrasts, **When** both binders run on it, **Then** the spike records each one's recall and false binds.
+2. **Given** the exit criterion, **When** the result is recorded, **Then** it says whether per-sentence binding reaches recall of at least 0.70 with zero false binds, and what blocks it if not.
+3. **Given** the zoo, **When** it is written, **Then** it holds no real transcript or rule-file text.
+
+**Files:** spike story file; zoo draft under `tests/fixtures/`. **Tests:** none; 8.2 makes the zoo a gate.
+
+### Story 8.2: `feat(corpus): score rule binding in ruleprobe corpus`
+
+**Kind:** story · **Binds:** FR-37, NFR-6; AD-6, AD-18 · **Depends on:** 8.1
+
+As a contributor changing the binder,
+I want `corpus` to score binding like a detector,
+So that a binding regression fails CI.
+
+**Acceptance Criteria:**
+
+1. **Given** the zoo shipped under `ruleprobe/corpus/`, **When** `ruleprobe corpus` runs, **Then** it prints a binder section with binding precision and recall.
+2. **Given** a false bind in the zoo, **When** `corpus --floor 0.9` runs, **Then** it exits non-zero.
+3. **Given** `--json`, **When** it runs, **Then** the binder figures appear beside the detector figures.
+
+**Files:** `ruleprobe/validity.py`, `ruleprobe/corpus/`. **Tests:** `tests/test_validity.py`.
+
+### Story 8.3: `feat(rules): bind rules per sentence`
+
+**Kind:** story · **Binds:** FR-36, NFR-4; AD-18, AD-12 · **Depends on:** 8.2
+
+As a developer with dense rule files,
+I want each sentence to bind its own detector,
+So that a section mixing several rules is measured rather than dropped.
+
+**Acceptance Criteria:**
+
+1. **Given** a section whose two sentences each match a different catalog entry, **When** it binds, **Then** it binds both, and the rule id is still AD-12's section id.
+2. **Given** a sentence matching no entry or several, **When** it binds, **Then** that sentence binds nothing.
+3. **Given** "unless" in one sentence, **When** the section binds, **Then** only that sentence is unbound.
+4. **Given** "admit no exception" or "without exception", **When** the sentence binds, **Then** the marker does not unbind it.
+5. **Given** the zoo, **When** `corpus` runs, **Then** binding recall is at least 0.70 with zero false binds.
+
+**Files:** `ruleprobe/rules.py`, `ruleprobe/detectors/catalog.py`. **Tests:** `tests/test_rules.py`, the zoo.
+
+### Story 8.4: `feat(detectors): catalog patterns for the four unbound default detectors`
+
+**Kind:** story · **Binds:** FR-36, FR-16; AD-12, AD-6 · **Depends on:** 8.3
+
+As a developer whose rules mention compaction, model switching, secrets or `find`,
+I want those rules bound to the shipped detectors,
+So that the defaults measure my own rules.
+
+**Acceptance Criteria:**
+
+1. **Given** a rule sentence in the shape of each of `compact`, `model-switch`, `secret-in-write` and `unfiltered-find`, **When** it binds, **Then** it binds that detector, catalog-bound.
+2. **Given** a near-miss sentence for each, **When** it binds, **Then** it stays unbound.
+3. **Given** `secret-in-write` outside the defaults (Epic 9), **When** its rule binds, **Then** the coverage block says which detector it bound and that the detector is not a default.
+
+**Files:** `ruleprobe/detectors/catalog.py`, the zoo. **Tests:** `tests/test_rules.py`.
+
+### Story 8.5: `feat(rules): find the rule files with no --rules`
+
+**Kind:** story · **Binds:** FR-38, NFR-5, NFR-9; AD-18, AD-8 · **Depends on:** 8.3
+
+As a first-time user,
+I want `ruleprobe report` to find my rule files itself,
+So that my first run needs no flags.
+
+**Acceptance Criteria:**
+
+1. **Given** no `--rules`, **When** `report` runs, **Then** it reads `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md` and the project rule files at each session's recorded working directory.
+2. **Given** an unmeasured section, **When** the coverage block prints, **Then** it names the nearest catalog entry and the word that blocked the bind.
+3. **Given** any discovered run, **When** the coverage block prints, **Then** it says the rule text is today's, not the text in force when an older session ran.
+4. **Given** a fixture home with one bindable rule, **When** `report` runs with no flags, **Then** that rule is measured inside 60 seconds.
+5. **Given** a discovered run, **When** it finishes, **Then** no file was written.
+
+**Files:** `ruleprobe/rules.py`, `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_rules.py`, `tests/test_cli.py`.
+
+## Epic 9: a field floor for the default detectors
+
+**Issue:** [#129](https://github.com/JakeSelby/ruleprobe/issues/129) (RP-E011).
+
+The default set is the detectors that clear NFR-10. Four existing items fix what the 0.2.0 field
+reading found; 9.5 sets the gate once Epic 10's field figure and Epic 11's bounds exist.
+
+### Story 9.1: #114 `decision(readers): whether a cancelled or errored tool call counts as a tool use`
+
+**Kind:** decision (existing, RP-D012) · **Binds:** FR-3; AD-2, AD-4 · **Depends on:** none
+
+Its story file holds the design. It is listed here so the epic's scope is whole.
+
+### Story 9.2: #110 `fix(detectors): secret-in-write stops counting text about secrets`
+
+**Kind:** bug (existing, RP-B009) · **Binds:** FR-8, NFR-10; AD-4 · **Depends on:** 9.1
+
+Redesigns `secret-in-write` to count an action that writes a secret-shaped value, not text that mentions
+secrets: the action-versus-mention principle. Until it clears the floor, `secret-in-write` is out of the
+defaults.
+
+### Story 9.3: #111 `fix(detectors): whole-file-cat skips a cat inside a redirected group`
+
+**Kind:** bug (existing, RP-B010) · **Binds:** FR-8; AD-5, AD-4 · **Depends on:** none
+
+### Story 9.4: #113 `fix(readers): --runtime gemini and auto read the same Gemini files under a root`
+
+**Kind:** bug (existing, RP-B012) · **Binds:** FR-32; AD-10 · **Depends on:** none
+
+### Story 9.5: `feat(validity): hold the default set to the field floor`
+
+**Kind:** story · **Binds:** NFR-10, FR-8, FR-31; AD-15, AD-17 · **Depends on:** 9.1 to 9.4, 10.3, 11.1
+
+As a developer trusting the defaults,
+I want every default detector to carry field evidence,
+So that a default number is never a synthetic 1.00 alone.
+
+**Acceptance Criteria:**
+
+1. **Given** the shipped `field.json`, **When** the suite runs, **Then** a test fails for any default detector whose field precision is under 0.90, whose Wilson lower bound is under 0.80, or that has fewer than 20 judged hits from 2 developers.
+2. **Given** a detector under the floor, **When** the release is prepared, **Then** it leaves the defaults and `CHANGELOG.md` names it under a Breaking heading.
+3. **Given** the README's detector section, **When** it is read, **Then** it states the floor and each default's field figure.
+4. **Given** `secret-in-write` before #110 clears the floor, **When** the defaults load, **Then** it is not among them.
+
+**Files:** `ruleprobe/detectors/`, `README.md`, `CHANGELOG.md`. **Tests:** a new floor test reading `field.json`.
+
+## Epic 10: audit and validity cards
+
+**Issue:** [#130](https://github.com/JakeSelby/ruleprobe/issues/130) (RP-E012).
+
+Evidence capture that never copies content (AD-15), keyed to a detector's version (AD-16).
+
+### Story 10.1: `feat(registry): a version hash on every detector`
+
+**Kind:** story · **Binds:** FR-39; AD-16 · **Depends on:** none
+
+As someone pooling figures,
+I want each figure tied to the detector version that produced it,
+So that a changed detector never inherits an old figure.
+
+**Acceptance Criteria:**
+
+1. **Given** the same detector definition, **When** it is hashed on each CI platform and Python version, **Then** the hash is the same.
+2. **Given** a change to a detector's matching, **When** it is hashed, **Then** the hash changes; a change only to `examples:` leaves it.
+3. **Given** a Python detector that declares no version, **When** it is hashed, **Then** it has no hash.
+4. **Given** `ruleprobe detectors`, **When** it runs, **Then** each detector's hash is printed.
+
+**Files:** `ruleprobe/registry.py`, `ruleprobe/declarative.py`. **Tests:** `tests/test_registry.py`.
+
+### Story 10.2: `feat(audit): sample a detector's hits and near-misses for judging`
+
+**Kind:** story · **Binds:** FR-40, NFR-5; AD-13, AD-15, AD-8 · **Depends on:** 10.1
+
+As a developer checking a detector,
+I want a seeded sample of its hits and near-misses to judge,
+So that I can say how often it is right on my own transcripts.
+
+**Acceptance Criteria:**
+
+1. **Given** `ruleprobe audit --detector <id> --sample N --seed S`, **When** it runs twice on the same transcripts, **Then** it draws the same sample.
+2. **Given** an event that failed exactly one clause of the detector, **When** sampling runs, **Then** it can be drawn as a near-miss.
+3. **Given** an item with a known secret shape, **When** it is shown, **Then** the shape never appears.
+4. **Given** a verdict of right, wrong or unsure, **When** it is recorded, **Then** it is written only under the directory the user named.
+
+**Files:** `ruleprobe/cli.py`, `ruleprobe/validity.py`. **Tests:** `tests/test_validity.py`, `tests/test_cli.py`.
+
+### Story 10.3: `feat(audit): content-free validity cards and the shipped field figure`
+
+**Kind:** story · **Binds:** FR-41, NFR-10; AD-15, AD-16 · **Depends on:** 10.2
+
+As someone contributing field evidence,
+I want a card I can share without sharing a transcript,
+So that my verdicts count toward the field figure.
+
+**Acceptance Criteria:**
+
+1. **Given** `audit --card`, **When** it runs, **Then** the card holds exactly AD-15's keys.
+2. **Given** sessions holding known strings, **When** a card is written, **Then** none of them, no session id and no path appear in it.
+3. **Given** cards from several sources, **When** they pool into `ruleprobe/validity/field.json`, **Then** figures are shown per source with contributor counts.
+4. **Given** an excluded source, **When** the figure prints, **Then** the exclusion and its stated reason are shown.
+5. **Given** a card whose detector hash differs from the shipped one, **When** the figure prints, **Then** it is flagged stale and does not count toward NFR-10.
+
+**Files:** `ruleprobe/validity.py`, `ruleprobe/validity/field.json`, `pyproject.toml` package data. **Tests:** `tests/test_validity.py`.
+
+### Story 10.4: `task(validity): retake the pre-fix figures and publish agent-human agreement`
+
+**Kind:** task · **Binds:** FR-41, NFR-10 · **Depends on:** 10.3, 9.2, 9.3
+
+As the maintainer,
+I want the field figures current and their judges checked,
+So that a published figure says who judged it and how well they agree.
+
+**Acceptance Criteria:**
+
+1. **Given** the four figures that predate their fixes, **When** they are retaken, **Then** the new cards carry the fixed detectors' hashes.
+2. **Given** every sample, **When** it is judged, **Then** at least a fifth of it is human-judged.
+3. **Given** at least 30 agent verdicts re-judged by a human, **When** agreement is computed, **Then** kappa is published beside the figures.
+
+**Files:** `ruleprobe/validity/field.json`, `README.md`. **Tests:** 9.5's floor test.
+
+## Epic 11: honest numbers and history
+
+**Issue:** [#131](https://github.com/JakeSelby/ruleprobe/issues/131) (RP-E013).
+
+Bounds from one statistics module (AD-17) and count-only history (AD-15).
+
+### Story 11.1: `feat(report): Wilson and session-clustered bounds on every rate`
+
+**Kind:** story · **Binds:** FR-42, FR-17, FR-21, NFR-3; AD-17 · **Depends on:** none
+
+As a developer reading a share,
+I want its bound beside it,
+So that 3 of 20 and 300 of 2,000 no longer look the same.
+
+**Acceptance Criteria:**
+
+1. **Given** any share or field precision, **When** the report prints, **Then** it carries a Wilson 95% bound, in the table and in `report_data`.
+2. **Given** a compliance rate, **When** it prints, **Then** it carries a session-clustered bound; below FR-22's minimum it carries none.
+3. **Given** `unobserved` and `frequent`, **When** they are decided, **Then** they read a bound, not the point estimate.
+4. **Given** `--validity`, **When** it prints, **Then** the field figure comes before the corpus figure.
+5. **Given** the golden rows, **When** the suite runs, **Then** they carry the bounds and match byte for byte.
+
+**Files:** `ruleprobe/stats.py` (new), `ruleprobe/report.py`. **Tests:** `tests/test_stats.py`, `tests/test_report.py`.
+
+### Story 11.2: `feat(snapshot): save count-only rows and read them with report --rows`
+
+**Kind:** story · **Binds:** FR-43, NFR-5; AD-15, AD-16, AD-8 · **Depends on:** 10.1
+
+As a developer who will want to compare later,
+I want to save count-only history now,
+So that a rule change can be tested after the transcripts are gone.
+
+**Acceptance Criteria:**
+
+1. **Given** `ruleprobe snapshot DIR`, **When** it runs, **Then** it writes rows keyed by runtime, session key and detector hash, only under `DIR`.
+2. **Given** a saved row, **When** it is read, **Then** it holds no transcript text and no path.
+3. **Given** a session saved twice, **When** `report --rows` reads both files, **Then** it counts once.
+4. **Given** `report` with no `snapshot`, **When** it runs, **Then** it writes nothing.
+
+**Files:** `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_report.py`, `tests/test_cli.py`.
+
+### Story 11.3: `feat(readers): warn when Claude Code history stops at about 30 days`
+
+**Kind:** story · **Binds:** FR-43 · **Depends on:** 11.2
+
+As a first-time user,
+I want to know my transcripts are being deleted,
+So that I can keep them or snapshot them before a comparison needs them.
+
+**Acceptance Criteria:**
+
+1. **Given** Claude Code transcripts whose oldest session is about 30 days old, **When** the first run reports, **Then** it warns and names `cleanupPeriodDays`.
+2. **Given** history older than that, **When** it reports, **Then** no warning prints.
+3. **Given** the warning, **When** it prints, **Then** it names `ruleprobe snapshot` as the way to keep counts.
+
+**Files:** `ruleprobe/readers/claude_code.py`, `ruleprobe/report.py`. **Tests:** `tests/test_readers.py`. [ASSUMPTION: the reader module name]
+
+### Story 11.4: #112 `fix(explain): show the deciding event for session-level and compliance hits`
+
+**Kind:** bug (existing, RP-B011) · **Binds:** FR-44, FR-25; AD-13 · **Depends on:** none
+
+Every corpus hit explains itself, session-level and compliance hits included.
+
+## Epic 12: robustness on three operating systems
+
+**Issue:** [#132](https://github.com/JakeSelby/ruleprobe/issues/132) (RP-E014).
+
+### Story 12.1: `ci: run the suite on ubuntu, macOS and Windows`
+
+**Kind:** chore · **Binds:** NFR-11, NFR-2 · **Depends on:** none
+
+As a developer on Windows or macOS,
+I want CI to prove ruleprobe runs where I do,
+So that a platform bug is caught before release.
+
+**Acceptance Criteria:**
+
+1. **Given** a pull request, **When** CI runs, **Then** the suite runs on ubuntu, macOS and Windows, each on Python 3.9 and 3.x, and all pass.
+2. **Given** the required checks, **When** the matrix lands, **Then** the ruleset names the new jobs.
+
+**Files:** `.github/workflows/`. **Tests:** the matrix itself.
+
+### Story 12.2: `feat(readers): count dropped lines, unknown record types and CLI versions`
+
+**Kind:** story · **Binds:** FR-45; AD-10, AD-2 · **Depends on:** none
+
+As a developer reading a quiet report,
+I want to know what the readers set aside,
+So that a quiet number is not mistaken for a clean one.
+
+**Acceptance Criteria:**
+
+1. **Given** a fixture with one malformed line and one unknown record type, **When** it is read, **Then** each is counted once.
+2. **Given** a run, **When** the coverage block and `--json` print, **Then** both carry the three counts, with the agent CLI versions seen.
+3. **Given** any reader, **When** it drops a line, **Then** the line is counted.
+
+**Files:** `ruleprobe/readers/`, `ruleprobe/report.py`. **Tests:** `tests/test_readers.py`.
+
+### Story 12.3: `test: identical bytes under two hash seeds and reversed file order`
+
+**Kind:** task · **Binds:** NFR-3; AD-8 · **Depends on:** 12.1
+
+**Acceptance Criteria:**
+
+1. **Given** the suite's report fixture, **When** it runs under two `PYTHONHASHSEED` values and with file order reversed, **Then** the output bytes are identical, on all three operating systems.
+
+**Files:** `tests/`. **Tests:** the new determinism test.
+
+### Story 12.4: `test(shell): seeded fuzzing of the shell parse`
+
+**Kind:** task · **Binds:** NFR-3, NFR-4; AD-5 · **Depends on:** none
+
+**Acceptance Criteria:**
+
+1. **Given** a fixed seed, **When** the fuzz test feeds generated commands to the shell parse, **Then** it never raises and each input parses the same way twice.
+2. **Given** the fuzz test, **When** it runs, **Then** it uses the standard library only and finishes within the suite's normal time. [ASSUMPTION: a time budget set in the story]
+
+**Files:** `tests/test_shell.py`. **Tests:** the fuzz test.
+
+## Epic 13: the 0.3 beta and launch
+
+**Issue:** [#133](https://github.com/JakeSelby/ruleprobe/issues/133) (RP-E015).
+
+#27 (RP-E008) sits alongside this epic: agent-harness bumps to 0.3, including its detector-count test,
+and checks what it measures after the default set changes.
+
+### Story 13.1: `chore(release): publish 0.3.0rc1`
+
+**Kind:** chore · **Binds:** FR-31 · **Depends on:** Epics 8 to 12
+
+**Acceptance Criteria:**
+
+1. **Given** the release procedure in `docs/releasing.md`, **When** `v0.3.0rc1` is tagged, **Then** the tag workflow publishes it and nothing is uploaded by hand.
+
+**Files:** `ruleprobe/__init__.py`, `CHANGELOG.md`. **Tests:** the release preflight.
+
+### Story 13.2: `task(beta): five outside developers try the no-flags first run`
+
+**Kind:** task · **Binds:** FR-38, FR-41, SM-1, NFR-9 · **Depends on:** 13.1
+
+As the maintainer,
+I want strangers to try the first run before launch,
+So that the headline claim is observed, not assumed.
+
+**Acceptance Criteria:**
+
+1. **Given** five developers outside the project, **When** they run the release candidate with no flags, **Then** at least three see one of their rules measured inside 60 seconds.
+2. **Given** the testers, **When** they report, **Then** at least two return a validity card.
+3. **Given** each tester's volume, **When** `report` is timed, **Then** only a run past 60 seconds is acted on.
+4. **Given** the reports, **When** they are recorded, **Then** the story holds synthesized findings, never transcript content or names.
+
+**Files:** story file. **Tests:** none.
+
+### Story 13.3: `chore(release): tag 0.3.0`
+
+**Kind:** chore · **Binds:** FR-31, NFR-10 · **Depends on:** 13.2
+
+**Acceptance Criteria:**
+
+1. **Given** what the testers hit, **When** it is fixed, **Then** each fix has its own issue and pull request.
+2. **Given** the changelog, **When** 0.3.0 is folded, **Then** the default-set change sits under a Breaking heading.
+3. **Given** the tag, **When** it is pushed, **Then** #27's agent-harness bump follows.
+
+**Files:** `CHANGELOG.md`, `ruleprobe/__init__.py`. **Tests:** the release preflight.
+
+### Story 13.4: `docs(launch): the field scan and the launch kit`
+
+**Kind:** task · **Binds:** SM-2 · **Depends on:** 13.3
+
+As the maintainer,
+I want the launch to position ruleprobe honestly against its neighbours,
+So that it is found by the people it serves.
+
+**Acceptance Criteria:**
+
+1. **Given** claude-md-doctor and RuleReceipt, **When** the field scan is written, **Then** it positions ruleprobe on determinism, privacy and measured validity, and says whether the ATIF and Inspect routes hold.
+2. **Given** the kit, **When** it is drafted, **Then** it holds a front-door README, list submissions and posts.
+3. **Given** any public text, **When** it is ready, **Then** the maintainer approves it before it goes out.
+
+**Files:** `README.md`, story file. **Tests:** none.
+
+## Epic 14: compare, before and after
+
+**Issue:** [#134](https://github.com/JakeSelby/ruleprobe/issues/134) (RP-E016).
+
+### Story 14.1: `feat(stats): Newcombe intervals and the minimum detectable effect`
+
+**Kind:** story · **Binds:** FR-46; AD-17 · **Depends on:** 11.1
+
+**Acceptance Criteria:**
+
+1. **Given** two proportions, **When** their difference is computed, **Then** it carries Newcombe's hybrid score interval, checked against published worked examples.
+2. **Given** two sides' sizes and a pooled rate, **When** the minimum detectable effect is computed, **Then** it uses a two-sided alpha of 0.05 and 80% power.
+3. **Given** compliance rates, **When** they are compared, **Then** the interval is built from the session-clustered bounds.
+
+**Files:** `ruleprobe/stats.py`. **Tests:** `tests/test_stats.py`.
+
+### Story 14.2: `feat(compare): compare two windows or two groups`
+
+**Kind:** story · **Binds:** FR-46, FR-21; AD-17, AD-16 · **Depends on:** 14.1, 11.2
+
+As a developer who changed a rule,
+I want before and after side by side with an honest interval,
+So that I know whether the change did anything.
+
+**Acceptance Criteria:**
+
+1. **Given** `--split-at DATE`, or two groups by stance, model or runtime, **When** `compare` runs, **Then** each detector shows the difference, its Newcombe interval and the minimum detectable effect.
+2. **Given** an interval spanning zero, **When** it prints, **Then** the detector reads `inconclusive`.
+3. **Given** detectors whose rules did not change, **When** it prints, **Then** they appear as controls.
+4. **Given** a detector that defines opportunities, **When** it is compared, **Then** its rate uses opportunities.
+5. **Given** a detector hash that differs between the sides, **When** `compare` runs, **Then** it refuses that detector and says why.
+6. **Given** saved rows, **When** `compare` reads them through `--rows`, **Then** they count as transcripts would.
+
+**Files:** `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_compare.py`.
+
+### Story 14.3: `feat(compare): confound warnings and git-aware windows`
+
+**Kind:** story · **Binds:** FR-46, FR-38; AD-17 · **Depends on:** 14.2
+
+**Acceptance Criteria:**
+
+1. **Given** a model mix that shifts between the sides, **When** `compare` runs, **Then** it warns and the fixture reads `confounded`.
+2. **Given** a rule edit that followed a bad stretch, **When** `compare` runs, **Then** it warns about regression to the mean.
+3. **Given** the opt-in `git log` window on a rule file, **When** it is chosen, **Then** the split falls at that file's last change.
+4. **Given** fixtures with an effect, with none and with a model shift, **When** `compare` runs, **Then** they read detected, inconclusive and confounded.
+
+**Files:** `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_compare.py`.
+
+## Epic 15: team roll-up, schemas and corpus proof
+
+**Issue:** [#135](https://github.com/JakeSelby/ruleprobe/issues/135) (RP-E017).
+
+#21 (RP-E002) covers 15.1 and 15.2; ruleprobe still calls no model. #115 (RP-T007) records the judge as
+a separate package.
+
+### Story 15.1: `feat(validity): judge receipts`
+
+**Kind:** story · **Binds:** FR-35, NFR-7; AD-8, AD-17 · **Depends on:** 10.3
+
+**Acceptance Criteria:**
+
+1. **Given** a versioned JSONL file of verdicts with provider, model and pack version, **When** `corpus` reads it, **Then** the judge is scored as one more rater.
+2. **Given** items judged by a human and the judge, **When** `corpus` runs, **Then** it prints judge-human agreement on the shared items.
+3. **Given** the core package, **When** it is imported, **Then** no model client is imported and no model is called.
+
+**Files:** `ruleprobe/validity.py`. **Tests:** `tests/test_validity.py`.
+
+### Story 15.2: `feat(corpus): a dark-rule slice`
+
+**Kind:** story · **Binds:** FR-47 · **Depends on:** 15.1
+
+**Acceptance Criteria:**
+
+1. **Given** 10 to 20 common rules no detector can see, **When** the slice ships, **Then** each has hand-labelled followed and not-followed synthetic sessions.
+2. **Given** the slice, **When** `corpus` runs, **Then** it scores judges on it and no detector.
+
+**Files:** `ruleprobe/corpus/`. **Tests:** `tests/test_validity.py`.
+
+### Story 15.3: `feat(merge): roll reports up across a team`
+
+**Kind:** story · **Binds:** FR-48, NFR-8; AD-15 · **Depends on:** 11.1
+
+**Acceptance Criteria:**
+
+1. **Given** three JSON reports, **When** `merge` runs, **Then** the result equals the report over the union of their rows.
+2. **Given** the merged report, **When** it is written, **Then** it holds no session key.
+3. **Given** `merge`, **When** it runs, **Then** it reads only the files named and sends nothing.
+
+**Files:** `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_report.py`.
+
+### Story 15.4: `feat(schemas): publish JSON Schemas for rows, cards, snapshots and verdicts`
+
+**Kind:** story · **Binds:** FR-49, FR-31; AD-15 · **Depends on:** 15.1, 15.3
+
+**Acceptance Criteria:**
+
+1. **Given** each golden output, **When** the suite runs, **Then** it validates against its published schema.
+2. **Given** the package contract, **When** schemas are checked, **Then** no runtime dependency is added. [ASSUMPTION: a standard-library check of the schema subset used]
+
+**Files:** schema files, `tests/`. **Tests:** a schema test.
+
+### Story 15.5: `test(corpus): mutation-test every declarative detector's corpus`
+
+**Kind:** story · **Binds:** FR-50, NFR-1; AD-6, AD-7 · **Depends on:** none
+
+**Acceptance Criteria:**
+
+1. **Given** each declarative detector, **When** mutants are generated (a flipped operator, a dropped clause), **Then** its corpus fails at least 80% of them.
+2. **Given** the tool, **When** it runs, **Then** it uses the standard library only.
+
+**Files:** `ruleprobe/validity.py` or `scripts/`. **Tests:** the mutation run in CI.
+
+### Story 15.6: `feat(corpus): a binding corpus of at least 200 sections`
+
+**Kind:** story · **Binds:** FR-51; AD-18 · **Depends on:** 8.2
+
+**Acceptance Criteria:**
+
+1. **Given** a census of public rule files collected outside the package after a licensing review, **When** the corpus is written, **Then** only paraphrases ship.
+2. **Given** at least 200 labelled sections, **When** `corpus` scores the binder, **Then** precision is at least 0.95.
+3. **Given** a release, **When** its notes are written, **Then** they publish the binding rate.
+
+**Files:** `ruleprobe/corpus/`. **Tests:** 8.2's binder section.
+
+## Validation, 0.3 and 0.4
+
+- **FR coverage:** FR-35 to FR-51, NFR-10 and NFR-11 each bound by at least one story (the map above).
+- **Forward dependencies:** one crosses epics forward: 9.5 depends on 10.3 and 11.1, because the floor
+  needs the field figure and its bound. Epic 9's four fixes land first; 9.5 closes the epic after them.
+  10.4 depends on 9.2 and 9.3 for the same reason.
+- **Existing items:** #110, #111, #113 and #114 under Epic 9; #112 under Epic 11; #27 alongside Epic
+  13; #21 over 15.1 and 15.2; #115 beside Epic 15. None is re-filed.
+- **Items:** 35 (21 stories, 5 tasks, 3 chores, 4 bugs, 1 spike, 1 decision), 5 of them existing issues.

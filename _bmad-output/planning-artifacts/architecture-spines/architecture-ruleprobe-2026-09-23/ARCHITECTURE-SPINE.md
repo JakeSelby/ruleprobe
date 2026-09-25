@@ -4,11 +4,11 @@ type: architecture-spine
 purpose: build-substrate
 altitude: feature
 paradigm: 'pipes-and-filters, batch per session: readers -> event list -> one shell parse -> detectors -> rows -> report'
-scope: 'The ruleprobe package: readers, event schema, shell parse, registry, matchers, declarative format, rule binding, report, validity and CLI. 0.1.0 as built, and the v0.2.0 PRD.'
+scope: 'The ruleprobe package: readers, event schema, shell parse, registry, matchers, declarative format, rule binding, report, validity and CLI. 0.1.0 as built, the v0.2.0 PRD, and the proposed v0.3.0 and v0.4.0 roadmap.'
 status: final
 created: '2026-09-23'
-updated: '2026-09-24'
-binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, agent-harness AD-13, agent-harness AD-21]
+updated: '2026-09-25'
+binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, FR-39, FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48, FR-49, FR-50, FR-51, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, agent-harness AD-13, agent-harness AD-21]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/prd.md
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/addendum.md
@@ -268,6 +268,8 @@ native (#55)
     drafting command and no boundary for one (PRD Q4).
   - `open()` is for reading. The one write in the package is the FR-26 label command, under a
     directory the user names. `report`, `detectors`, `corpus` and the explain path write nothing.
+    Amended 2026-09-25 [PROPOSED, v0.3.0]: `audit` (verdicts and cards) and `snapshot` also write, each
+    only under a directory the user names and only what AD-15 allows.
   - The clock is read only to resolve `--since`, in `ruleprobe/readers/__init__.py`.
   - Every ordering in output comes from an explicit sort. Path lists are sorted before reading, as the
     readers do today. No count depends on dict, set or filesystem order.
@@ -406,6 +408,8 @@ native (#55)
     matches; none or several leaves it unmeasured. Binding reads text; no model.
   - The 0.2 catalog is a small set of six to eight shapes, each with `examples:` at the floor, listed
     with their detector kinds in PRD FR-16 (PRD Q3, decided 2026-09-23).
+  - Amended 2026-09-25 [PROPOSED, v0.3.0]: AD-18 makes the sentence the binding unit; the rule id
+    above is unchanged.
 
 ### AD-13: Explain, label and redaction [ADOPTED; explain implemented under #51 and label under #52, ship in v0.2.0]
 
@@ -438,6 +442,95 @@ native (#55)
     `DEFAULT.copy()`, as `Bundle.registry` in `ruleprobe/rules.py` does through `base.copy()`, whose
     `base` is `DEFAULT` unless a caller passes one built from it.
   - `COMPILERS` is written only by `register_compiler` at import time.
+
+### AD-15: Validity cards and saved rows hold counts, never content [PROPOSED, v0.3.0]
+
+- **Binds:** FR-40, FR-41, FR-43, FR-48, FR-49, NFR-5, NFR-10.
+- **Prevents:** a card, snapshot or merged report carrying a session id, a path or transcript text; two
+  writers keying rows differently, so a pooled or deduplicated count counts twice.
+- **Rule:**
+  - A validity card is one JSON object built from an allow-list, never by stripping a richer object:
+    `schema_version`, `ruleprobe_version`, `detector`, `detector_hash` (AD-16), `runtime`, `seed`,
+    `sampled`, `right`, `wrong`, `unsure` and `judge` (`human` or `agent`). No other key.
+    [ASSUMPTION: the key spelling; the roadmap fixes the contents]
+  - A test feeds sessions holding known strings through `audit --card` and asserts none reaches the
+    card.
+  - `ruleprobe/validity/field.json` is package data pooled from cards and kept per source, with
+    contributor counts. An excluded source stays in the file with its stated reason. A figure whose
+    `detector_hash` differs from the shipped detector's is stale and does not count toward NFR-10.
+  - A snapshot row is an AD-9 row's counts (`rules`, `compliance`) keyed by runtime, the reader's
+    session key and each detector's hash. It holds no transcript text and no path. It stays on the
+    user's machine; `merge` (FR-48) strips the session key before a roll-up leaves it.
+  - `report --rows` counts one row per runtime and session key. When copies differ, the copy in the
+    first file in sorted path order wins. [ASSUMPTION: the tie rule]
+  - Every format carries `schema_version`. In 0.4 each gets a JSON Schema (FR-49), checked against
+    every golden output.
+
+### AD-16: Every detector carries a version hash [PROPOSED, v0.3.0]
+
+- **Binds:** FR-39, FR-41, FR-43, FR-46.
+- **Prevents:** a figure or a saved row from an old detector being pooled or compared with a new one;
+  two modules hashing a detector differently.
+- **Rule:**
+  - One function in `ruleprobe/registry.py` computes the hash. [ASSUMPTION: its home] It is SHA-256
+    from `hashlib`, over a canonical JSON form (sorted keys, no whitespace, ASCII-escaped), shown as
+    the first 12 hex characters. [ASSUMPTION: the length]
+  - A declarative detector hashes its spec without `examples:`, which do not change what it matches.
+  - A Python detector hashes its id and an explicit version string it declares. A shipped Python
+    detector with a declarative twin hashes the twin. A detector that declares no version has no hash:
+    its cards are stale and `compare` refuses it (AD-4, under-count).
+  - The canonical form also carries an engine version that changes whenever a matcher or the shell
+    parse (AD-5) changes a hit, so an engine change stales every figure it could have moved.
+  - The same definition gives the same hash on every platform and Python version CI runs (NFR-11).
+
+### AD-17: One statistics module, standard library only [PROPOSED; bounds v0.3.0, compare v0.4.0]
+
+- **Binds:** FR-41, FR-42, FR-46, NFR-3, NFR-10.
+- **Prevents:** two commands computing an interval differently; a naive bound on clustered
+  opportunities; floating-point noise changing output bytes between platforms.
+- **Rule:**
+  - `ruleprobe/stats.py` owns every interval, as pure functions over counts using `math`.
+    [ASSUMPTION: the module name]
+  - Every share and every field precision takes a Wilson score interval at 95%. No trials, no bound.
+  - Compliance per opportunity takes a session-clustered bound: the session is the cluster, the ratio of
+    followed to opportunities is the estimate, and its variance is cluster-robust. Below FR-22's
+    minimum there is no bound, as there is no rate. [ASSUMPTION: the clustered method]
+  - A difference between two rates takes Newcombe's hybrid score interval, built from each side's
+    interval; `inconclusive` when it spans zero. Compliance differences use the clustered intervals.
+    [ASSUMPTION: Newcombe over clustered limits]
+  - The minimum detectable effect is reported at a two-sided alpha of 0.05 and 80% power.
+    [ASSUMPTION: the power]
+  - Agreement between raters is Cohen's kappa.
+  - Bounds are rounded to four decimal places before they are printed or serialized, so output bytes
+    match across platforms (AD-8). [ASSUMPTION: the precision]
+  - `frequent` and `unobserved` compare a bound, not the point estimate, with their threshold; which
+    bound is fixed in FR-42's story.
+  - `compare` refuses a detector whose hash differs between the sides (AD-16). A shift in the model mix
+    or a rule edit after a bad stretch is a warning, never a silent adjustment.
+
+### AD-18: Rules bind per sentence, under the under-count rule [PROPOSED, v0.3.0]
+
+- **Binds:** FR-36, FR-37, FR-38, FR-51, NFR-4.
+- **Prevents:** a section binding loosely because one of its sentences matched; an exception word in
+  one sentence unbinding, or failing to unbind, another; a binder change landing unscored.
+- **Rule:**
+  - Amends AD-12's binding unit. The rule and its id stay AD-12's section; the sentence becomes the
+    unit that binds. A section is measured when at least one sentence binds, and it may bind several
+    detectors, one per sentence.
+  - `ruleprobe/rules.py` owns the sentence split: text only, deterministic, outside code spans and
+    fences. [ASSUMPTION: sentence-final punctuation and list items end a sentence]
+  - A sentence binds an entry only when exactly one entry's pattern matches it; none or several leaves
+    it unbound.
+  - Exception, permission and condition words unbind only their own sentence, narrowing the two-tier
+    scan of 2026-09-24. Negated markers such as "no exception" are a closed list in the catalog data
+    and never unbind.
+  - An unsure sentence stays unbound (AD-4). The binder ships only at zero false binds and recall of
+    at least 0.70 on the zoo (FR-37); in 0.4, precision of at least 0.95 on at least 200 sections
+    (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/` beside the detector
+    corpus (AD-6).
+  - Discovery (FR-38) lives in `rules.py`, reads and never writes, and the coverage block says the rule
+    text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
+    it.
 
 ## Consistency Conventions
 
@@ -509,6 +602,14 @@ No service, no hosted component, no environment beyond a developer machine and C
 | FR-27 to FR-31 versioned contract | `registry.py`, `report.py`, `declarative.py`, contract test | AD-9 |
 | FR-34 drafting (withdrawn 2026-09-23; moved to #21) | not in ruleprobe | AD-8 |
 | NFR-1 to NFR-8 | all | AD-8, AD-4, AD-6 |
+| FR-35, FR-47 judge receipts and dark-rule slice (proposed, v0.4.0) | `validity.py`, `corpus/` | AD-6, AD-8, AD-17 |
+| FR-36 to FR-38, FR-51 per-sentence binding, binder score, discovery, binding corpus (proposed) | `rules.py`, `corpus/` | AD-18, AD-12, AD-6 |
+| FR-39 to FR-41 hash, audit, validity cards (proposed, v0.3.0) | `registry.py`, `validity.py`, `cli.py` | AD-16, AD-15, AD-13 |
+| FR-42 to FR-44 bounds, snapshot and rows, deciding event (proposed, v0.3.0) | `stats.py`, `report.py`, `cli.py` | AD-17, AD-15, AD-13 |
+| FR-45 reader health counts (proposed, v0.3.0) | `readers/` | AD-10, AD-2 |
+| FR-46, FR-48, FR-49 compare, merge, schemas (proposed, v0.4.0) | `stats.py`, `report.py`, `cli.py` | AD-17, AD-16, AD-15 |
+| FR-50 mutation-tested corpus (proposed, v0.4.0) | `validity.py`, `corpus/` | AD-6, AD-7 |
+| NFR-10, NFR-11 field floor, three operating systems (proposed) | `validity/field.json`, CI | AD-15, AD-17, AD-8 |
 
 ## Deferred
 
@@ -520,5 +621,7 @@ No service, no hosted component, no environment beyond a developer machine and C
 - **Performance** (NFR-9). No timing exists; the batch-per-session shape bounds memory per session.
   A measured timing decides whether anything needs fixing here.
 - **Concurrency.** Single process, one session at a time. Parallel reading is not planned.
+- **The judge library** (#21). A separate package that writes judge receipts ruleprobe reads (FR-35);
+  its own spine. Nothing here beyond the receipt format and AD-8's no-model rule.
 - **Release operations.** Owned by `scripts/release_preflight.py` and `.github/workflows/release.yml`;
   nothing here a unit could diverge on.
