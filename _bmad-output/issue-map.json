@@ -5,7 +5,7 @@
   "generated_at": "2026-09-23",
   "next_ids": {
     "epic": 18,
-    "story": 22,
+    "story": 23,
     "task": 10,
     "bug": 13,
     "chore": 9,
@@ -1100,6 +1100,19 @@
       "type": "story",
       "native_type": "Feature",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S021.md",
+      "parent_bmad_id": "RP-E010",
+      "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-S022",
+      "github_number": 141,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/141",
+      "title": "feat(rules): bind rules per sentence",
+      "type": "story",
+      "native_type": "Feature",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-S022.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
       "lifecycle": "active",

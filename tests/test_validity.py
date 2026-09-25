@@ -624,6 +624,52 @@ class BindingTests(Temp):
         self.assertEqual(binding.misses, [("b2", "testing/test-after-change")])
         self.assertEqual((binding.sections, binding.labels), (4, 5))
 
+    def test_an_unlabelled_line_that_binds_is_a_false_bind_beside_a_labelled_one(self):
+        """Scored per line: a section-level tally would let the labelled line mask it."""
+        item = {"id": "l1", "heading": "Pushing",
+                "lines": [["Never force-push to main.", "git-safety/force-push-default"],
+                          ["Do not force-push the default branch.", None]]}
+        binding = score_binding(zoo=[item])
+        push = binding.entries["git-safety/force-push-default"]
+        self.assertEqual((push.positives, push.tp, push.fp, push.fn), (1, 1, 1, 0))
+        self.assertEqual(binding.false_binds, [("l1", "git-safety/force-push-default")])
+        self.assertTrue(binding_failures(binding))
+
+    def test_the_gate_scores_the_binder_s_own_decision(self):
+        """A change in what `rules._bind` decides moves the tally: the gate re-derives
+        nothing."""
+        module = sys.modules["ruleprobe.rules"]
+        real = module._binding
+
+        def unmeasured(*args, **kwargs):
+            entry, binds = real(*args, **kwargs)
+            return entry._replace(state="unmeasured", detectors=[], source=None), binds
+
+        with mock.patch.object(module, "_binding", unmeasured):
+            tests = score_binding(zoo=[BOUND]).entries["testing/test-after-change"]
+        self.assertEqual((tests.tp, tests.fn), (0, 1))
+        with mock.patch.object(module, "_binds", lambda matches: []):
+            tests = score_binding(zoo=[BOUND]).entries["testing/test-after-change"]
+        self.assertEqual((tests.tp, tests.fn), (0, 1))
+        with mock.patch.object(module, "_binding",
+                               lambda *args, **kwargs: (real(*args, **kwargs)[0], [])):
+            with self.assertRaises(CorpusError):
+                score_binding(zoo=[BOUND])
+
+    def test_a_bind_is_attributed_to_the_line_its_sentence_starts_on(self):
+        joined = {"id": "l2", "heading": "Pushing",
+                  "lines": [["Keep commits small.", None],
+                            ["Never force-push", "git-safety/force-push-default"],
+                            ["to main.", None]]}
+        push = score_binding(zoo=[joined]).entries["git-safety/force-push-default"]
+        self.assertEqual((push.tp, push.fp, push.fn), (1, 0, 0))
+        headed = {"id": "l3", "heading": "Never force-push to main",
+                  "lines": [["Keep commits small.", "git-safety/force-push-default"]]}
+        binding = score_binding(zoo=[headed])
+        push = binding.entries["git-safety/force-push-default"]
+        self.assertEqual((push.tp, push.fp, push.fn), (0, 1, 1))
+        self.assertEqual(binding.false_binds, [("l3", "git-safety/force-push-default")])
+
     def test_a_heading_label_counts_and_an_uncatalogued_label_is_set_apart(self):
         item = {"id": "h1", "heading": "Run the tests before finishing",
                 "heading_label": "testing/test-after-change",
@@ -763,7 +809,7 @@ class ShippedBindingTests(unittest.TestCase):
 
     def test_the_shipped_zoo_is_package_data_in_the_shipped_corpus(self):
         self.assertTrue(os.path.isfile(os.path.join(corpus_dir(), ZOO_FILE)))
-        self.assertEqual((self.binding.sections, self.binding.labels), (65, 84))
+        self.assertEqual((self.binding.sections, self.binding.labels), (71, 103))
 
     def test_the_shipped_binder_makes_no_false_bind_on_the_zoo(self):
         self.assertEqual(self.binding.false_binds, [])
@@ -786,7 +832,7 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertIn("detectors", data)
         binding = data["binding"]
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
-                          binding["total"]["fn"]), (18, 0, 23))
+                          binding["total"]["fn"]), (27, 0, 14))
         self.assertEqual(binding["total"]["precision"], 1.0)
         self.assertEqual(binding["total"]["source"], "zoo")
         self.assertEqual(set(row["source"] for row in binding["entries"].values()),

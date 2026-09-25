@@ -508,7 +508,7 @@ native (#55)
   - `compare` refuses a detector whose hash differs between the sides (AD-16). A shift in the model mix
     or a rule edit after a bad stretch is a warning, never a silent adjustment.
 
-### AD-18: Rules bind per sentence, under the under-count rule [PROPOSED, v0.3.0]
+### AD-18: Rules bind per sentence, under the under-count rule [ADOPTED; binding implemented under #141, ships in v0.3.0]
 
 - **Binds:** FR-36, FR-37, FR-38, FR-51, NFR-4.
 - **Prevents:** a section binding loosely because one of its sentences matched; an exception word in
@@ -521,13 +521,26 @@ native (#55)
     fences. [ASSUMPTION: sentence-final punctuation and list items end a sentence]
   - A sentence binds an entry only when exactly one entry's pattern matches it; none or several leaves
     it unbound.
-  - Exception, permission and condition words unbind only their own sentence, narrowing the two-tier
-    scan of 2026-09-24. Negated markers such as "no exception" are a closed list in the catalog data
-    and never unbind.
-  - An unsure sentence stays unbound (AD-4). The binder ships only at zero false binds and recall of
-    at least 0.70 on the zoo (FR-37); in 0.4, precision of at least 0.95 on at least 200 sections
-    (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/` beside the detector
-    corpus (AD-6).
+  - An exception or permission word anywhere in the section, heading included, unbinds every rule
+    in it, as the 0.2.0 binder did (variant S). A condition or contrast word unbinds only its own
+    sentence. A sentence does not end inside parentheses or after e.g., i.e., etc., vs. or cf.
+    Negated markers such as "no exception" are a closed list in the catalog data
+    (`NEGATED_EXCEPTIONS`) and never unbind where the clause ends after them.
+  - An unsure sentence stays unbound (AD-4). The binder ships only at zero false binds on the zoo,
+    scored per labelled line from the binder's own per-sentence output, each bind on the line its
+    sentence starts on, with its recall held by a ratchet at the recall measured (FR-37); the
+    0.70 recall bar belongs to Epic 8 as a whole (RP-SP004). In 0.4, precision of at least 0.95 on at
+    least 200 sections (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/`
+    beside the detector corpus (AD-6).
+  - Amended 2026-09-25 (RP-SP004's decision, #141): the exception scope reaches the next sentence,
+    replacing "only their own sentence", and the heading's reaches the whole section, settled by the
+    maintainer; a narrower refer-back scope waits for held-out near-misses. Amended again at #142's
+    review: the scope also reaches the sentence before and a colon lead-in's list, sentences do not
+    split in parentheses or after common abbreviations, and a negated marker must end its clause.
+    Amended at #142's second review to variant S: every narrower exception reach was carried past by
+    another markdown shape (a list item of two paragraphs, a lead-in ending in a period, an unlisted
+    abbreviation), so an exception unbinds the whole section again; the per-sentence multi-bind
+    stays, and the next-sentence, lead-in and refer-back scopes are retired.
   - Discovery (FR-38) lives in `rules.py`, reads and never writes, and the coverage block says the rule
     text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
     it.
