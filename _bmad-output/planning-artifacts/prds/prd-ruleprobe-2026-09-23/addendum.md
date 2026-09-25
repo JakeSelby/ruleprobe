@@ -1,7 +1,7 @@
 ---
 title: "PRD addendum: ruleprobe"
 created: 2026-09-23
-updated: 2026-09-23
+updated: 2026-09-25
 ---
 
 # Addendum: ruleprobe PRD
@@ -112,6 +112,33 @@ These are candidate shapes, not decisions. The spine decides them.
 - **Explain over stored rows.** A row holds counts only. The explain path names the re-run instead:
   `ruleprobe report` over the row's runtime and session id. Widening the row to carry hit keys was
   rejected in the update of 2026-09-23: it grows every stored ledger for a debugging path.
+
+## The 0.3 and 0.4 roadmap, 2026-09-25
+
+Depth behind PRD §4.12 to §4.17, §13 and §14.
+
+- **History, rejected alternative.** Reading only `--json` output the user saved (`report --rows` with no
+  `snapshot`) adds no writing command, but most first comparisons would find no history, because people
+  do not remember to save it (PRD §11 Q14).
+- **Discovery skew, rejected alternative.** Discovering rules only for sessions newer than each rule
+  file's last change is accurate, but it empties most first runs, and the no-flags first run is the
+  launch's headline (PRD §11 Q15).
+- **Why binding moves to sentences.** 0.2's binder bound a whole section only when exactly one catalog
+  entry matched, and any exception word in the section, even "admit no exception", unbound all of it.
+  Dense rule files mix several rules per section, so they stayed unmeasured.
+- **Neighbours, verified 2026-09-25.** Claude Code deletes transcripts after 30 days by default
+  ([anthropics/claude-code#62476](https://github.com/anthropics/claude-code/issues/62476), open).
+  [claude-md-doctor](https://github.com/agent-clinic/claude-md-doctor) (no licence) backtests every rule
+  against session history with a model-written matcher per rule; it measures nearly every rule on a
+  first run, which is the bar FR-38's zero-config coverage is compared against.
+  [RuleReceipt](https://github.com/rulereceipt/rulereceipt) (no licence) checks a Claude Code session
+  against its rules with evidence, separating an action from a mention, the principle #110 needs.
+  Nothing is borrowed from either.
+- **Not verified.** An ATIF reader (Harbor's trajectory format) and an Inspect AI scorer package, both
+  proposed as routes to a second consumer, are left for the launch's field scan (PRD §14).
+- **Evidence behind the roadmap, re-run 2026-09-24.** 1,171 tests passed on Python 3.14 and 3.9; the
+  corpus held 87 positives and 111 negatives, all at 1.00; `report` took 0.75 to 0.77 s over 202 MB.
+  From the 0.2.0 record, SM-2 stood at 0 of 5, SM-3 at 0 of 1 and SM-8 at 8 of 10.
 
 ## Harness requirements that touch ruleprobe
 

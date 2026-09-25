@@ -2,7 +2,7 @@
 title: "PRD: ruleprobe"
 status: final
 created: 2026-09-23
-updated: 2026-09-24
+updated: 2026-09-25
 issue: 13
 bmad_id: RP-S004
 milestone: v0.2.0
@@ -281,6 +281,10 @@ The package ships six detectors that mean the same in every repository: `whole-f
 **Consequences (testable):**
 - `ruleprobe/detectors/common.yaml` produces hit for hit what `ruleprobe/detectors/common.py` produces
   over the corpus.
+
+**Amended 2026-09-25 (proposed, v0.3.0):** the default set becomes the detectors that clear the field
+floor (NFR-10). `secret-in-write` leaves it until its redesign (#110) clears the floor, which breaks the
+"six generic detectors" promise under a Breaking changelog heading.
 
 #### FR-9: A failing detector costs only itself
 A detector that raises is recorded against its own id, and every other detector's result stands.
@@ -674,7 +678,7 @@ A user can run a separate, opt-in command that drafts a declarative detector fro
 **Non-goals of FR-34:** it does not bind rules at report time; it does not score detectors; it does not
 make a drafted detector count before a person commits it; it does not ship with the core install.
 
-### 4.11 Verdict-source seam (proposed, 0.3)
+### 4.11 Verdict-source seam (proposed, v0.4.0)
 
 **Description:** Some rules no transcript shape can decide, such as voice or conciseness; the report
 shows them as dark. A judge outside ruleprobe could give a verdict on them. ruleprobe would own only a
@@ -683,12 +687,233 @@ model-free seam: the shape of a judged verdict, and scoring a judge on the corpu
 
 #### FR-35: Verdict-source seam
 A judge installed beside ruleprobe can emit verdicts into the row shape and be scored on the labelled
-corpus. **Status:** proposed (0.3, #21).
+corpus. **Status:** proposed (0.3, #21). Amended 2026-09-25: proposed (v0.4.0, #21), as judge receipts.
 
 **Consequences (testable):**
 - A judged verdict is marked as judged and carries its provider, model id and pack version.
 - `ruleprobe corpus` scores a judge with the same precision, recall and floor as a detector.
 - `ruleprobe report` calls no model, with or without a judge installed (NFR-7).
+- (Added 2026-09-25.) Verdicts arrive as judge receipts: a versioned JSONL format with that provenance.
+  A judge counts as one more rater, trusted as far as it agrees with humans, and `corpus` prints
+  judge-human agreement on shared items. The dark-rule slice (FR-47) is its calibration set.
+
+### 4.12 Rule discovery and per-sentence binding (proposed, v0.3.0)
+
+**Description:** 0.2.0's catalog bound 2 of the ten rule files and none of the 26 stance files in
+agent-harness's rule set (measured 2026-09-24): it binds a section only when exactly one entry matches, and
+one exception word anywhere in the section unbinds all of it. 0.3 binds per sentence, scores the binder
+like a detector, and finds the rule files itself, so a stranger's first run needs no flags. Realizes
+UJ-1 (roadmap approved 2026-09-25).
+
+#### FR-36: Per-sentence binding
+One rule section can bind several detectors, each through its own sentence. **Status:** proposed
+(v0.3.0).
+
+**Consequences (testable):**
+- A section whose sentences match two different catalog entries binds both, each through its own
+  sentence.
+- A sentence still binds an entry only when it matches exactly one entry's pattern (FR-16); a sentence
+  that matches none or several binds nothing.
+- An exception or condition word ("unless", "except", "only when") unbinds only its own sentence.
+- A negated marker such as "no exception" or "without exception" does not unbind its sentence.
+- The catalog gains patterns for the four default detectors that have none: `compact`, `model-switch`,
+  `secret-in-write` and `unfiltered-find`.
+- Binding still reads the rule text with no model (NFR-7), and an unsure sentence stays unmeasured
+  (NFR-4).
+
+#### FR-37: The binder scored like a detector
+`ruleprobe corpus` scores rule binding against labelled rule sentences, under the same floor as the
+detectors. **Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- The corpus ships a synthetic zoo of about 60 labelled rule sentences in common phrasings, with
+  near-misses for conditions, exceptions and contrasts.
+- `corpus` prints a binder section with binding precision and recall.
+- Per-sentence binding ships only at recall ≥ 0.70 on the zoo with zero false binds.
+- A false bind fails the corpus gate as a detector under the floor does.
+
+#### FR-38: Rule discovery
+With no `--rules`, `ruleprobe report` finds and binds the rule files that applied to each session.
+**Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- It reads the global rule files (`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`)
+  and the project rule files at each session's recorded working directory.
+  `[ASSUMPTION: the project rule files are the same three names, found at the working directory]`
+- For each unmeasured section, the coverage block names the nearest catalog entry and the word that
+  blocked the bind.
+- The coverage block says the rule text is today's, not the text in force when an older session ran
+  (maintainer decision, 2026-09-25, §11 Q15). Git-aware windows arrive with FR-46.
+- A fixture home directory with one bindable rule shows that rule measured, with no flags, inside 60
+  seconds.
+- Discovery reads files and writes none (NFR-5).
+
+### 4.13 Field evidence (proposed, v0.3.0)
+
+**Description:** A corpus score of 1.00 says the detector agrees with labels its author wrote; it says
+nothing about real transcripts. In the 0.2.0 record, field precision came from one developer, was
+agent-judged, covered precision only, and `secret-in-write` stood at 0.05. 0.3 turns reviewed hits into
+content-free validity cards and gates the default set on them (NFR-10). Realizes UJ-2.
+
+#### FR-39: Detector version hash
+Every detector carries a version hash of its definition. **Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- The same detector definition always gives the same hash, on every platform and Python version CI
+  tests.
+- A change to a detector's matching behaviour changes its hash.
+- Validity cards (FR-41), saved rows (FR-43) and `compare` (FR-46) carry or check the hash.
+
+#### FR-40: Audit
+`ruleprobe audit --detector <id> --sample N --seed S` samples a detector's hits and near-misses for a
+person or an agent to judge, locally. **Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- A near-miss is an event that failed exactly one clause of the detector. Judging a sample of them gives
+  an upper bound on recall.
+- The same transcripts, detector and seed give the same sample.
+- Each item is shown through the explain path's redaction (FR-25).
+- A verdict is right, wrong or unsure, and is written only under a directory the user names.
+- `label` (FR-26) stays the route from a wrong hit to a corpus negative.
+
+#### FR-41: Validity cards and the field figure
+`ruleprobe audit --card` emits a validity card, and cards pool into the shipped field figure.
+**Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- A card holds the ruleprobe version, the detector id and its version hash, the runtime, the seed, the
+  counts sampled, right, wrong and unsure, and the judge kind (human or agent).
+- A card holds no session id, path or transcript text. A test feeds sessions holding known strings and
+  asserts none reaches the card.
+- Cards pool into `ruleprobe/validity/field.json`, shipped as package data and shown per source with
+  contributor counts.
+- Cards from outside developers are accepted, shown per source, and excludable with a stated reason
+  (maintainer decision, 2026-09-25).
+- At least a fifth of every sample is human-judged, and agent-human agreement is published
+  (maintainer decision, 2026-09-25). Kappa is published once a human has re-judged at least 30 agent
+  verdicts.
+- A figure whose detector hash no longer matches the shipped detector is flagged stale. The four
+  figures that predate their fixes are retaken.
+
+### 4.14 Honest numbers and history (proposed, v0.3.0)
+
+**Description:** A share over 20 sessions and a share over 2,000 print alike, and Claude Code deletes
+transcripts after 30 days by default, so the evidence for a rule change is gone before anyone asks.
+0.3 puts a bound on every rate and lets the user keep count-only history. Realizes UJ-1 and UJ-3.
+
+#### FR-42: Bounds on every rate
+Every share and every field precision carries a 95% bound. **Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- Every share and every field precision in the table and in `report_data` carries a Wilson 95% bound,
+  computed with the standard library.
+- Compliance per opportunity (FR-21) carries a session-clustered bound, because opportunities cluster
+  within sessions and a naive bound understates the error.
+- `unobserved` and `frequent` (FR-17) are read from the bounds, not the point estimates.
+- `--validity` prints the field figure before the corpus figure, so a corpus 1.00 never stands alone
+  beside a detector measured at 0.05 in the field.
+- Golden rows carry the bounds.
+
+#### FR-43: Snapshot and saved rows
+An opt-in `ruleprobe snapshot DIR` saves count-only rows, and `report --rows FILE...` reads them.
+**Status:** proposed (v0.3.0) (maintainer decision, 2026-09-25, §11 Q14).
+
+**Consequences (testable):**
+- `snapshot` writes only under the directory the user names; `report` still writes nothing (NFR-5).
+- A saved row holds counts keyed by session and detector hash, and no transcript text or path.
+- `report --rows` counts a session saved twice once.
+- When the Claude Code transcripts a run finds stop at about 30 days, the first run warns and names
+  the `cleanupPeriodDays` setting.
+
+#### FR-44: A deciding event for every hit
+Session-level and compliance hits name the event that decided them in the explain path. **Status:**
+proposed (v0.3.0, #112).
+
+**Consequences (testable):**
+- Every hit in a corpus run explains itself through FR-25, session-level and compliance hits included.
+
+### 4.15 Reader health (proposed, v0.3.0)
+
+**Description:** A reader that drops a line it cannot parse makes the report quieter without saying so.
+0.3 counts what the readers set aside.
+
+#### FR-45: Reader health counts
+The readers count unparseable lines, unknown record types and the agent CLI versions they saw.
+**Status:** proposed (v0.3.0).
+
+**Consequences (testable):**
+- A fixture with one malformed line and one unknown record type reports one of each.
+- The coverage block and `--json` report all three counts.
+- A reader never drops a line without counting it.
+
+### 4.16 Compare (proposed, v0.4.0)
+
+**Description:** A rule is worth keeping when the behaviour it asks for changes. 0.4 compares two
+windows or two groups and says whether a difference is real, absent or confounded. Realizes UJ-1.
+
+#### FR-46: Compare
+`ruleprobe compare` compares two windows (`--split-at DATE`, or opt-in `git log` on a rule file) or two
+groups (stance, model read from the transcript, or runtime). **Status:** proposed (v0.4.0).
+
+**Consequences (testable):**
+- For each detector it reports the difference with a Newcombe interval, and `inconclusive` when that
+  interval spans zero.
+- It reports the minimum detectable effect for each detector.
+- Unchanged detectors are shown alongside as controls.
+- Rates use opportunities where a detector defines them (FR-21).
+- It refuses when a detector's version hash (FR-39) differs between the two sides.
+- It warns when the model mix shifts between the sides, and when a rule edit followed a bad stretch,
+  which risks regression to the mean.
+- Fixtures with an effect, with none, and with a model shift read detected, inconclusive and
+  confounded.
+
+### 4.17 Team roll-up, schemas and corpus proof (proposed, v0.4.0)
+
+**Description:** 0.4 lets several people pool what they measured, publishes the formats other tools
+read, and proves the corpus would catch a broken detector. It also gives a judge outside ruleprobe
+somewhere to be scored (FR-35).
+
+#### FR-47: Dark-rule slice
+The corpus holds 10 to 20 common rules that no detector can see, hand-labelled on synthetic sessions.
+**Status:** proposed (v0.4.0, #21).
+
+**Consequences (testable):**
+- Each slice rule has labelled followed and not-followed sessions.
+- The slice is the judge's calibration set (FR-35); no detector is scored on it.
+
+#### FR-48: Merge
+`ruleprobe merge` combines JSON reports into one team roll-up. **Status:** proposed (v0.4.0).
+
+**Consequences (testable):**
+- The merge of three reports equals the report over the union of their rows.
+- The merged report holds no session key.
+- `merge` reads files the user names and sends nothing (NFR-8).
+
+#### FR-49: JSON Schemas
+JSON Schemas are published for report rows, validity cards, snapshots and verdicts. **Status:** proposed
+(v0.4.0).
+
+**Consequences (testable):**
+- Every golden output validates against its schema in the suite.
+- A schema change follows the versioning policy (FR-31).
+
+#### FR-50: Mutation-tested corpus
+Generated mutants of each declarative detector must fail that detector's corpus. **Status:** proposed
+(v0.4.0).
+
+**Consequences (testable):**
+- Mutants include a flipped operator and a dropped clause.
+- Each detector's corpus catches at least 80% of its mutants.
+- Mutation testing runs with the standard library only.
+
+#### FR-51: Binding corpus
+At least 200 labelled rule sections, paraphrased from a census of public rule files, score the binder.
+**Status:** proposed (v0.4.0).
+
+**Consequences (testable):**
+- Binding precision is at least 0.95 on at least 200 sections.
+- The census is collected outside the package after a licensing review, and only the paraphrases ship.
+- The binding rate is published with each release.
 
 ## 5. The package contract (cross-cutting NFRs)
 
@@ -703,6 +928,9 @@ These bind every feature. Each is tested.
 - **NFR-3 Deterministic output.** The same transcripts, detectors and flags give byte-identical
   `--json` output (implemented, 0.1.0). Bound: no clock, randomness, locale or dict-order effect in any
   count. `[ASSUMPTION: --since is the one input read against the clock, and a fixed date removes it]`
+  Proposed, v0.3.0: a test runs the report under two `PYTHONHASHSEED` values and in reversed file order
+  and demands identical bytes, and a seeded standard-library fuzz test feeds generated commands to the
+  shell parse.
 - **NFR-4 Under-count rather than over-count.** When a detector or the shell parse cannot decide, it
   produces no hit (implemented: positive matchers in 0.1.0; negation, `any`, `all`, `order` and
   `absent` over skipped commands under #19, unreleased, shipping in v0.2.0). Bound: every documented
@@ -710,6 +938,8 @@ These bind every feature. Each is tested.
 - **NFR-5 `report` writes and sends nothing.** `ruleprobe report` opens no network connection and writes
   no file (implemented, 0.1.0). Bound: a test runs `report` with network access and file writes denied,
   and `report` succeeds (planned, v0.2.0). Only FR-26's command writes, and only where the user says.
+  Amended 2026-09-25 (proposed, v0.3.0): `audit` (FR-40, FR-41) and `snapshot` (FR-43) also write, each
+  only under a directory the user names, and never transcript text.
 - **NFR-6 Corpus floor 0.9 in CI.** CI runs `ruleprobe corpus --floor 0.9` and fails under it
   (implemented, 0.1.0). Bound: the floor is not lowered to pass a detector; a detector under it is
   fixed or removed.
@@ -717,6 +947,15 @@ These bind every feature. Each is tested.
   (implemented, 0.1.0). Bound: the core package imports no model client.
 - **NFR-8 Local data only.** Transcripts are read where the runtime wrote them or where `--root`
   points (implemented, 0.1.0).
+- **NFR-10 Field floor for the default set.** A detector is in the default set only while its field
+  precision is at least 0.90 as a point estimate, with a Wilson 95% lower bound of at least 0.80, on at
+  least 20 judged hits from at least 2 developers (proposed, v0.3.0; maintainer decision, 2026-09-25).
+  Bound: the floor is printed in the README's detector section, and a test that reads the shipped
+  `field.json` (FR-41) fails when a default detector is under it. A detector under the floor leaves the
+  defaults under a Breaking changelog heading; the floor is not lowered to keep it. Corpus agreement
+  (NFR-6) is not field evidence and does not count toward this floor.
+- **NFR-11 Three operating systems.** CI runs the suite on ubuntu, macOS and Windows, each on Python 3.9
+  and the current 3.x (proposed, v0.3.0).
 - **NFR-9 Time to first answer.** `report --rules --since 30` finishes inside the sixty-second budget of
   SM-1 over a reference volume of 500 sessions and 200 MB of transcripts. `report` has no default
   window (`--since` defaults to none, `ruleprobe/cli.py:44`), so the bound names the flag.
@@ -728,6 +967,8 @@ These bind every feature. Each is tested.
 
 - **Surfaces.** The CLI (`report`, `detectors`, `corpus`), the library's declared public API (FR-30),
   the declarative format (FR-10 to FR-12), the row schema (FR-28), and the corpus format (FR-23).
+  Proposed: 0.3 adds `audit`, `snapshot`, `report --rows`, the validity card and the snapshot row; 0.4
+  adds `compare`, `merge`, judge receipts and the published JSON Schemas (FR-49).
 - **Breaking change policy.** 0.2.0 is the one planned break: schema versions, the fold map and the
   declared API land together (maintainer decision 4). After it, FR-31 governs.
 - **Distribution.** A pure-Python wheel on PyPI, runnable with `uvx` and vendorable as a zip (FR-30).
@@ -744,7 +985,9 @@ From the maintainer's decisions of 2026-09-23:
 - No HTML report cards.
 - No cause triage. ruleprobe does not say why a rule was ignored.
 - No hooks or guards that block an agent.
-- Nothing hosted: no service, no upload, no team aggregation.
+- Nothing hosted: no service, no upload, no team aggregation. Amended 2026-09-25: `merge` (FR-48) rolls
+  up reports people hand each other on their own machines, content-free; hosting and dashboards stay
+  out.
 - No model call inside `ruleprobe report`.
 - No universal runtime claim. The README lists the runtimes read.
 - No fork of detector logic into a consumer; consumers import it (AD-13).
@@ -769,6 +1012,8 @@ carved out of agent-harness's decision layer when three signals hold: developers
 to measure dark rules with their own model; the judge needs nothing from the harness except ruleprobe's
 seam; and the judge has a validity figure on the corpus that the provider's terms allow to be published.
 Non-goal: no model client, credential or vendor adapter enters ruleprobe.
+
+Scope for 0.3.0 and 0.4.0 is §13; the proposed 1.0 bar is §14.
 
 ## 9. Success metrics
 
@@ -826,6 +1071,14 @@ transcript giving a different report. Any one is a failure regardless of the oth
   due 2026-12-23.
 - **Stale evidence.** The research's staleness map lists ref 26 as already stale. The positioning cites
   it for parity only.
+- **0.3 roughly doubled (2026-09-25).** Mitigation: ship the field floor, rule discovery and history
+  first, and recruit five testers before building `compare`.
+- **Per-sentence binding false-binds.** Mitigation: exactly-one-match and exception words kept per
+  sentence; FR-36 ships only at zero false binds on the zoo (FR-37).
+- **Before and after flatters the edit.** People edit rules after bad weeks. Mitigation: `compare`
+  shows control detectors and warns about regression to the mean (FR-46).
+- **The field evidence base is deleted as it ages.** Claude Code deletes transcripts after 30 days by
+  default. Mitigation: FR-43's snapshot and its `cleanupPeriodDays` warning.
 
 ## 11. Open questions
 
@@ -859,6 +1112,23 @@ transcript giving a different report. Any one is a failure regardless of the oth
 13. **README count of declared names.** The README says "six names" but lists seven lines plus two
     (`README.md:339`); FR-30's count of eight is right. A docs fix for the 0.2 stories, not a PRD
     change.
+14. **How does ruleprobe keep history past Claude Code's 30-day deletion?** Closed 2026-09-25: an
+    opt-in `ruleprobe snapshot DIR` of count-only rows, `report --rows` to read them, and a first-run
+    warning naming `cleanupPeriodDays` (FR-43). Rejected: `report --rows` over saved `--json` output
+    alone, which leaves most first comparisons with no history.
+15. **Rule discovery reads today's rule text for older sessions. Is that skew acceptable for 0.3?**
+    Closed 2026-09-25: yes, stated in the coverage block, with git-aware windows arriving in `compare`
+    (FR-38, FR-46). Rejected: discovering only for sessions newer than each rule file's last change,
+    which empties most first runs.
+16. **What must a default detector show in the field?** Closed 2026-09-25: NFR-10's floor;
+    `secret-in-write` leaves the defaults until #110 lands.
+17. **Which release launches?** Closed 2026-09-25: 0.3.
+18. **Are validity cards from outside developers accepted?** Closed 2026-09-25: yes, shown per source and
+    excludable with a stated reason (FR-41).
+19. **How much of an audit sample is human-judged?** Closed 2026-09-25: at least a fifth of every sample,
+    with agent-human agreement published (FR-41).
+20. **When do canary agent runs come?** Closed 2026-09-25: after 0.4, as a `scripts/` tool outside the
+    package (§14).
 
 ## 12. Assumptions index
 
@@ -868,3 +1138,40 @@ transcript giving a different report. Any one is a failure regardless of the oth
 - §4.6 FR-21: compliance per opportunity starts from the `order` and `absent` shapes.
 - §5 NFR-3: `--since` is the one clock-dependent input.
 - §5 NFR-9: the reference volume; no timing measured, and the bound is SM-1's minute.
+- (2026-09-25) §4.12 FR-38: the project rule files are the same three names, found at the session's
+  recorded working directory.
+
+## 13. Scope for 0.3.0 and 0.4.0
+
+From the roadmap the maintainer approved on 2026-09-25. Every item is proposed.
+
+**0.3.0, a trusted first run and the launch:** FR-36 to FR-38 (per-sentence binding, the binder's
+score, rule discovery); NFR-10 and the fixes #110, #111, #113 and #114 (the field floor for the
+defaults); FR-39 to FR-41 (version hashes, `audit`, validity cards); FR-42 to FR-44 (bounds, snapshot
+and saved rows, a deciding event for every hit, #112); FR-45 and NFR-11 (reader health, three operating
+systems, the determinism and fuzz tests under NFR-3). A release candidate goes to five developers outside
+the project; 0.3.0 is tagged when three of them see a rule measured with no flags inside 60 seconds and
+two return a validity card. Agent-harness then pins 0.3 (#27). Every public launch text is approved by
+the maintainer before it goes out.
+
+**0.4.0, rules you can evaluate:** FR-46 (`compare`); FR-35 amended as judge receipts and FR-47 (the
+dark-rule slice), both under #21; FR-48 to FR-51 (`merge`, JSON Schemas, mutation testing, the binding
+corpus).
+
+**Out of 0.3 and 0.4:** the judge itself (a separate package), hosting and dashboards, prescriptions,
+and canary agent runs.
+
+## 14. Toward 1.0 (proposed)
+
+After 0.4, in dependency order: the separate judge library and a local backend, licensing first;
+canary sessions as a `scripts/` tool; a CI integration for transcripts that agents write inside CI runs;
+an ATIF reader and an Inspect AI scorer, if the field scan confirms them; and from the spine's deferred
+list, compliance by position, the `absent` trigger and concurrency.
+
+The proposed 1.0 bar, each part checkable:
+
+1. No contract break across two consecutive minors.
+2. Field validity (NFR-10's evidence) from at least five developers.
+3. Three outside consumers of the library or its formats.
+4. CI green on three operating systems and three runtimes.
+5. No default detector under the field floor (NFR-10).
