@@ -20,18 +20,22 @@ setext heading does not split. Nothing here fails a build: a bad entry is a find
 file, a line and a reason, and the rest of the file still loads.
 
 A section rule is bound to the shipped catalog (`ruleprobe.detectors.catalog`) by what it
-says, with no model: its heading and each sentence of its prose are matched against every
-entry's anchored pattern, and the rule binds the one entry that matches, as a measured rule
-whose source is `catalog`. None matching, or more than one, leaves it unmeasured and listed,
-so the gap is visible rather than assumed; under-counting is the point, since a loose binding
-would lift the measured share on rules nobody would recognise. For the same reason a pattern
-never spans a clause break (see `ruleprobe.detectors.catalog`), and a rule carrying an
-exception, a condition or a permission in any sentence, heading included, binds nothing:
-except (excepted, exception), unless, other than, apart from, excluding, without, but,
-however, allowed, fine, okay, ok, if, when. So "Never force-push to main. Hotfixes excepted."
-is no force-push rule. `only` is left out, since it intensifies as often as it narrows
-("use only uv"), and so are `instead` and `rather than`, which the pip shape itself uses. A
-rule bound in its front matter is `own`,
+says, with no model, one sentence at a time: its heading and each sentence of its prose are
+matched against every entry's anchored pattern, a sentence that matches exactly one entry
+binds that entry, and the rule is measured by every entry its sentences bind, under its own
+section id, as a rule whose source is `catalog`. A sentence matching none, or more than one,
+binds nothing, and a rule none of whose sentences binds is unmeasured and listed, so the gap
+is visible rather than assumed; under-counting is the point, since a loose binding would
+lift the measured share on rules nobody would recognise. For the same reason a pattern
+never spans a clause break (see `ruleprobe.detectors.catalog`), and a word that narrows a
+rule unbinds the sentence it qualifies. An exception or a permission - except (excepted,
+exception), exempt, unless, other than, apart from, excluding, allowed, fine, okay, ok -
+unbinds the sentence it is in and the one before it, and in the heading the whole rule, so
+"Never force-push to main. Hotfixes excepted." is no force-push rule. A condition or a
+contrast - if, when, but, however, without - unbinds only its own sentence. The catalog's
+negated markers ("no exceptions", "admit no exception") are neither. `only` is left out,
+since it intensifies as often as it narrows ("use only uv"), and so are `instead` and
+`rather than`, which the pip shape itself uses. A rule bound in its front matter is `own`,
 and so is a catalog-bound one whose detector id a detector file of the user's replaced.
 """
 import os
@@ -523,17 +527,23 @@ def _file_prose(body):
 # --- catalog binding ---------------------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-#: An exception or a permission. Anywhere in a rule, its heading included, it unbinds the
-#: rule: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools"
-#: are not the rules the catalog patterns read, and nor is "Run the tests before finishing.
-#: Docs-only changes are exempt."
+#: An exception or a permission. It unbinds the sentence it is in and the sentence before it:
+#: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools" are
+#: not the rules the catalog patterns read, and nor is "Run the tests before finishing.
+#: Docs-only changes are exempt." In a heading it unbinds the whole section under it.
 _EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ing|s|ions?)?|unless|other\s+than|"
                         r"apart\s+from|excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
-#: A condition or a contrast. It unbinds a rule only in a sentence a pattern matched ("Never
-#: force-push to main when others share it"): elsewhere it qualifies another sentence, as
-#: "If one fails, fix it." does beside "Run the tests before finishing.", and a file bound
-#: by its whole text is full of them.
+#: A condition or a contrast. It unbinds only the sentence it is in ("Never force-push to
+#: main when others share it"): elsewhere it qualifies another sentence, as "If one fails,
+#: fix it." does beside "Run the tests before finishing.", and a file bound by its whole text
+#: is full of them.
 _CONDITION = re.compile(r"\b(?:if|when|but|however|without)\b", re.IGNORECASE)
+#: The catalog's negated exception markers ("admit no exception"), longest first, each in
+#: the singular or the plural. They are removed before either word list is read.
+_NEGATED = re.compile(r"\b(?:%s)s?\b" % "|".join(
+    r"\s+".join(re.escape(word) for word in phrase.split())
+    for phrase in sorted(_catalog.NEGATED_EXCEPTIONS, key=lambda p: (-len(p), p))),
+    re.IGNORECASE)
 _MARKUP = re.compile(r"[`*]+")
 _TASK = re.compile(r"^\[[ xX]\][ \t]+")
 
@@ -548,55 +558,66 @@ def _sentences(heading, paragraphs):
     for text in [heading] + list(paragraphs):
         text = _TASK.sub("", _LIST.sub("", text, count=1).lstrip(), count=1)
         text = _EMPHASIS.sub("", _MARKUP.sub("", _LINK.sub(r"\1", text)))
-        text = " ".join(text.replace("\u2019", "'").split())
+        text = " ".join(text.replace("’", "'").split())
         out.extend(part for part in _SENTENCE_END.split(text) if part)
     return out
 
 
 def _match(heading, paragraphs):
-    """`(detectors, marker)`: the catalog detectors whose pattern matches the start of any
-    sentence of the rule, in catalog order, and the word that unbinds them, or None - an
-    exception or permission (`_EXCEPTION`) in any sentence, else a condition (`_CONDITION`)
-    in a sentence a pattern matched. Binding reads text and nothing else, against the
-    shipped fold map: a consumer's own renames are applied when `Bundle.registry` is
-    built."""
+    """`[(detectors, marker)]`, one per sentence of the rule (`_sentences`), heading first:
+    the catalog detectors whose pattern matches the start of that sentence, in catalog order,
+    and the word that unbinds them, or None. The word is an exception or permission
+    (`_EXCEPTION`) or a condition (`_CONDITION`) in the sentence itself, else an exception or
+    permission in the sentence after it, else one in the heading; a negated marker such as
+    "no exceptions" is never one. Binding reads text and nothing else, against the shipped
+    fold map: a consumer's own renames are applied when `Bundle.registry` is built."""
     sentences = _sentences(heading, paragraphs)
+    plain = [_NEGATED.sub(" ", sentence) for sentence in sentences]
+    head = [_NEGATED.sub(" ", sentence) for sentence in _sentences(heading, [])]
+    headed = next((found for found in map(_EXCEPTION.search, head) if found), None)
     retired = fold_map()
-    matched, matching = [], []
-    for pattern, detector in _CATALOG:
-        if detector.id in retired:
-            continue
-        found = [sentence for sentence in sentences if pattern.match(sentence)]
-        if found:
-            matched.append(detector)
-            matching.extend(found)
-    for marker, texts in ((_EXCEPTION, sentences), (_CONDITION, matching)):
-        for sentence in texts:
-            found = marker.search(sentence)
-            if found:
-                return matched, found.group(0).lower()
-    return matched, None
+    live = [(pattern, detector) for pattern, detector in _CATALOG
+            if detector.id not in retired]
+    out = []
+    for n, sentence in enumerate(sentences):
+        matched = [detector for pattern, detector in live if pattern.match(sentence)]
+        found = None
+        if matched:
+            found = (_EXCEPTION.search(plain[n]) or _CONDITION.search(plain[n])
+                     or (n + 1 < len(plain) and _EXCEPTION.search(plain[n + 1])) or headed)
+        out.append((matched, found.group(0).lower() if found else None))
+    return out
+
+
+def _bound(matches):
+    """The detectors `_match`'s sentences bind, in catalog order: each sentence that matches
+    exactly one entry and has no word unbinding it binds that entry."""
+    ids = set(matched[0].id for matched, marker in matches if len(matched) == 1 and not marker)
+    return [detector for _pattern, detector in _CATALOG if detector.id in ids]
 
 
 def _catalog_matches(heading, paragraphs):
-    """The catalog detectors a rule binds to (`_match`): none when a word unbinds it."""
-    matched, marker = _match(heading, paragraphs)
-    return [] if marker else matched
+    """The catalog detectors a rule binds to, one or more per sentence (`_match`)."""
+    return _bound(_match(heading, paragraphs))
 
 
 def _bind(rule, path, heading, paragraphs, reason=""):
-    """A rule's entry: measured and catalog-bound when exactly one entry matches and no word
-    unbinds it, else unmeasured, with the word or the entries named when there is one, or
-    else with `reason`."""
-    matched, marker = _match(heading, paragraphs)
-    if matched and marker:
-        return RuleEntry(rule, path, "unmeasured",
-                         "a catalog shape with an exception or condition (%s)" % marker, [])
-    if len(matched) == 1:
-        return RuleEntry(rule, path, "measured", "", [matched[0].id], "catalog")
-    if matched:
-        return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
-                         % (len(matched), ", ".join(d.id for d in matched)), [])
+    """A rule's entry: measured and catalog-bound to every detector a sentence binds, in
+    catalog order, when at least one does. Else unmeasured, naming the word that unbound a
+    matching sentence, or else the entries a sentence matched together, or else `reason`."""
+    matches = _match(heading, paragraphs)
+    bound = _bound(matches)
+    if bound:
+        return RuleEntry(rule, path, "measured", "", [d.id for d in bound], "catalog")
+    for matched, marker in matches:
+        if matched and marker:
+            return RuleEntry(rule, path, "unmeasured",
+                             "a catalog shape with an exception or condition (%s)" % marker,
+                             [])
+    for matched, _marker in matches:
+        if len(matched) > 1:
+            return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
+                             % (len(matched), ", ".join(d.id for d in matched)), [])
     return RuleEntry(rule, path, "unmeasured", reason, [])
 
 
@@ -700,7 +721,7 @@ def _slug(heading):
 
 def _section_rules(path, root, body, first_line, name):
     """One `RuleEntry` per section of `body` that is a rule, with its id, bound to the
-    catalog when exactly one entry matches its text and unmeasured otherwise; or,
+    catalog entry each of its sentences binds (`_bind`) and unmeasured when none does; or,
     when `body` has no heading or none of its sections is a rule, one rule called `name`, as
     the file always was, so that no file drops out of the coverage block; its whole text binds
     the catalog as one unit.

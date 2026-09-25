@@ -786,7 +786,7 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertIn("detectors", data)
         binding = data["binding"]
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
-                          binding["total"]["fn"]), (18, 0, 23))
+                          binding["total"]["fn"]), (28, 0, 13))
         self.assertEqual(binding["total"]["precision"], 1.0)
         self.assertEqual(binding["total"]["source"], "zoo")
         self.assertEqual(set(row["source"] for row in binding["entries"].values()),

@@ -11,8 +11,10 @@ import io
 import json
 import os
 import shutil
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
 from corpus import bash, tool_use
 from ruleprobe import Registry, iter_sessions, run
@@ -330,6 +332,83 @@ class CliTests(Temp):
         self.assertIn("findings: 1 (everything else still loaded)", text)
         self.assertIn("unknown matcher", text)
         self.assertIn("transcript-hygiene/whole-file-cat", text)
+
+    def test_a_section_several_detectors_measure_lists_them_all_on_its_line(self):
+        self.write("rules/CLAUDE.md", MULTI)
+        rules_dir = os.path.join(self.dir, "rules")
+        code, text = self.run_cli("report", "--root", FIXTURES, "--no-config",
+                                  "--rules", rules_dir)
+        self.assertEqual(code, 0)
+        self.assertIn("rules: 1 measured, 0 dark, 0 unmeasured (100% measured)", text)
+        self.assertRegex(text, r"measured +CLAUDE\.md#git .*: catalog-bound, "
+                               r"verification/no-verify, git-safety/force-push-default, "
+                               r"commits/non-conventional-subject\n")
+        for did in MULTI_IDS:
+            self.assertIn(did, text.split("rules:")[0])
+        out = io.StringIO()
+        with mock.patch.object(sys, "stderr", io.StringIO()):
+            self.assertEqual(main(["report", "--root", FIXTURES, "--no-config", "--rules",
+                                   rules_dir, "--json"], out=out), 0)
+        coverage = json.loads(out.getvalue())["coverage"]
+        self.assertEqual((coverage["measured"], coverage["unmeasured"], coverage["catalog"]),
+                         (1, 0, 1))
+
+
+#: One section of three rules, each sentence binding a different catalog entry.
+MULTI = ("# Git\n\n- Use Conventional Commits.\n- Never force-push to main.\n"
+         "- Never skip pre-commit hooks.\n")
+#: What `MULTI` binds, in catalog order, whatever order its sentences come in.
+MULTI_IDS = ["verification/no-verify", "git-safety/force-push-default",
+             "commits/non-conventional-subject"]
+
+
+class SentenceBindingTests(Temp):
+    """A section binds one catalog entry per sentence, under its own section id."""
+
+    def load(self, text):
+        self.write("rules/CLAUDE.md", text)
+        return load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False)
+
+    def test_a_section_binds_every_entry_its_sentences_bind_in_catalog_order(self):
+        [entry] = self.load(MULTI).rules
+        self.assertEqual((entry.rule, entry.state, entry.detectors, entry.source),
+                         ("CLAUDE.md#git", "measured", MULTI_IDS, "catalog"))
+        [again] = self.load("# Git\n\nNever skip pre-commit hooks. Use Conventional Commits. "
+                            "Never force-push to main.\n").rules
+        self.assertEqual(again.detectors, MULTI_IDS)
+
+    def test_one_entry_two_sentences_bind_is_listed_once(self):
+        [entry] = self.load("# Git\n\nNever force-push to main.\n\n"
+                            "Do not force-push the default branch either.\n").rules
+        self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
+
+    def test_every_bound_detector_joins_the_registry(self):
+        registry = self.load(MULTI).registry()
+        for did in MULTI_IDS:
+            self.assertIn(did, registry)
+
+    def test_a_user_detector_replacing_one_bound_id_makes_the_rule_its_own(self):
+        self.write("rules/CLAUDE.md", MULTI)
+        path = self.write("d.json", json.dumps({"detectors": [
+            {"id": "git-safety/force-push-default", "rule": "git", "event": "tool_use",
+             "when": {"git": {"subcommand": "push"}}}]}))
+        bundle = load_bundle(paths=[path], rules_dir=os.path.join(self.dir, "rules"),
+                             config=False)
+        [entry] = bundle.rules
+        self.assertEqual((entry.state, entry.detectors, entry.source),
+                         ("measured", MULTI_IDS, "own"))
+
+    def test_a_heading_less_file_binds_per_sentence_too(self):
+        self.write("rules/git.md", "Use uv, not pip. Keep it short.\n\n"
+                                   "Never force-push to main. Tags are fine.\n")
+        [entry] = load_bundle(rules_dir=os.path.join(self.dir, "rules"), config=False).rules
+        self.assertEqual((entry.rule, entry.state, entry.detectors),
+                         ("git", "measured", ["package-manager/pip-install"]))
+
+    def test_binding_is_the_same_on_every_load(self):
+        first = [tuple(e) for e in self.load(MULTI).rules]
+        second = [tuple(e) for e in self.load(MULTI).rules]
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

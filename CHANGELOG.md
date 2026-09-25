@@ -22,6 +22,14 @@ All notable changes to this project are documented here. The format follows
 - "exempt", "exempted", "exempting", "exempts" and "exemptions" join the exception words, so "Run the tests before
   finishing. Docs-only changes are exempt." leaves its section unmeasured rather than binding it
   ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
+- Rule sections bind the catalog one sentence at a time, so a section stating several rules is
+  measured by each detector its sentences bind, and the coverage block lists them all on the
+  section's line. An exception or permission word now unbinds the sentence it is in and the one
+  before it, or the whole section from its heading, rather than the whole section from anywhere;
+  a condition or contrast word still unbinds only its own sentence; and a negated marker such as
+  "no exceptions" or "admit no exception" unbinds nothing. On the rules zoo, binding recall rises
+  from 0.44 to 0.68 with no false bind, and the recorded recall floor rises to 0.68
+  ([#141](https://github.com/JakeSelby/ruleprobe/issues/141)).
 
 ## 0.2.0 (2026-09-24)
 

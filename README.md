@@ -96,8 +96,9 @@ and `ruleprobe detectors` names the stance each one is waiting for.
 The six above are generic. Your rules are not, but a rule in a common shape needs no detector
 at all. Point `--rules` at your rule files and a section that no front matter binds is matched
 against a small shipped catalog by what it says, with no model: its heading and each sentence
-of its text are tested against one anchored pattern per entry, and a section that matches
-exactly one entry is measured by that entry's detector. In a clone:
+of its text are tested against one anchored pattern per entry, a sentence that matches
+exactly one entry binds that entry's detector, and a section is measured by every detector its
+sentences bind. In a clone:
 
 ```sh
 ruleprobe report --root docs --rules tests/fixtures/catalog
@@ -118,17 +119,22 @@ test run followed - so more is better, and its opportunities and followed count 
 measure. Its errors run low: a test run it does not recognise leaves the change counted as not
 followed, so read its followed share as a floor. Its description lists the runners it misses.
 
-The binding under-counts on purpose. A section matching none, or more than one, stays
-unmeasured, and the coverage block names the entries when it matched several. A pattern
-never reaches across a clause break (`;`, `,`, `:`, a run of hyphens between spaces such as
-` - ` or ` -- `, a dash), except the comma of its own contrast ("use uv, not pip"). A rule
-carrying an exception or a permission anywhere, its heading included - except (excepted,
-exception), exempt (exempted, exempting, exempts, exemption), unless, other than, apart
-from, excluding, allowed, fine, okay, ok - binds nothing, so "Never force-push to main. Hotfixes excepted." is left
-unmeasured rather than read as a rule it is not. A condition or a contrast - if, when, but,
-however, without - unbinds a rule only in the sentence the pattern matched: "Never force-push to
-main when others share it" binds nothing, while "Run the tests before finishing. If one fails,
-fix it." binds. `only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
+The binding under-counts on purpose. A sentence matching no entry, or more than one, binds
+nothing, and a section none of whose sentences binds stays unmeasured; the coverage block names
+the entries when a sentence matched several. A section whose sentences bind different entries
+is measured by each, and the coverage block lists them all: "Never force-push to main. Use uv,
+not pip." binds both. A pattern never reaches across a clause break (`;`, `,`, `:`, a run of
+hyphens between spaces such as ` - ` or ` -- `, a dash), except the comma of its own contrast
+("use uv, not pip"). An exception or a permission - except (excepted, exception), exempt
+(exempted, exempting, exempts, exemption), unless, other than, apart from, excluding, allowed,
+fine, okay, ok - unbinds the sentence it is in and the sentence before it, so "Never force-push
+to main. Hotfixes excepted." is left unmeasured rather than read as a rule it is not; in the
+heading it unbinds the whole section. A negated marker - no exception, without exception, without any
+exception, and admit, allow, make or with no exception, singular or plural - grants nothing, so
+"Never force-push to main. No exceptions." binds. A condition or a contrast - if, when, but,
+however, without - unbinds only the sentence it is in: "Never force-push to main when others
+share it" binds nothing, while "Run the tests before finishing. If one fails, fix it." binds.
+`only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
 own with a catalog id replaces it, `ruleprobe corpus` scores every entry, and
 `ruleprobe detectors` lists every entry marked `catalog`.
 
@@ -136,8 +142,9 @@ One place it over-counts, knowingly. A file with no heading, or none of whose se
 rule, is one rule and binds by its whole text: one matching sentence marks the whole file
 measured, and its other sentences may say "if" or "when" as they like, so the measured share
 counts it as one measured rule while the detector measures one sentence of it. The exception
-and permission words still apply to the whole text, so such a file that says "fine" or
-"unless" anywhere stays unmeasured - in a long file, the likelier outcome.
+and permission words reach only as far as they do in a section - their own sentence and the
+one before it - so a long file saying "fine" or "unless" somewhere is still measured by the
+sentences they do not touch.
 
 A catalog entry measures the shape it names and no more. "Never commit secrets" binds
 `secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
@@ -364,8 +371,8 @@ with the id `<path>#<heading-slug>` under `--rules`, and a repeated heading take
 section holding only a code block, an HTML comment, a table, a blockquote, an image or a link
 reference is not a rule. A file with no heading, or with no section that is a rule, stays one
 rule, named by its `rule:` key or else its file name, and its whole text - text above the first
-heading included - binds the catalog as one unit: measured when exactly one entry matches,
-unmeasured otherwise. Known misses: in a file with a rule section, text above the first
+heading included - binds the catalog as one unit, sentence by sentence as a section does:
+measured when at least one sentence binds, unmeasured otherwise. Known misses: in a file with a rule section, text above the first
 heading is no rule, a setext heading (text underlined with `===` or `---`) does not split,
 and list items are never split.
 
@@ -487,15 +494,15 @@ total                                    87  111   87    0    0   1.00    1.00  
 binder over the rules zoo: 65 sections, 84 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
-commits/non-conventional-subject          5    2    0    3   1.00    0.40
-git-safety/force-push-default             8    3    0    5   1.00    0.38
-package-manager/pip-install               5    2    0    3   1.00    0.40
+commits/non-conventional-subject          5    4    0    1   1.00    0.80
+git-safety/force-push-default             8    5    0    3   1.00    0.62
+package-manager/pip-install               5    3    0    2   1.00    0.60
 secrets/secret-file-add                   4    2    0    2   1.00    0.50
-testing/test-after-change                 9    3    0    6   1.00    0.33
+testing/test-after-change                 9    6    0    3   1.00    0.67
 transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
-verification/no-verify                    6    3    0    3   1.00    0.50
+verification/no-verify                    6    5    0    1   1.00    0.83
 -------------------------------------------------------------------------------
-total                                    41   18    0   23   1.00    0.44  recall floor 0.43
+total                                    41   28    0   13   1.00    0.68  recall floor 0.68
 4 label(s) name a detector no catalog entry binds yet; not scored
 ```
 
