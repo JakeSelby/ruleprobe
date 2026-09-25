@@ -532,7 +532,8 @@ native (#55)
     least 200 sections (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/`
     beside the detector corpus (AD-6).
   - Amended 2026-09-25 (RP-SP004's decision, #141): the exception scope reaches the next sentence,
-    replacing "only their own sentence"; a narrower refer-back scope waits for held-out near-misses.
+    replacing "only their own sentence", and the heading's reaches the whole section, settled by the
+    maintainer; a narrower refer-back scope waits for held-out near-misses.
   - Discovery (FR-38) lives in `rules.py`, reads and never writes, and the coverage block says the rule
     text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
     it.
