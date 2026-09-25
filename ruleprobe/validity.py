@@ -76,7 +76,7 @@ ZOO_FILE = "rules-zoo.json"
 BINDING_RECALL_FLOOR = 0.68
 #: The sha256 of the shipped zoo's bytes. A zoo with other bytes - a corpus of your own, or
 #: the shipped one edited - gets no recall floor; a change to the shipped zoo updates this.
-SHIPPED_ZOO_SHA256 = "0a22f9b27d3601654c6535f83d3cf9c7a5ea30427733aede127fddb554a0325a"
+SHIPPED_ZOO_SHA256 = "fb8cbf74855bdab6f9ded788ce3757a9f895e5efa12329b9aea95b860f2fb3f5"
 _ZOO_KEYS = ("about", "items")
 _ITEM_KEYS = ("id", "kind", "heading", "heading_label", "lines")
 
@@ -473,10 +473,10 @@ class Binding(object):
     """The binder's tally over the rules zoo.
 
     `entries` is `{detector_id: Score}` for every catalog entry the binder can bind. Per
-    section: a positive is an entry its labels name, a true positive one it bound as
-    labelled, a false positive one it bound unlabelled - a false bind - and a false negative
-    a labelled one it did not bind. `false_binds` and `misses` name those as `(section id,
-    detector id)` pairs, in zoo order. `outside` counts the labels naming a detector no
+    labelled line, the heading one of them: a positive is the entry its label names, a true
+    positive one a sentence starting on that line bound as labelled, a false positive one it
+    bound unlabelled - a false bind - and a false negative a labelled one it did not bind.
+    `false_binds` and `misses` name those as `(section id, detector id)` pairs, in zoo order. `outside` counts the labels naming a detector no
     catalog entry binds yet: no binder can meet them, so none is scored on them.
     `recall_floor` is `BINDING_RECALL_FLOOR` for the shipped zoo and None for any other.
     """
@@ -574,6 +574,41 @@ def _zoo_section(item):
     return units[0][0], units[0][3]
 
 
+def _attributed(item, heading, paragraphs):
+    """`[set of detector ids]`, one per labelled unit of `item` - its heading, then each
+    line - holding what the binder bound through a sentence starting there. A sentence is
+    placed by the paragraph and offset `rules._match` gives it, against each line's own
+    normalized text found in turn in its paragraph's."""
+    lines = [text for text, _label in item["lines"]]
+    starts, cursor = {}, 0
+    for index, paragraph in enumerate(paragraphs):
+        text, offset = _rules._normalize(paragraph), 0
+        while cursor < len(lines) and offset <= len(text):
+            own = _rules._normalize(lines[cursor])
+            if not own:
+                cursor += 1
+                continue
+            found = text.find(own, offset)
+            if found < 0:
+                break
+            starts.setdefault(index, []).append((found, cursor))
+            offset, cursor = found + len(own), cursor + 1
+    out = [set() for _unit in range(len(lines) + 1)]
+    for sentence in _rules._match(heading, paragraphs):
+        if len(sentence.detectors) != 1 or sentence.marker:
+            continue
+        unit = 0
+        if sentence.paragraph >= 0:
+            placed = [line for start, line in starts.get(sentence.paragraph, [])
+                      if start <= sentence.start]
+            if not placed:
+                raise CorpusError("zoo item %s: a bound sentence is on no line of it"
+                                  % item["id"])
+            unit = placed[-1] + 1
+        out[unit].add(sentence.detectors[0].id)
+    return out
+
+
 def score_binding(directory=None, zoo=None):
     """The binder over the rules zoo (`load_zoo`), as a `Binding`, or None when there is no
     zoo. Each item binds as a section of a rule file binds, against the shipped catalog and
@@ -594,28 +629,25 @@ def score_binding(directory=None, zoo=None):
     binding = Binding(dict((i, Score(i, source="zoo")) for i in ids), floor)
     for item in items:
         heading, paragraphs = _zoo_section(item)
-        labels = [label for _text, label in item["lines"]]
-        if "heading_label" in item:
-            labels.append(item["heading_label"])
+        units = [item.get("heading_label")] + [label for _text, label in item["lines"]]
         binding.sections += 1
-        binding.labels += len(labels)
-        wanted = set(folds.get(label, label) for label in labels if label)
-        expected = wanted & catalog
-        binding.outside += len(wanted - catalog)
-        entry = _rules._bind(item["id"], ZOO_FILE, heading, paragraphs)
-        bound = set(entry.detectors) if entry.state == "measured" else set()
-        for detector_id in sorted(expected | bound):
-            score = binding.entries[detector_id]
-            if detector_id in expected:
-                score.positives += 1
-                if detector_id in bound:
-                    score.tp += 1
+        binding.labels += len(units) - ("heading_label" not in item)
+        for label, bound in zip(units, _attributed(item, heading, paragraphs)):
+            wanted = set([folds.get(label, label)]) if label else set()
+            expected = wanted & catalog
+            binding.outside += len(wanted - catalog)
+            for detector_id in sorted(expected | bound):
+                score = binding.entries[detector_id]
+                if detector_id in expected:
+                    score.positives += 1
+                    if detector_id in bound:
+                        score.tp += 1
+                    else:
+                        score.fn += 1
+                        binding.misses.append((item["id"], detector_id))
                 else:
-                    score.fn += 1
-                    binding.misses.append((item["id"], detector_id))
-            else:
-                score.fp += 1
-                binding.false_binds.append((item["id"], detector_id))
+                    score.fp += 1
+                    binding.false_binds.append((item["id"], detector_id))
     return binding
 
 

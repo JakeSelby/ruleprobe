@@ -33,7 +33,7 @@ from ruleprobe.matchers import Examples
 from ruleprobe import rules
 from ruleprobe.matchers import compile_detector
 from ruleprobe.rules import (Bundle, RuleEntry, _CATALOG, _NEGATED, _catalog_matches,
-                             _match, catalog_detectors, load_bundle)
+                             _match, _sentences, catalog_detectors, load_bundle)
 from ruleprobe.registry import Detector
 from ruleprobe.validity import DEFAULT_FLOOR, score_corpus, score_examples
 from test_contract_data import non_literal
@@ -684,7 +684,79 @@ class BindingTests(Temp):
                              "Exemptive clauses belong in the licence.\n").rules
         self.assertEqual(entry.detectors, ["testing/test-after-change"])
 
-    def test_unless_in_one_sentence_unbinds_that_sentence_and_the_one_before_it(self):
+    def test_an_exception_in_the_sentence_before_unbinds_the_rule(self):
+        for text in ("# Pushing\n\nHotfixes are fine. Never force-push to main.\n",
+                     "# Pushing\n\nUnless the lead says otherwise, rebase.\n\n"
+                     "Never force-push to main.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+
+    def test_a_colon_lead_in_carries_its_exception_over_the_list_it_introduces(self):
+        """Review of #142: 0.2.0 left these unmeasured, and the first per-sentence cut bound
+        them."""
+        for text in ("# Git\n\nExcept on release branches:\n\n- Never force-push to main.\n",
+                     "# Testing\n\nUnless the lead says otherwise:\n\n"
+                     "- Run the tests before finishing.\n",
+                     "# Git\n\nExcept on release branches:\n\n- Keep commits small.\n"
+                     "- Rebase often.\n- Never force-push to main.\n",
+                     "# Git\n\nKeep it tidy. Hotfixes are fine:\n\n- Keep commits small.\n"
+                     "- Rebase often.\n- Never force-push to main.\n",
+                     "# Git\n\nExcept on release branches:\n\nKeep commits small. Rebase "
+                     "often. Never force-push to main.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+        for text in ("# Git\n\nKeep it tidy:\n\n- Keep commits small.\n"
+                     "- Never force-push to main.\n",
+                     "# Git\n\nExcept on release branches:\n\n- Keep commits small.\n"
+                     "- Rebase often.\n\nKeep it tidy.\n\nNever force-push to main.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
+
+    def test_a_sentence_never_ends_inside_parentheses_or_after_an_abbreviation(self):
+        self.assertEqual(_sentences("", ["Never force-push to main (e.g. with --force). "
+                                         "Tags are fine."]),
+                         ["Never force-push to main (e.g. with --force).", "Tags are fine."])
+        for text in ("Use uv, e.g. for scripts.", "Use uv, i.e. never pip.",
+                     "Use uv for tools etc. and scripts.", "Use uv vs. pip.",
+                     "Use uv (cf. the docs).", "Use uv (see the docs. Then pip.",
+                     "Use uv (see (the docs. here). Then) pip."):
+            with self.subTest(text=text):
+                self.assertEqual(_sentences("", [text]), [text])
+        self.assertEqual(_sentences("", ["Use uv. Then (maybe) pip. Done."]),
+                         ["Use uv.", "Then (maybe) pip.", "Done."])
+        self.assertEqual(_sentences("", ["Use uv) now. Then pip."]),
+                         ["Use uv) now.", "Then pip."])
+        for text in ("# Pushing\n\nNever force-push to main (e.g. with --force). "
+                     "Tags are fine.\n",
+                     "# Pushing\n\nNever force-push to main, i.e. the default. "
+                     "Tags are fine.\n"):
+            with self.subTest(text=text):
+                [entry] = self.rules(text).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+
+    def test_a_negated_marker_counts_only_where_its_clause_ends(self):
+        for text in ("Never force-push to main without exception approval from the "
+                     "release lead.",
+                     "Never force-push to main, with no exception ticket open.",
+                     "Never force-push to main. No exceptions granted by email."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+        for text in ("Never force-push to main - without exception - ever.",
+                     "Never force-push to main (no exceptions).",
+                     "Never force-push to main, no exceptions; ask first.",
+                     "Never force-push to main without exception"):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), ["git-safety/force-push-default"])
+
+    def test_the_binder_source_is_ascii(self):
+        with open(inspect.getsourcefile(rules), "rb") as handle:
+            source = handle.read()
+        self.assertEqual([n for n, byte in enumerate(source) if byte > 127], [])
+
+    def test_unless_in_one_sentence_unbinds_that_sentence_and_the_ones_beside_it(self):
         [entry] = self.rules("# Git\n\nUse uv, not pip. Keep commits small. Never force-push "
                              "to main unless the release lead asks.\n").rules
         self.assertEqual((entry.state, entry.detectors),

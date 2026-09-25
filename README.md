@@ -127,13 +127,17 @@ not pip." binds both. A pattern never reaches across a clause break (`;`, `,`, `
 hyphens between spaces such as ` - ` or ` -- `, a dash), except the comma of its own contrast
 ("use uv, not pip"). An exception or a permission - except (excepted, exception), exempt
 (exempted, exempting, exempts, exemption), unless, other than, apart from, excluding, allowed,
-fine, okay, ok - unbinds the sentence it is in and the sentence before it, so "Never force-push
-to main. Hotfixes excepted." is left unmeasured rather than read as a rule it is not; in the
-heading it unbinds the whole section. A negated marker - no exception, without exception, without any
-exception, and admit, allow, make or with no exception, singular or plural - grants nothing, so
-"Never force-push to main. No exceptions." binds. A condition or a contrast - if, when, but,
-however, without - unbinds only the sentence it is in: "Never force-push to main when others
-share it" binds nothing, while "Run the tests before finishing. If one fails, fix it." binds.
+fine, okay, ok - unbinds the sentence it is in and the sentences either side of it, so "Never
+force-push to main. Hotfixes excepted." is left unmeasured rather than read as a rule it is not;
+in the heading it unbinds the whole section, and in a lead-in ending with a colon ("Except on
+release branches:") the whole list or paragraph it introduces. A sentence never ends inside
+parentheses or after e.g., i.e., etc., vs. or cf., so an aside cannot carry an exception out of
+reach. A negated marker - no exception, without exception, without any exception, and admit,
+allow, make or with no exception, singular or plural - grants nothing where its clause ends, so
+"Never force-push to main. No exceptions." binds, while "without exception approval" does not
+count as one. A condition or a contrast - if, when, but, however, without - unbinds only the
+sentence it is in: "Never force-push to main when others share it" binds nothing, while "Run
+the tests before finishing. If one fails, fix it." binds.
 `only` is not a marker: it intensifies as often as it narrows. A catalog detector joins the report only when a rule binds it, a detector of your
 own with a catalog id replaces it, `ruleprobe corpus` scores every entry, and
 `ruleprobe detectors` lists every entry marked `catalog`.
@@ -143,8 +147,8 @@ rule, is one rule and binds by its whole text: one matching sentence marks the w
 measured, and its other sentences may say "if" or "when" as they like, so the measured share
 counts it as one measured rule while the detector measures one sentence of it. The exception
 and permission words reach only as far as they do in a section - their own sentence and the
-one before it - so a long file saying "fine" or "unless" somewhere is still measured by the
-sentences they do not touch.
+ones either side of it, or a list a colon lead-in introduces - so a long file saying "fine" or
+"unless" somewhere is still measured by the sentences they do not touch.
 
 A catalog entry measures the shape it names and no more. "Never commit secrets" binds
 `secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
@@ -491,7 +495,7 @@ verification/no-verify                   11   13   11    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 
-binder over the rules zoo: 65 sections, 84 labels
+binder over the rules zoo: 67 sections, 88 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
 commits/non-conventional-subject          5    4    0    1   1.00    0.80
@@ -521,8 +525,8 @@ a detector scored badly. `--json` prints the same numbers as data.
 The second table scores the rule binder, the text reading that binds a rule section to a
 catalog entry, over `ruleprobe/corpus/rules-zoo.json`: synthetic rule sections with every
 line labelled with the catalog detector it should bind, or none, beside near-misses for
-exceptions, conditions and contrasts. `pos` counts the sections labelled with an entry. Any
-false bind fails the command, whatever `--floor` says, because a rule bound to the wrong
+exceptions, conditions and contrasts. `pos` counts the lines labelled with an entry, a heading
+included, and a bind counts on the line its sentence starts on. Any false bind fails the command, whatever `--floor` says, because a rule bound to the wrong
 detector is measured wrongly. On the shipped zoo, recall fails only under the recorded floor,
 the recall the shipped binder measured, which rises as binding improves; a zoo of your own in
 a `--corpus` directory reports its recall and holds it to nothing. Labels naming a detector no catalog

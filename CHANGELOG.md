@@ -24,11 +24,14 @@ All notable changes to this project are documented here. The format follows
   ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
 - Rule sections bind the catalog one sentence at a time, so a section stating several rules is
   measured by each detector its sentences bind, and the coverage block lists them all on the
-  section's line. An exception or permission word now unbinds the sentence it is in and the one
-  before it, or the whole section from its heading, rather than the whole section from anywhere;
-  a condition or contrast word still unbinds only its own sentence; and a negated marker such as
-  "no exceptions" or "admit no exception" unbinds nothing. On the rules zoo, binding recall rises
-  from 0.44 to 0.68 with no false bind, and the recorded recall floor rises to 0.68
+  section's line. An exception or permission word now unbinds the sentence it is in and the ones
+  either side of it, the whole section from its heading, or the list a lead-in ending with a colon
+  introduces, rather than the whole section from anywhere; a condition or contrast word still
+  unbinds only its own sentence; a sentence no longer ends inside parentheses or after e.g., i.e.,
+  etc., vs. or cf.; and a negated marker such as "no exceptions" or "admit no exception" unbinds
+  nothing where its clause ends. `ruleprobe corpus` scores binding per labelled line, and the zoo
+  gains two lead-in near-misses. On the rules zoo, binding recall rises from 0.44 to 0.68 with no
+  false bind, and the recorded recall floor rises to 0.68
   ([#141](https://github.com/JakeSelby/ruleprobe/issues/141)).
 
 ## 0.2.0 (2026-09-24)

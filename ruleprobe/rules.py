@@ -30,10 +30,12 @@ lift the measured share on rules nobody would recognise. For the same reason a p
 never spans a clause break (see `ruleprobe.detectors.catalog`), and a word that narrows a
 rule unbinds the sentence it qualifies. An exception or a permission - except (excepted,
 exception), exempt, unless, other than, apart from, excluding, allowed, fine, okay, ok -
-unbinds the sentence it is in and the one before it, and in the heading the whole rule, so
-"Never force-push to main. Hotfixes excepted." is no force-push rule. A condition or a
-contrast - if, when, but, however, without - unbinds only its own sentence. The catalog's
-negated markers ("no exceptions", "admit no exception") are neither. `only` is left out,
+unbinds the sentence it is in and the sentences either side of it, in the heading the whole
+rule, and in a lead-in ending with `:` the list or paragraph it introduces, so "Never
+force-push to main. Hotfixes excepted." is no force-push rule, and nor is "Except on release
+branches:" over "- Never force-push to main.". A condition or a contrast - if, when, but,
+however, without - unbinds only its own sentence. The catalog's negated markers ("no
+exceptions", "admit no exception") are neither where the clause ends after them. `only` is left out,
 since it intensifies as often as it narrows ("use only uv"), and so are `instead` and
 `rather than`, which the pip shape itself uses. A rule bound in its front matter is `own`,
 and so is a catalog-bound one whose detector id a detector file of the user's replaced.
@@ -527,10 +529,13 @@ def _file_prose(body):
 # --- catalog binding ---------------------------------------------------------------------
 
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
-#: An exception or a permission. It unbinds the sentence it is in and the sentence before it:
-#: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools" are
-#: not the rules the catalog patterns read, and nor is "Run the tests before finishing.
-#: Docs-only changes are exempt." In a heading it unbinds the whole section under it.
+#: The abbreviations a sentence never ends after, however it is punctuated.
+_ABBREVIATION = re.compile(r"(?:^|[\s(\[])(?:e\.g|i\.e|etc|vs|cf)\.$", re.IGNORECASE)
+#: An exception or a permission. It unbinds the sentence it is in and the sentences either
+#: side of it: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for
+#: tools" are not the rules the catalog patterns read, and nor is "Run the tests before
+#: finishing. Docs-only changes are exempt." In a heading it unbinds the whole section under
+#: it, and in a paragraph or list item that ends with `:` the whole list it introduces.
 _EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ing|s|ions?)?|unless|other\s+than|"
                         r"apart\s+from|excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
 #: A condition or a contrast. It unbinds only the sentence it is in ("Never force-push to
@@ -539,60 +544,124 @@ _EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ing|s|ions?)?
 #: is full of them.
 _CONDITION = re.compile(r"\b(?:if|when|but|however|without)\b", re.IGNORECASE)
 #: The catalog's negated exception markers ("admit no exception"), longest first, each in
-#: the singular or the plural. They are removed before either word list is read.
-_NEGATED = re.compile(r"\b(?:%s)s?\b" % "|".join(
+#: the singular or the plural, and only where the clause ends after it: "without exception
+#: approval" names a kind of approval and denies nothing. They are removed before either
+#: word list is read.
+_CLAUSE_END = r"(?=\s*(?:[.,;:!?)\]\u2013\u2014]|$)|\s+-+(?:\s|$))"
+_NEGATED = re.compile(r"\b(?:%s)s?%s" % ("|".join(
     r"\s+".join(re.escape(word) for word in phrase.split())
     for phrase in sorted(_catalog.NEGATED_EXCEPTIONS, key=lambda p: (-len(p), p))),
-    re.IGNORECASE)
+    _CLAUSE_END), re.IGNORECASE)
 _MARKUP = re.compile(r"[`*]+")
 _TASK = re.compile(r"^\[[ xX]\][ \t]+")
 
+#: One sentence of a rule as the binder read it: the index of the paragraph it is in (-1
+#: for the heading), where it starts in that paragraph's normalized text (`_normalize`), the
+#: text, the catalog detectors whose pattern matches its start, in catalog order, and the
+#: word that unbinds them, or None.
+_Sentence = namedtuple("_Sentence", "paragraph start text detectors marker")
 
-def _sentences(heading, paragraphs):
-    """The heading and each sentence of `paragraphs`, as a catalog pattern reads them: a
-    link as its text, list markers, code and emphasis markers dropped, a typographic
-    apostrophe made plain, and whitespace collapsed. A sentence ends at `.`, `!` or `?`
-    followed by a space, so an abbreviation such as `e.g.` starts a new one: a pattern that
-    then fails to match under-counts, never over-counts."""
-    out = []
-    for text in [heading] + list(paragraphs):
-        text = _TASK.sub("", _LIST.sub("", text, count=1).lstrip(), count=1)
-        text = _EMPHASIS.sub("", _MARKUP.sub("", _LINK.sub(r"\1", text)))
-        text = " ".join(text.replace("’", "'").split())
-        out.extend(part for part in _SENTENCE_END.split(text) if part)
+
+def _normalize(text):
+    """A heading or a paragraph as a catalog pattern reads it: a link as its text, a list
+    or task marker, code and emphasis markers dropped, a typographic apostrophe made plain,
+    and whitespace collapsed."""
+    text = _TASK.sub("", _LIST.sub("", text, count=1).lstrip(), count=1)
+    text = _EMPHASIS.sub("", _MARKUP.sub("", _LINK.sub(r"\1", text)))
+    return " ".join(text.replace("\u2019", "'").split())
+
+
+def _split(text):
+    """`[(start, sentence)]` for normalized `text`. A sentence ends at `.`, `!` or `?`
+    followed by a space, but never inside parentheses or after e.g., i.e., etc., vs. or cf.,
+    since a split there can carry an exception out of the rule's reach ("Never force-push to
+    main (e.g. with --force). Tags are fine."). An unmatched `(` keeps the rest of the text
+    one sentence. Another abbreviation still splits; with an exception reaching the
+    sentences either side of it, it takes two such splits to leave a rule bound that should
+    not be."""
+    out, start, last, depth = [], 0, 0, 0
+    for found in _SENTENCE_END.finditer(text):
+        chunk = text[last:found.start()]
+        depth = max(0, depth + chunk.count("(") - chunk.count(")"))
+        last = found.start()
+        if depth or _ABBREVIATION.search(text[max(0, last - 6):last]):
+            continue
+        out.append((start, text[start:last]))
+        start = found.end()
+    if text[start:]:
+        out.append((start, text[start:]))
     return out
 
 
+def _pieces(heading, paragraphs):
+    """`[(paragraph index, start, sentence)]` for the heading (index -1) and each paragraph."""
+    out = []
+    for index, text in enumerate([heading] + list(paragraphs)):
+        out.extend((index - 1, start, part) for start, part in _split(_normalize(text)))
+    return out
+
+
+def _sentences(heading, paragraphs):
+    """The heading and each sentence of `paragraphs`, as a catalog pattern reads them
+    (`_normalize`, `_split`)."""
+    return [part for _index, _start, part in _pieces(heading, paragraphs)]
+
+
 def _match(heading, paragraphs):
-    """`[(detectors, marker)]`, one per sentence of the rule (`_sentences`), heading first:
-    the catalog detectors whose pattern matches the start of that sentence, in catalog order,
-    and the word that unbinds them, or None. The word is an exception or permission
-    (`_EXCEPTION`) or a condition (`_CONDITION`) in the sentence itself, else an exception or
-    permission in the sentence after it, else one in the heading; a negated marker such as
-    "no exceptions" is never one. Binding reads text and nothing else, against the shipped
-    fold map: a consumer's own renames are applied when `Bundle.registry` is built."""
-    sentences = _sentences(heading, paragraphs)
-    plain = [_NEGATED.sub(" ", sentence) for sentence in sentences]
-    head = [_NEGATED.sub(" ", sentence) for sentence in _sentences(heading, [])]
-    headed = next((found for found in map(_EXCEPTION.search, head) if found), None)
+    """`[_Sentence]`, one per sentence of the rule, heading first. A matching sentence's
+    unbinding word is the first found of: an exception or permission (`_EXCEPTION`) or a
+    condition (`_CONDITION`) in the sentence itself; an exception or permission in the
+    sentence before it or after it, in a paragraph or list item ending with `:` that
+    introduces its own paragraph or list, or in the heading. A negated marker such as
+    "no exceptions" at the end of a clause is never one. Binding reads text and nothing
+    else, against the shipped fold map: a consumer's own renames are applied when
+    `Bundle.registry` is built."""
+    pieces = _pieces(heading, paragraphs)
+    plain = [_NEGATED.sub(" ", part) for _index, _start, part in pieces]
+    granted = [_EXCEPTION.search(text) for text in plain]
+    headed = next((found for (index, _s, _p), found in zip(pieces, granted)
+                   if index < 0 and found), None)
+    reach = _introduced(paragraphs, pieces, granted)
     retired = fold_map()
     live = [(pattern, detector) for pattern, detector in _CATALOG
             if detector.id not in retired]
     out = []
-    for n, sentence in enumerate(sentences):
-        matched = [detector for pattern, detector in live if pattern.match(sentence)]
+    for n, (index, start, part) in enumerate(pieces):
+        matched = [detector for pattern, detector in live if pattern.match(part)]
         found = None
         if matched:
-            found = (_EXCEPTION.search(plain[n]) or _CONDITION.search(plain[n])
-                     or (n + 1 < len(plain) and _EXCEPTION.search(plain[n + 1])) or headed)
-        out.append((matched, found.group(0).lower() if found else None))
+            found = (granted[n] or _CONDITION.search(plain[n])
+                     or (n and granted[n - 1]) or (n + 1 < len(pieces) and granted[n + 1])
+                     or reach.get(index) or headed)
+        out.append(_Sentence(index, start, part, matched,
+                             found.group(0).lower() if found else None))
     return out
+
+
+def _introduced(paragraphs, pieces, granted):
+    """`{paragraph index: the exception or permission that reaches it}` from each paragraph
+    or list item ending with `:` that grants one: it introduces the list items straight
+    after it, or, when none follows, the next paragraph."""
+    reach = {}
+    for index, text in enumerate(paragraphs):
+        if not _normalize(text).endswith(":"):
+            continue
+        found = next((g for (i, _s, _p), g in zip(pieces, granted) if i == index and g), None)
+        if not found:
+            continue
+        covered = index + 1
+        while covered < len(paragraphs) and _LIST.match(paragraphs[covered]):
+            reach.setdefault(covered, found)
+            covered += 1
+        if covered == index + 1 and covered < len(paragraphs):
+            reach.setdefault(covered, found)
+    return reach
 
 
 def _bound(matches):
     """The detectors `_match`'s sentences bind, in catalog order: each sentence that matches
     exactly one entry and has no word unbinding it binds that entry."""
-    ids = set(matched[0].id for matched, marker in matches if len(matched) == 1 and not marker)
+    ids = set(s.detectors[0].id for s in matches if len(s.detectors) == 1 and not s.marker)
     return [detector for _pattern, detector in _CATALOG if detector.id in ids]
 
 
@@ -609,15 +678,16 @@ def _bind(rule, path, heading, paragraphs, reason=""):
     bound = _bound(matches)
     if bound:
         return RuleEntry(rule, path, "measured", "", [d.id for d in bound], "catalog")
-    for matched, marker in matches:
-        if matched and marker:
+    for sentence in matches:
+        if sentence.detectors and sentence.marker:
             return RuleEntry(rule, path, "unmeasured",
-                             "a catalog shape with an exception or condition (%s)" % marker,
-                             [])
-    for matched, _marker in matches:
-        if len(matched) > 1:
+                             "a catalog shape with an exception or condition (%s)"
+                             % sentence.marker, [])
+    for sentence in matches:
+        if len(sentence.detectors) > 1:
             return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
-                             % (len(matched), ", ".join(d.id for d in matched)), [])
+                             % (len(sentence.detectors),
+                                ", ".join(d.id for d in sentence.detectors)), [])
     return RuleEntry(rule, path, "unmeasured", reason, [])
 
 

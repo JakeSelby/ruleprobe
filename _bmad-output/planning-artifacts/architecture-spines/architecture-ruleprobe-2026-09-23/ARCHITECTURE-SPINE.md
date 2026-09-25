@@ -521,19 +521,23 @@ native (#55)
     fences. [ASSUMPTION: sentence-final punctuation and list items end a sentence]
   - A sentence binds an entry only when exactly one entry's pattern matches it; none or several leaves
     it unbound.
-  - An exception or permission word unbinds its own sentence and the sentence before it, since an
-    exception stated next ("Never force-push to main. Release managers are the exception.") narrows
-    the rule; in the heading it unbinds the whole section. A condition or contrast word unbinds only
-    its own sentence. Negated markers such as "no exception" are a closed list in the catalog data
-    (`NEGATED_EXCEPTIONS`) and never unbind.
+  - An exception or permission word unbinds its own sentence and the sentences either side of it,
+    since an exception stated next ("Never force-push to main. Release managers are the exception.")
+    or just before narrows the rule; in the heading it unbinds the whole section, and in a lead-in
+    ending with `:` the list or paragraph it introduces. A condition or contrast word unbinds only
+    its own sentence. A sentence never ends inside parentheses or after e.g., i.e., etc., vs. or cf.
+    Negated markers such as "no exception" are a closed list in the catalog data
+    (`NEGATED_EXCEPTIONS`) and never unbind where the clause ends after them.
   - An unsure sentence stays unbound (AD-4). The binder ships only at zero false binds on the zoo,
-    section and sentence level, with its recall held by a ratchet at the recall measured (FR-37); the
+    scored per labelled line, each bind on the line its sentence starts on, with its recall held by a ratchet at the recall measured (FR-37); the
     0.70 recall bar belongs to Epic 8 as a whole (RP-SP004). In 0.4, precision of at least 0.95 on at
     least 200 sections (FR-51). The binder's corpus is synthetic and lives under `ruleprobe/corpus/`
     beside the detector corpus (AD-6).
   - Amended 2026-09-25 (RP-SP004's decision, #141): the exception scope reaches the next sentence,
     replacing "only their own sentence", and the heading's reaches the whole section, settled by the
-    maintainer; a narrower refer-back scope waits for held-out near-misses.
+    maintainer; a narrower refer-back scope waits for held-out near-misses. Amended again at #142's
+    review: the scope also reaches the sentence before and a colon lead-in's list, sentences do not
+    split in parentheses or after common abbreviations, and a negated marker must end its clause.
   - Discovery (FR-38) lives in `rules.py`, reads and never writes, and the coverage block says the rule
     text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
     it.

@@ -411,9 +411,11 @@ ENTRIES = (
 
 #: Negated exception markers: phrases that deny an exception rather than grant one, so a rule
 #: stating one ("Never force-push to main. No exceptions.") still binds. A closed list, read
-#: case-insensitively, each phrase also in the plural, with any whitespace between its words;
-#: `ruleprobe.rules` removes them from a sentence before it looks for an exception or a
-#: condition word. A marker not listed here unbinds, which under-counts.
+#: case-insensitively, each phrase also in the plural, with any whitespace between its words,
+#: and only where the clause ends after the phrase: "without exception approval" and "with no
+#: exception ticket open" name a thing and deny nothing. `ruleprobe.rules` removes them from a
+#: sentence before it looks for an exception or a condition word. A marker not listed here, or
+#: not ending its clause, unbinds, which under-counts.
 NEGATED_EXCEPTIONS = (
     "admit no exception",
     "allow no exception",

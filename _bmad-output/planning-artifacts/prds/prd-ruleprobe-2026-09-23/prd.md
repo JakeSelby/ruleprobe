@@ -715,13 +715,17 @@ One rule section can bind several detectors, each through its own sentence. **St
 - A sentence still binds an entry only when it matches exactly one entry's pattern (FR-16); a sentence
   that matches none or several binds nothing.
 - An exception or permission word ("unless", "except", "exempt", "fine") unbinds its own sentence
-  and the sentence before it, so "Never force-push to main. Release managers are the exception." binds
-  nothing; in a section's heading it unbinds the whole section.
+  and the sentences either side of it, so "Never force-push to main. Release managers are the
+  exception." binds nothing; in a section's heading it unbinds the whole section, and in a lead-in
+  ending with a colon ("Except on release branches:") the list or paragraph it introduces.
 - A condition or contrast word ("if", "when", "but") unbinds only its own sentence.
-- A negated marker such as "no exception" or "without exception" does not unbind its sentence.
+- A negated marker such as "no exception" or "without exception" does not unbind its sentence where
+  its clause ends; "without exception approval" is no marker.
 - Amended 2026-09-25 (RP-SP004's decision, #141): the exception scope reaches the next sentence and
   the heading's reaches the section, replacing "an exception or condition word unbinds only its own
-  sentence", which measured five false binds on the zoo.
+  sentence", which measured five false binds on the zoo. Amended again at #142's review: the scope
+  also reaches the sentence before and a colon lead-in's list, and a negated marker must end its
+  clause.
 - The catalog gains patterns for the four default detectors that have none: `compact`, `model-switch`,
   `secret-in-write` and `unfiltered-find`.
 - Binding still reads the rule text with no model (NFR-7), and an unsure sentence stays unmeasured
