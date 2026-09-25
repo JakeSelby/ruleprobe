@@ -123,8 +123,8 @@ unmeasured, and the coverage block names the entries when it matched several. A 
 never reaches across a clause break (`;`, `,`, `:`, a run of hyphens between spaces such as
 ` - ` or ` -- `, a dash), except the comma of its own contrast ("use uv, not pip"). A rule
 carrying an exception or a permission anywhere, its heading included - except (excepted,
-exception), exempt (exempted, exemption), unless, other than, apart from, excluding, allowed,
-fine, okay, ok - binds nothing, so "Never force-push to main. Hotfixes excepted." is left
+exception), exempt (exempted, exempting, exempts, exemption), unless, other than, apart
+from, excluding, allowed, fine, okay, ok - binds nothing, so "Never force-push to main. Hotfixes excepted." is left
 unmeasured rather than read as a rule it is not. A condition or a contrast - if, when, but,
 however, without - unbinds a rule only in the sentence the pattern matched: "Never force-push to
 main when others share it" binds nothing, while "Run the tests before finishing. If one fails,
@@ -516,8 +516,9 @@ catalog entry, over `ruleprobe/corpus/rules-zoo.json`: synthetic rule sections w
 line labelled with the catalog detector it should bind, or none, beside near-misses for
 exceptions, conditions and contrasts. `pos` counts the sections labelled with an entry. Any
 false bind fails the command, whatever `--floor` says, because a rule bound to the wrong
-detector is measured wrongly; recall fails only under the recorded floor, the recall the
-shipped binder measured, which rises as binding improves. Labels naming a detector no catalog
+detector is measured wrongly. On the shipped zoo, recall fails only under the recorded floor,
+the recall the shipped binder measured, which rises as binding improves; a zoo of your own in
+a `--corpus` directory reports its recall and holds it to nothing. Labels naming a detector no catalog
 entry binds yet are counted apart. `--json` carries the same figures under `binding`.
 
 `ruleprobe report --validity` puts each detector's `p=` and `r=` beside its row. It is off

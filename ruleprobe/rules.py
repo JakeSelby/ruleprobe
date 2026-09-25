@@ -527,7 +527,7 @@ _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 #: rule: "Never force-push to main. Hotfixes excepted." and "Use uv; pip is fine for tools"
 #: are not the rules the catalog patterns read, and nor is "Run the tests before finishing.
 #: Docs-only changes are exempt."
-_EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ions?)?|unless|other\s+than|"
+_EXCEPTION = re.compile(r"\b(?:except(?:ed|ing|ions?)?|exempt(?:ed|ing|s|ions?)?|unless|other\s+than|"
                         r"apart\s+from|excluding|allowed|fine|okay|ok)\b", re.IGNORECASE)
 #: A condition or a contrast. It unbinds a rule only in a sentence a pattern matched ("Never
 #: force-push to main when others share it"): elsewhere it qualifies another sentence, as

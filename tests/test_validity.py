@@ -10,6 +10,7 @@ Three separate things are under test here and they fail for different reasons:
 
 Run: python3 -m unittest discover -s tests
 """
+import hashlib
 import io
 import json
 import os
@@ -24,7 +25,7 @@ from ruleprobe.cli import main
 from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
-from ruleprobe.validity import (BINDING_RECALL_FLOOR, ZOO_FILE, CorpusError, DEFAULT_FLOOR,
+from ruleprobe.validity import (BINDING_RECALL_FLOOR, SHIPPED_ZOO_SHA256, ZOO_FILE, CorpusError, DEFAULT_FLOOR,
                                 Score, below_floor, binding_as_dict, binding_failures,
                                 binding_table, corpus_dir, event_key, hit_key, load_corpus,
                                 load_zoo, score_binding, score_corpus, score_examples,
@@ -681,6 +682,31 @@ class BindingTests(Temp):
                          [{"section": "b3", "detector": "git-safety/force-push-default"}])
         self.assertEqual(data["below_floor"], [])
 
+    def test_a_zoo_of_my_own_with_low_recall_and_no_false_bind_exits_zero(self):
+        """The recall floor belongs to the shipped zoo: another zoo's recall is reported and
+        holds nothing, and only a false bind fails it."""
+        base = self.zoo_corpus([MISSED, dict(MISSED, id="b5"), NEAR])
+        binding = score_binding(base)
+        self.assertLess(binding.total.recall, BINDING_RECALL_FLOOR)
+        self.assertIsNone(binding.recall_floor)
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base)
+        self.assertEqual(code, 0)
+        self.assertIn("0.00  no recall floor", text)
+        code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base, "--json")
+        self.assertEqual(code, 0)
+        data = json.loads(text)["binding"]
+        self.assertEqual((data["recall_floor"], data["failures"]), (None, []))
+
+    def test_the_recall_floor_follows_the_shipped_zoo_by_its_bytes(self):
+        with open(os.path.join(corpus_dir(None), ZOO_FILE), "rb") as handle:
+            raw = handle.read()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), SHIPPED_ZOO_SHA256)
+        copied = self.zoo_corpus(None, raw=raw.decode("utf-8"))
+        self.assertEqual(score_binding(copied).recall_floor, BINDING_RECALL_FLOOR)
+        # The near miss: one byte more and it is a zoo of its own, with no floor.
+        edited = self.zoo_corpus(None, raw=raw.decode("utf-8") + "\n")
+        self.assertIsNone(score_binding(edited).recall_floor)
+
     def test_the_cli_exits_zero_on_a_clean_zoo_and_prints_the_binder_section(self):
         base = self.zoo_corpus([BOUND, NEAR])
         code, text, _err = self.run_cli("corpus", "--no-config", "--corpus", base)
@@ -747,6 +773,7 @@ class ShippedBindingTests(unittest.TestCase):
     def test_the_recall_floor_is_todays_recall_rounded_down(self):
         """The ratchet: when binding improves, raise `BINDING_RECALL_FLOOR` with it."""
         recall = self.binding.total.recall
+        self.assertEqual(self.binding.recall_floor, BINDING_RECALL_FLOOR)
         self.assertGreaterEqual(recall, BINDING_RECALL_FLOOR)
         self.assertEqual(BINDING_RECALL_FLOOR, int(recall * 100) / 100.0,
                          "binding recall is now %.4f: raise BINDING_RECALL_FLOOR to %.2f"
@@ -761,6 +788,9 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
                           binding["total"]["fn"]), (18, 0, 23))
         self.assertEqual(binding["total"]["precision"], 1.0)
+        self.assertEqual(binding["total"]["source"], "zoo")
+        self.assertEqual(set(row["source"] for row in binding["entries"].values()),
+                         set(["zoo"]))
         self.assertEqual((binding["recall_floor"], binding["outside_catalog"],
                           binding["failures"]), (BINDING_RECALL_FLOOR, 4, []))
 
