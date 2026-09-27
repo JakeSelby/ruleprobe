@@ -8,7 +8,7 @@
     "story": 23,
     "task": 10,
     "bug": 13,
-    "chore": 9,
+    "chore": 10,
     "spike": 5,
     "decision": 14
   },
@@ -1102,6 +1102,19 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S021.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C009",
+      "github_number": 144,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/144",
+      "title": "Move repository-internal agent instructions into a path-scoped rule",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C009.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
       "lifecycle": "active",
       "provenance": "authored"
     },
