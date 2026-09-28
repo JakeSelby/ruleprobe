@@ -753,7 +753,7 @@ to [Discussions](https://github.com/JakeSelby/ruleprobe/discussions).
 
 ## Origins and neighbours
 
-The engine was carved out of [agent-harness](https://github.com/JakeSelby/agent-harness),
+The engine was carved out of [Model Citizen (formerly agent-harness)](https://github.com/JakeSelby/model-citizen),
 where it grew as a hook that measured that project's own always-loaded rules; the detectors
 that were about agent-harness's rules stayed there, and the rule-agnostic half is this
 package. The nearest neighbour is [Burnd](https://github.com/garvitsurana271/burnd), which

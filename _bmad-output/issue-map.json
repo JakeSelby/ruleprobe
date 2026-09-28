@@ -6,7 +6,7 @@
   "next_ids": {
     "epic": 18,
     "story": 22,
-    "task": 10,
+    "task": 11,
     "bug": 13,
     "chore": 10,
     "spike": 5,
@@ -1113,6 +1113,19 @@
       "type": "chore",
       "native_type": "Task",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-C009.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-T010",
+      "github_number": 146,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/146",
+      "title": "docs(readme): update the Model Citizen origin reference",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T010.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
