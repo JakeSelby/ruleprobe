@@ -29,9 +29,14 @@ parse cannot see is a stated under-count in the entry's `description`.
 
 The catalog detector keeps its own slash-free `rule`; a bound section keeps its own id, path
 and all, on the rule entry that lists this detector's id, so a rule file in a subdirectory
-binds as one at the root does. Two entries restate a shipped detector,
-`verification/no-verify` and `transcript-hygiene/whole-file-cat`, under the shipped id: a
-section binds the shipped detector and the report carries one line for it, not two.
+binds as one at the root does. Six entries restate a shipped detector under the shipped id,
+one for each in `DEFAULT`: a section binds the shipped detector and the report carries one
+line for it, not two. Where a rule in a shape could carry a narrowing the pattern cannot
+read ("never compact more than once", "never run a bare find from the home directory"), the
+pattern must reach the end of the sentence, so the narrowed rule, or one with a second clause,
+binds nothing. Those patterns also name only scopes as wide as the detector's: a session or the
+context, never a task or a database, and files in general, never a commit, a repository, a
+config file or the code.
 
 This module holds literals and nothing else - no import, no call, no function - so it loads
 through the import system the same way from a directory, a wheel or a zip on `sys.path`, and
@@ -403,6 +408,205 @@ ENTRIES = (
                     {"bash": "git add certs/ca.pem", "note": "a certificate"},
                     {"bash": "git add src; echo \"git add .env\"",
                      "note": "the path only in another segment's text"},
+                ],
+            },
+        },
+    },
+    {
+        "shape": "Never compact the context",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:trigger(?:ing)?\s+)?(?:(?:context|"
+                   r"conversation)\s+compaction|auto-?compact(?:ion|ing)?|compaction\s+of\s+(?:the\s+|"
+                   r"your\s+)?(?:context|conversation|session)|compact(?:ing)?\s+(?:(?:the\s+|your\s+)?"
+                   r"(?:context|conversation|session)(?:\s+window)?|mid-?(?:session|conversation)|"
+                   r"(?:in\s+the\s+middle\s+of|partway\s+through)\s+(?:a|the)\s+(?:session|"
+                   r"conversation)))|(?:start|open)\s+a\s+(?:fresh|new)\s+(?:session|conversation)\s+"
+                   r"(?:rather\s+than|instead\s+of)\s+compacting)(?=[.!?]*$)",
+        "detector": {
+            "id": "cache-hygiene/compact",
+            "rule": "cache-hygiene",
+            "event": "session",
+            "description": "The shipped detector, written as data: one hit per context "
+                           "compaction, typed or automatic, since the transcript marks both "
+                           "the same way, so a rule against the typed `/compact` alone, or "
+                           "one scoped to a task, is not this shape and binds nothing; nor is "
+                           "\"never compact more than once\", nor compaction with no word "
+                           "saying it is the context's, which a database does too.",
+            "when": {"kind": "compact"},
+            "examples": {
+                "fire": [
+                    {"events": [{"kind": "compact"}], "note": "one compaction"},
+                    {"events": [{"kind": "assistant_text", "text": "Done."},
+                                {"kind": "compact"},
+                                {"kind": "assistant_text", "text": "Resuming."}],
+                     "note": "a compaction mid-session"},
+                ],
+                "skip": [
+                    {"events": [{"kind": "assistant_text", "text": "Run /compact now?"}],
+                     "note": "the command named, not run"},
+                    {"bash": "echo /compact", "note": "the command as text"},
+                    {"events": [{"kind": "user_prompt", "text": "/clear"}],
+                     "note": "a fresh start, not a compaction"},
+                ],
+            },
+        },
+    },
+    {
+        "shape": "Never switch models mid-session",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:switch(?:ing)?|chang(?:e|ing)|"
+                   r"swap(?:ping)?)\s+(?:the\s+|your\s+)?models?\s+(?:mid-?(?:session|conversation|"
+                   r"chat)|(?:in\s+the\s+middle\s+of|partway\s+through|during)\s+(?:a|the)\s+"
+                   r"(?:session|conversation|chat))|(?:always\s+)?(?:stay|stick)\s+(?:on|with)\s+"
+                   r"(?:one|a\s+single|the\s+same)\s+model\s+(?:for|throughout)\s+(?:the\s+"
+                   r"(?:whole\s+|entire\s+)?|a\s+|each\s+)?(?:session|conversation|chat))"
+                   r"(?=[.!?]*$)",
+        "detector": {
+            "id": "cache-hygiene/model-switch",
+            "rule": "cache-hygiene",
+            "event": "session",
+            "description": "The shipped detector, written as data: one hit per change of the "
+                           "assistant's model within a session. A bracketed model name is a "
+                           "turn the runtime generated, and is stepped over. A rule naming a "
+                           "purpose (\"never switch models to save money\") is not this shape "
+                           "and binds nothing.",
+            "when": {
+                "change": {"kind": "assistant_text", "field": "model",
+                           "ignore_prefix": "<", "ignore_empty": True},
+            },
+            "examples": {
+                "fire": [
+                    {"events": [{"kind": "assistant_text", "text": "a", "model": "model-a"},
+                                {"kind": "assistant_text", "text": "b", "model": "model-b"}],
+                     "note": "one change"},
+                    {"events": [{"kind": "assistant_text", "text": "a", "model": "model-a"},
+                                {"kind": "assistant_text", "text": "b", "model": "<synthetic>"},
+                                {"kind": "assistant_text", "text": "c", "model": "model-b"}],
+                     "note": "a change across a runtime-generated turn"},
+                ],
+                "skip": [
+                    {"events": [{"kind": "assistant_text", "text": "a", "model": "model-a"},
+                                {"kind": "assistant_text", "text": "b", "model": "model-a"}],
+                     "note": "the same model throughout"},
+                    {"events": [{"kind": "assistant_text", "text": "a", "model": "model-a"},
+                                {"kind": "assistant_text", "text": "b", "model": "<synthetic>"},
+                                {"kind": "assistant_text", "text": "c", "model": "model-a"}],
+                     "note": "a runtime-generated turn between two of one model"},
+                    {"events": [{"kind": "assistant_text", "text": "a", "model": "model-a"},
+                                {"kind": "assistant_text", "text": "b"}],
+                     "note": "a turn with no model named"},
+                ],
+            },
+        },
+    },
+    {
+        "shape": "Never write a secret into a file",
+        "pattern": r"^(?:never|do\s+not|don't)\s+(?:write|hard-?code|paste|put|embed|inline)\s+"
+                   r"(?:a\s+|an\s+|any\s+)?(?:secrets?|credentials?|(?:api|access)\s+keys?|"
+                   r"(?:api|access|auth)\s+tokens?|tokens?|private\s+keys?)\s+(?:in|into|to)\s+"
+                   r"(?:a\s+|any\s+)?files?(?=[.!?]*$)",
+        "detector": {
+            "id": "secrets/secret-in-write",
+            "rule": "secrets",
+            "event": "tool_use",
+            "description": "The shipped detector, written as data: a secret-shaped string - an "
+                           "access key id, a bearer token, a client secret assignment, a "
+                           "private key block, a chat or code-host token, an `sk-` key - in "
+                           "the text a Write or Edit writes, or in a Bash heredoc body. A key "
+                           "given on the command line outside a heredoc is missed, and so is "
+                           "a password, which has no shape.",
+            "when": {
+                "any": [
+                    {"all": [
+                        {"tool": {"name": ["Write", "Edit"]}},
+                        {"arg": {"field": ["content", "new_string"],
+                                 "regex": ["AKIA[0-9A-Z]{16}",
+                                           r"(?i)aws_secret[_]access_key",
+                                           r"Bearer [A-Za-z0-9._-]{20,}",
+                                           r"(?i)client_secret\s*[:=]",
+                                           "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+                                           "xox[bp]-",
+                                           "ghp_[A-Za-z0-9]{20,}",
+                                           "sk-[A-Za-z0-9]{20,}"]}},
+                    ]},
+                    {"all": [
+                        {"tool": {"name": "Bash"}},
+                        {"text": {"source": "payload",
+                                  "regex": ["AKIA[0-9A-Z]{16}",
+                                            r"(?i)aws_secret[_]access_key",
+                                            r"Bearer [A-Za-z0-9._-]{20,}",
+                                            r"(?i)client_secret\s*[:=]",
+                                            "-----BEGIN [A-Z ]*PRIVATE KEY-----",
+                                            "xox[bp]-",
+                                            "ghp_[A-Za-z0-9]{20,}",
+                                            "sk-[A-Za-z0-9]{20,}"]}},
+                    ]},
+                ],
+            },
+            # Each secret-shaped literal below is split in two, so a repository that greps
+            # its tracked files for secret shapes does not trip over this module.
+            "examples": {
+                "fire": [
+                    {"event": {"name": "Write",
+                               "input": {"file_path": "config/app.env",
+                                         "content": "KEY_ID=AKIA" "QQQQQQQQQQQQQQQQ\n"}},
+                     "note": "an access key id written to a file"},
+                    {"event": {"name": "Edit",
+                               "input": {"file_path": "src/auth.py", "old_string": "x",
+                                         "new_string": "client_" "secret = 'abc123'"}},
+                     "note": "a client secret assigned in an edit"},
+                    {"bash": "cat > token.txt <<'EOF'\nghp_" "abcdefghijklmnopqrstuvwx\nEOF",
+                     "note": "a code-host token in a heredoc body"},
+                ],
+                "skip": [
+                    {"event": {"name": "Write",
+                               "input": {"file_path": "config/app.env",
+                                         "content": "KEY_ID=${KEY_ID}\n"}},
+                     "note": "a placeholder, not a value"},
+                    {"event": {"name": "Edit",
+                               "input": {"file_path": "src/auth.py", "old_string": "x",
+                                         "new_string": "headers['Authorization'] = "
+                                                       "'Bearer ' + token"}},
+                     "note": "a token read from a variable"},
+                    {"bash": "grep -rn client_" "secret src",
+                     "note": "the key name searched for, nothing written"},
+                    {"bash": "cat > notes.txt <<'EOF'\nrotate the keys on Friday\nEOF",
+                     "note": "a heredoc with no secret in it"},
+                ],
+            },
+        },
+    },
+    {
+        "shape": "Filter every find",
+        "pattern": r"^(?:(?:always\s+)?(?:filter|narrow)\s+(?:every\s+|each\s+|any\s+|all\s+|"
+                   r"your\s+)?find(?![\w-])(?:\s+(?:commands?|calls?|searches))?(?:\s+(?:by|with)\s+"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|size|pattern)s?(?:\s+(?:or|and)\s+"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|size|pattern)s?)*)?|(?:never|"
+                   r"do\s+not|don't)\s+(?:run\s+)?(?:a\s+|an\s+)?(?:unfiltered|bare|unbounded)\s+"
+                   r"find(?![\w-])(?:\s+(?:commands?|calls?|searches))?)(?=[.!?]*$)",
+        "detector": {
+            "id": "transcript-hygiene/unfiltered-find",
+            "rule": "transcript-hygiene",
+            "event": "tool_use",
+            "description": "The shipped detector, written as data: a lone `find` with no "
+                           "narrowing predicate, no redirect and nothing piped from it. A "
+                           "`find` piped to `head` is filtered by its consumer and is no hit.",
+            "when": {
+                "command": {"starts_with": "find", "sole_segment": True, "redirect": False,
+                            "none_of": ["-name", "-iname", "-path", "-ipath", "-regex",
+                                        "-iregex", "-type", "-maxdepth", "-mindepth",
+                                        "-mmin", "-mtime", "-newer", "-newermt", "-size",
+                                        "-perm", "-user", "-group", "-empty", "-prune",
+                                        "-exec", "-execdir", "-delete", "-print0"]},
+            },
+            "examples": {
+                "fire": [
+                    {"bash": "find ."},
+                    {"bash": "find src -follow", "note": "an option that narrows nothing"},
+                ],
+                "skip": [
+                    {"bash": "find . -name '*.py'", "note": "narrowed by name"},
+                    {"bash": "find . -maxdepth 2", "note": "narrowed by depth"},
+                    {"bash": "find . | head -50", "note": "piped to a filter"},
+                    {"bash": "find . > files.txt", "note": "redirected to a file"},
                 ],
             },
         },
