@@ -26,6 +26,8 @@ from ruleprobe.cli import main
 from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
+from ruleprobe.validity import (HELDOUT_FILE, HELDOUT_HEADING, HELDOUT_RECALL_FLOOR,
+                                SHIPPED_HELDOUT_SHA256, load_heldout, score_heldout)
 from ruleprobe.validity import (BINDING_RECALL_FLOOR, SHIPPED_ZOO_SHA256, ZOO_FILE, CorpusError, DEFAULT_FLOOR,
                                 Score, below_floor, binding_as_dict, binding_failures,
                                 binding_table, corpus_dir, event_key, hit_key, load_corpus,
@@ -893,6 +895,71 @@ class HeldOutTests(unittest.TestCase):
         self.assertEqual(binding.total.positives, 34)
         self.assertGreaterEqual(binding.total.recall, self.RECALL)
         self.assertEqual(self.RECALL, int(binding.total.recall * 100) / 100.0)
+
+
+class IndependentHeldOutTests(Temp):
+    """`rules-heldout.json`: 80 sentences written from each detector's claim by an author who
+    never saw the patterns, shipped as written. The binder's first measurement on it, before
+    any change it prompted, was recall 0.12 (5/40) with no false bind."""
+
+    def heldout_corpus(self, raw):
+        base = self.corpus("version: 1\nsessions: []\n", {})
+        with open(os.path.join(base, HELDOUT_FILE), "w", encoding="utf-8") as handle:
+            handle.write(raw)
+        return base
+
+    def test_the_shipped_set_is_the_one_its_author_froze(self):
+        path = os.path.join(corpus_dir(), HELDOUT_FILE)
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), SHIPPED_HELDOUT_SHA256)
+        items = load_heldout()
+        self.assertEqual(len(items), 80)
+        self.assertEqual(sum(1 for item in items if item["lines"][0][1]), 40)
+        self.assertEqual(set(item["heading"] for item in items), set([HELDOUT_HEADING]))
+
+    def test_the_binder_makes_no_false_bind_on_it_and_holds_its_recall(self):
+        binding = score_heldout()
+        self.assertEqual(binding.false_binds, [])
+        self.assertEqual(binding_failures(binding), [])
+        self.assertEqual(binding.recall_floor, HELDOUT_RECALL_FLOOR)
+        self.assertEqual(HELDOUT_RECALL_FLOOR, int(binding.total.recall * 100) / 100.0,
+                         "held-out recall is now %.4f: raise HELDOUT_RECALL_FLOOR"
+                         % binding.total.recall)
+
+    def test_a_set_of_my_own_is_scored_with_no_floor_and_its_false_bind_fails(self):
+        raw = json.dumps([{"id": "a", "text": "Never force-push to main.", "label": None,
+                           "why": "a near-miss for the test"},
+                          {"id": "b", "text": "Keep it tidy.", "label":
+                           "git-safety/force-push-default", "why": "a miss"}])
+        binding = score_heldout(self.heldout_corpus(raw))
+        self.assertIsNone(binding.recall_floor)
+        self.assertEqual(binding.false_binds, [("a", "git-safety/force-push-default")])
+        self.assertEqual(binding.misses, [("b", "git-safety/force-push-default")])
+        self.assertIn("binder over the independent held-out set: 2 sections",
+                      binding_table(binding))
+
+    def test_no_set_in_a_corpus_of_my_own_is_none_and_a_malformed_one_is_an_error(self):
+        self.assertIsNone(score_heldout(self.corpus("version: 1\nsessions: []\n", {})))
+        for raw in ('{"items": []}', '[{"id": "a", "text": "x", "label": null, "extra": 1}]',
+                    '[{"id": "a", "text": "two\\nlines", "label": null}]',
+                    '[{"id": "a", "text": "x"}, {"id": "a", "text": "y"}]'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(CorpusError):
+                    load_heldout(self.heldout_corpus(raw))
+
+    def test_the_corpus_command_prints_it_and_carries_it_in_the_json(self):
+        os.environ.pop("RULEPROBE_CORPUS", None)
+        out = io.StringIO()
+        self.assertEqual(main(["corpus", "--no-config", "--json"], out=out), 0)
+        heldout = json.loads(out.getvalue())["heldout"]
+        self.assertEqual((heldout["zoo"], heldout["sections"], heldout["failures"]),
+                         (HELDOUT_FILE, 80, []))
+        self.assertEqual(heldout["recall_floor"], HELDOUT_RECALL_FLOOR)
+        out = io.StringIO()
+        self.assertEqual(main(["corpus", "--no-config"], out=out), 0)
+        self.assertIn("binder over the independent held-out set: 80 sections, 80 labels",
+                      out.getvalue())
 
 
 class FoldTests(Temp):

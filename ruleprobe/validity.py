@@ -77,6 +77,19 @@ BINDING_RECALL_FLOOR = 0.68
 #: The sha256 of the shipped zoo's bytes. A zoo with other bytes - a corpus of your own, or
 #: the shipped one edited - gets no recall floor; a change to the shipped zoo updates this.
 SHIPPED_ZOO_SHA256 = "d390f1c4a755e801967224e0246e2857df81f371c69346d78a627d10d31c4fb1"
+#: The independent held-out set, beside the zoo: synthetic rule sentences written from each
+#: detector's claim by an author who never saw the catalog's patterns, shipped byte for byte
+#: as written. Each item is `{"id", "text", "label", "why"}`, and binds as a one-sentence
+#: section under `HELDOUT_HEADING`. Once shipped it is a regression set; a new claim of
+#: independence needs a new set.
+HELDOUT_FILE = "rules-heldout.json"
+#: The heading each held-out sentence binds under: a word no pattern reads.
+HELDOUT_HEADING = "Rule"
+#: The binding recall the shipped binder measured on the shipped held-out set, rounded down,
+#: held as `BINDING_RECALL_FLOOR` is, and on that set alone, known by its bytes.
+HELDOUT_RECALL_FLOOR = 0.12
+SHIPPED_HELDOUT_SHA256 = "b1fbde61d35afbb4906ca0985b3657783c86e24ec75084315cf28a5ecc08ccf2"
+_HELDOUT_KEYS = ("id", "text", "label", "why")
 _ZOO_KEYS = ("about", "items")
 _ITEM_KEYS = ("id", "kind", "heading", "heading_label", "lines")
 
@@ -482,9 +495,9 @@ class Binding(object):
     """
 
     __slots__ = ("entries", "false_binds", "misses", "sections", "labels", "outside",
-                 "recall_floor")
+                 "recall_floor", "source_file")
 
-    def __init__(self, entries, recall_floor=None):
+    def __init__(self, entries, recall_floor=None, source_file=ZOO_FILE):
         self.entries = entries
         self.false_binds = []
         self.misses = []
@@ -492,6 +505,7 @@ class Binding(object):
         self.labels = 0
         self.outside = 0
         self.recall_floor = recall_floor
+        self.source_file = source_file
 
     @property
     def total(self):
@@ -616,6 +630,64 @@ def _attributed(item, heading, paragraphs):
     return out
 
 
+def load_heldout(directory=None):
+    """The independent held-out set's items as zoo sections (`load_zoo`'s shape), or None
+    when a corpus directory of your own holds no `HELDOUT_FILE`; its absence from the
+    shipped corpus is a `CorpusError`."""
+    loaded = _read_heldout(directory)
+    return None if loaded is None else loaded[0]
+
+
+def _read_heldout(directory=None):
+    """`(items as zoo sections, sha256 of the file's bytes)` for `load_heldout`, or None."""
+    base = corpus_dir(directory)
+    path = os.path.join(base, HELDOUT_FILE)
+    if not os.path.isfile(path):
+        if os.path.normcase(base) == os.path.normcase(_shipped_dir()):
+            raise CorpusError("%s: the shipped corpus has no held-out set" % path)
+        return None
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        document = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise CorpusError("%s: cannot read: %s" % (path, exc))
+    if not isinstance(document, list):
+        raise CorpusError("%s: expected a list of held-out items" % path)
+    items, seen = [], set()
+    for item in document:
+        if not isinstance(item, dict):
+            raise CorpusError("%s: a held-out item is an object" % path)
+        _only(item, _HELDOUT_KEYS, path, "held-out item")
+        ident, text = item.get("id"), item.get("text")
+        if not isinstance(ident, str) or not ident or ident in seen:
+            raise CorpusError("%s: every held-out item has an id of its own; %r is not one"
+                              % (path, ident))
+        seen.add(ident)
+        if not isinstance(text, str) or not text.strip() or "\n" in text \
+                or not _is_label(item.get("label")):
+            raise CorpusError("%s: held-out item %s needs one line of text and a detector id "
+                              "or null" % (path, ident))
+        items.append({"id": ident, "heading": HELDOUT_HEADING,
+                      "lines": [[text, item.get("label")]]})
+    return items, hashlib.sha256(raw).hexdigest()
+
+
+def score_heldout(directory=None):
+    """The binder over the independent held-out set (`load_heldout`), as a `Binding`, or
+    None when there is none. Only the shipped set, known by its bytes, carries a recall
+    floor; any false bind fails it, as on the zoo."""
+    loaded = _read_heldout(directory)
+    if loaded is None:
+        return None
+    items, digest = loaded
+    binding = score_binding(zoo=items)
+    binding.source_file = HELDOUT_FILE
+    if digest == SHIPPED_HELDOUT_SHA256:
+        binding.recall_floor = HELDOUT_RECALL_FLOOR
+    return binding
+
+
 def score_binding(directory=None, zoo=None):
     """The binder over the rules zoo (`load_zoo`), as a `Binding`, or None when there is no
     zoo. Each item binds as a section of a rule file binds, against the shipped catalog and
@@ -694,7 +766,7 @@ def binding_as_dict(binding, recall_floor=None):
         return None
     if recall_floor is None:
         recall_floor = binding.recall_floor
-    return {"zoo": ZOO_FILE, "sections": binding.sections, "labels": binding.labels,
+    return {"zoo": binding.source_file, "sections": binding.sections, "labels": binding.labels,
             "outside_catalog": binding.outside, "recall_floor": recall_floor,
             "entries": dict((did, _binding_row(s)) for did, s in binding.entries.items()),
             "total": _binding_row(binding.total),
@@ -747,8 +819,10 @@ def binding_table(binding, recall_floor=None):
         recall_floor = binding.recall_floor
     head = _BIND_HEAD % ("catalog entry", "pos", "tp", "fp", "fn", "prec", "recall")
     rule = "-" * len(head)
-    lines = ["binder over the rules zoo: %d sections, %d labels"
-             % (binding.sections, binding.labels), head, rule]
+    over = ("the independent held-out set" if binding.source_file == HELDOUT_FILE
+            else "the rules zoo")
+    lines = ["binder over %s: %d sections, %d labels"
+             % (over, binding.sections, binding.labels), head, rule]
     for did in sorted(binding.entries):
         score = binding.entries[did]
         lines.append(_bind_row(did[:38], score, "false bind" if score.fp else ""))

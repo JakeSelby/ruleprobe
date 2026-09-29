@@ -49,7 +49,7 @@ from .rules import catalog_detectors, find_rule_files, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
                        DEFAULT_FLOOR, below_floor, binding_as_dict, binding_failures,
                        binding_table, event_key, hit_key, load_corpus, read_events,
-                       score_binding, score_corpus, score_examples, scores_as_dict, validity,
+                       score_binding, score_corpus, score_heldout, score_examples, scores_as_dict, validity,
                        validity_table)
 
 
@@ -371,25 +371,31 @@ def cmd_corpus(args, out):
 
     The binder is scored too, over the corpus's rules zoo, and fails the gate on any false
     bind or on recall under its recorded floor, whatever `--floor` says: one wrong bind is a
-    rule measured by the wrong detector.
+    rule measured by the wrong detector. The independent held-out set beside the zoo is
+    scored the same way, and gates the same way.
     """
     bundle, registry = _bundle_and_registry(args, whole_catalog=True)
     try:
         scores = _score_restated(validity(registry=registry, directory=args.corpus),
                                  registry)
         binding = score_binding(directory=args.corpus)
+        heldout = score_heldout(directory=args.corpus)
     except CorpusError as exc:
         sys.stderr.write("corpus: %s\n" % exc)
         return 2
     failed = below_floor(scores, args.floor)
-    unbound = binding_failures(binding)
+    unbound = binding_failures(binding) + ["held-out set: %s" % line
+                                           for line in binding_failures(heldout)]
     if args.json:
         data = scores_as_dict(scores, args.floor)
         data["binding"] = binding_as_dict(binding)
+        data["heldout"] = binding_as_dict(heldout)
         out.write(json.dumps(data, indent=2, sort_keys=True) + "\n")
         return 1 if failed or unbound else 0
     out.write(validity_table(scores, args.floor) + "\n")
     out.write("\n" + binding_table(binding) + "\n")
+    if heldout is not None:
+        out.write("\n" + binding_table(heldout) + "\n")
     summary = bundle.summary()
     if summary:
         out.write("\n" + summary + "\n")

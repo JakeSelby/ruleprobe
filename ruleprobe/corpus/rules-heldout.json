@@ -1,0 +1,482 @@
+[
+ {
+  "id": "i01",
+  "text": "The .env file lives in the repo root and is gitignored.",
+  "label": null,
+  "why": "description"
+ },
+ {
+  "id": "i02",
+  "text": "After editing any source file, run the test suite before moving on.",
+  "label": "testing/test-after-change",
+  "why": "requires test run after change"
+ },
+ {
+  "id": "i03",
+  "text": "Write a regression test for every bug fix.",
+  "label": null,
+  "why": "different: writing tests"
+ },
+ {
+  "id": "i04",
+  "text": "- Keep the same model for the whole session.",
+  "label": "cache-hygiene/model-switch",
+  "why": "model switch"
+ },
+ {
+  "id": "i05",
+  "text": "Use find-and-replace across the repo for renames \u2014 prefer sed or your editor.",
+  "label": null,
+  "why": "different: find-and-replace"
+ },
+ {
+  "id": "i06",
+  "text": "Keep commit bodies wrapped at 72 columns.",
+  "label": null,
+  "why": "different: body format"
+ },
+ {
+  "id": "i07",
+  "text": "- Never let the context be compacted, manually or automatically.",
+  "label": "cache-hygiene/compact",
+  "why": "compaction any"
+ },
+ {
+  "id": "i08",
+  "text": "- Filter every `find`.",
+  "label": "transcript-hygiene/unfiltered-find",
+  "why": "unfiltered find"
+ },
+ {
+  "id": "i09",
+  "text": "Never cat a whole file into the conversation; use head, grep -n or a sed range.",
+  "label": "transcript-hygiene/whole-file-cat",
+  "why": "whole-file cat"
+ },
+ {
+  "id": "i10",
+  "text": "Our pre-commit hooks run ruff and mypy.",
+  "label": null,
+  "why": "description"
+ },
+ {
+  "id": "i11",
+  "text": "- Do not stage secret-bearing files (.env, *.pem, id_rsa) with git add.",
+  "label": "secrets/secret-file-add",
+  "why": "secret file add"
+ },
+ {
+  "id": "i12",
+  "text": "Release commits use the subject `release: vX.Y.Z`.",
+  "label": null,
+  "why": "narrower: one kind of commit"
+ },
+ {
+  "id": "i13",
+  "text": "Changing the model partway through a task invalidates the cache, so never do it.",
+  "label": "cache-hygiene/model-switch",
+  "why": "model switch"
+ },
+ {
+  "id": "i14",
+  "text": "Do not git add private keys.",
+  "label": null,
+  "why": "narrower: only private keys"
+ },
+ {
+  "id": "i15",
+  "text": "You may switch to a cheaper model for bulk summarization.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i16",
+  "text": "An unfiltered find floods the transcript; always constrain it by name, path, type or depth.",
+  "label": "transcript-hygiene/unfiltered-find",
+  "why": "unfiltered find"
+ },
+ {
+  "id": "i17",
+  "text": "- Commit subjects follow the Conventional Commits format.",
+  "label": "commits/non-conventional-subject",
+  "why": "conventional subject"
+ },
+ {
+  "id": "i18",
+  "text": "Use the strong model class for review subagents.",
+  "label": null,
+  "why": "different: model choice for subagents"
+ },
+ {
+  "id": "i19",
+  "text": "Rewriting history on the default branch with a force push is prohibited.",
+  "label": "git-safety/force-push-default",
+  "why": "force-push default"
+ },
+ {
+  "id": "i20",
+  "text": "- Install Python packages with `uv add`/`uv pip`, not `pip install` or `python -m pip install`.",
+  "label": "package-manager/pip-install",
+  "why": "pip install"
+ },
+ {
+  "id": "i21",
+  "text": "Avoid context compaction of any kind; use /clear between tasks.",
+  "label": "cache-hygiene/compact",
+  "why": "compaction"
+ },
+ {
+  "id": "i22",
+  "text": "Every commit message must start with a type like feat, fix or chore, then a colon.",
+  "label": "commits/non-conventional-subject",
+  "why": "conventional subject"
+ },
+ {
+  "id": "i23",
+  "text": "Prefer uv over pip for every package installation.",
+  "label": "package-manager/pip-install",
+  "why": "pip install"
+ },
+ {
+  "id": "i24",
+  "text": "Never write API keys, tokens or passwords into any file.",
+  "label": "secrets/secret-in-write",
+  "why": "secret in write"
+ },
+ {
+  "id": "i25",
+  "text": "Never force-push to the release/2.x branch.",
+  "label": null,
+  "why": "narrower: one non-default branch"
+ },
+ {
+  "id": "i26",
+  "text": "- Always re-run tests once you've modified code.",
+  "label": "testing/test-after-change",
+  "why": "test after change"
+ },
+ {
+  "id": "i27",
+  "text": "Before opening a pull request, run the full test suite.",
+  "label": null,
+  "why": "narrower: before PR, not after each change"
+ },
+ {
+  "id": "i28",
+  "text": "Never skip the pre-push hook.",
+  "label": null,
+  "why": "narrower: only pre-push"
+ },
+ {
+  "id": "i29",
+  "text": "We write commit subjects as feat(scope): summary, always.",
+  "label": "commits/non-conventional-subject",
+  "why": "conventional subject"
+ },
+ {
+  "id": "i30",
+  "text": "- Read narrowly: no `cat file` dumps.",
+  "label": "transcript-hygiene/whole-file-cat",
+  "why": "whole-file cat"
+ },
+ {
+  "id": "i31",
+  "text": "--no-verify is okay on throwaway branches.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i32",
+  "text": "Never git add a .env file, credentials.json or a private key.",
+  "label": "secrets/secret-file-add",
+  "why": "secret file add"
+ },
+ {
+  "id": "i33",
+  "text": "During the incident call, do not switch models.",
+  "label": null,
+  "why": "narrower: one situation"
+ },
+ {
+  "id": "i34",
+  "text": "Do not write the Stripe live key into .github/workflows files.",
+  "label": null,
+  "why": "narrower: one directory, one key"
+ },
+ {
+  "id": "i35",
+  "text": "Never type /compact during a migration.",
+  "label": null,
+  "why": "narrower: typed only, one task"
+ },
+ {
+  "id": "i36",
+  "text": "You may skip the tests for documentation-only edits.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i37",
+  "text": "Never run find over node_modules without a filter.",
+  "label": null,
+  "why": "narrower: one directory"
+ },
+ {
+  "id": "i38",
+  "text": "Rotate tokens every ninety days.",
+  "label": null,
+  "why": "different: rotation"
+ },
+ {
+  "id": "i39",
+  "text": "The legacy scripts were installed with pip.",
+  "label": null,
+  "why": "description"
+ },
+ {
+  "id": "i40",
+  "text": "- No secrets in files: read credentials from the environment instead.",
+  "label": "secrets/secret-in-write",
+  "why": "secret in write"
+ },
+ {
+  "id": "i41",
+  "text": "Never paste an API key into the chat.",
+  "label": null,
+  "why": "different: chat, not file"
+ },
+ {
+  "id": "i42",
+  "text": "Secret-shaped files such as .env or key files must never be committed.",
+  "label": "secrets/secret-file-add",
+  "why": "secret file add"
+ },
+ {
+  "id": "i43",
+  "text": "Avoid dumping entire files with cat; read only the lines you need.",
+  "label": "transcript-hygiene/whole-file-cat",
+  "why": "whole-file cat"
+ },
+ {
+  "id": "i44",
+  "text": "Log compaction runs every hour on the Kafka cluster.",
+  "label": null,
+  "why": "different sense, description"
+ },
+ {
+  "id": "i45",
+  "text": "Squash-merge titles on main follow Conventional Commits.",
+  "label": null,
+  "why": "narrower: PR titles only"
+ },
+ {
+  "id": "i46",
+  "text": "Every code change is followed by a test run in the same session. No exceptions.",
+  "label": "testing/test-after-change",
+  "why": "test after change"
+ },
+ {
+  "id": "i47",
+  "text": "In the deploy repo, never git add credentials.json.",
+  "label": null,
+  "why": "narrower: one repo, one file"
+ },
+ {
+  "id": "i48",
+  "text": "Do not push directly to main; open a PR.",
+  "label": null,
+  "why": "different: plain push"
+ },
+ {
+  "id": "i49",
+  "text": "Keep secret files out of the index: never `git add` them.",
+  "label": "secrets/secret-file-add",
+  "why": "secret file add"
+ },
+ {
+  "id": "i50",
+  "text": "Use cat to concatenate fixtures when building test data.",
+  "label": null,
+  "why": "different sense: concatenation"
+ },
+ {
+  "id": "i51",
+  "text": "Never cat log files from /var/log; grep them.",
+  "label": null,
+  "why": "narrower: one kind of file"
+ },
+ {
+  "id": "i52",
+  "text": "Reading a small config with cat is fine.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i53",
+  "text": "Never run find without a filter such as -name, -type or -maxdepth.",
+  "label": "transcript-hygiene/unfiltered-find",
+  "why": "unfiltered find"
+ },
+ {
+  "id": "i54",
+  "text": "pip install is allowed for the global tooling venv.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i55",
+  "text": "Run the integration tests after changing anything under services/billing.",
+  "label": null,
+  "why": "narrower: one directory"
+ },
+ {
+  "id": "i56",
+  "text": "Don't reach for pip to install dependencies; this repo is uv-managed.",
+  "label": "package-manager/pip-install",
+  "why": "pip install"
+ },
+ {
+  "id": "i57",
+  "text": "Never change a Django model without a migration.",
+  "label": null,
+  "why": "different: database model"
+ },
+ {
+  "id": "i58",
+  "text": "Do not put tokens or passwords in any file, committed or not.",
+  "label": "secrets/secret-in-write",
+  "why": "secret in write"
+ },
+ {
+  "id": "i59",
+  "text": "On Fridays, never force-push to main.",
+  "label": null,
+  "why": "narrower: one day"
+ },
+ {
+  "id": "i60",
+  "text": "We expect you to execute the tests after each change you make.",
+  "label": "testing/test-after-change",
+  "why": "test after change"
+ },
+ {
+  "id": "i61",
+  "text": "Auto-compaction is acceptable on long research sessions; use it freely there.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i62",
+  "text": "Credentials must never be hardcoded in source, config or docs.",
+  "label": "secrets/secret-in-write",
+  "why": "secret in write"
+ },
+ {
+  "id": "i63",
+  "text": "- Do not bypass git hooks.",
+  "label": "verification/no-verify",
+  "why": "hook skipping, all hooks"
+ },
+ {
+  "id": "i64",
+  "text": "Don't switch models mid-session.",
+  "label": "cache-hygiene/model-switch",
+  "why": "model switch"
+ },
+ {
+  "id": "i65",
+  "text": "Never force-push to main or master.",
+  "label": "git-safety/force-push-default",
+  "why": "force-push default branch"
+ },
+ {
+  "id": "i66",
+  "text": "Inside the Docker image, avoid pip install; use uv.",
+  "label": null,
+  "why": "narrower: one environment"
+ },
+ {
+  "id": "i67",
+  "text": "Pin every dependency in pyproject.toml.",
+  "label": null,
+  "why": "different: pinning"
+ },
+ {
+  "id": "i68",
+  "text": "Do not force push the main branch under any circumstances.",
+  "label": "git-safety/force-push-default",
+  "why": "force-push default"
+ },
+ {
+  "id": "i69",
+  "text": "Never pass --no-verify to git commit or git push.",
+  "label": "verification/no-verify",
+  "why": "hook skipping"
+ },
+ {
+  "id": "i70",
+  "text": "Do not compact the conversation; start a fresh session instead.",
+  "label": "cache-hygiene/compact",
+  "why": "compaction"
+ },
+ {
+  "id": "i71",
+  "text": "Never paste a .env file's contents into chat.",
+  "label": null,
+  "why": "different: chat, not git add"
+ },
+ {
+  "id": "i72",
+  "text": "Always let pre-commit, commit-msg and pre-push hooks run; skipping them is forbidden.",
+  "label": "verification/no-verify",
+  "why": "all hooks"
+ },
+ {
+  "id": "i73",
+  "text": "Do not disable the lint hook in .pre-commit-config.yaml.",
+  "label": null,
+  "why": "different: config edit"
+ },
+ {
+  "id": "i74",
+  "text": "Use uv, never pip install.",
+  "label": "package-manager/pip-install",
+  "why": "pip install"
+ },
+ {
+  "id": "i75",
+  "text": "Compact the Parquet files nightly to keep the lake small.",
+  "label": null,
+  "why": "different: data compaction"
+ },
+ {
+  "id": "i76",
+  "text": "- No `git push --force` against the default branch, and that includes --force-with-lease.",
+  "label": "git-safety/force-push-default",
+  "why": "force-push default"
+ },
+ {
+  "id": "i77",
+  "text": "Hooks exist for a reason: never skip them with -n or --no-verify.",
+  "label": "verification/no-verify",
+  "why": "hook skipping"
+ },
+ {
+  "id": "i78",
+  "text": "Force-pushing your own feature branch is fine after a rebase.",
+  "label": null,
+  "why": "permission"
+ },
+ {
+  "id": "i79",
+  "text": "Use Conventional Commits for every commit: `type(scope): summary`.",
+  "label": "commits/non-conventional-subject",
+  "why": "conventional subject"
+ },
+ {
+  "id": "i80",
+  "text": "Tests run in CI on every push.",
+  "label": null,
+  "why": "description"
+ }
+]

@@ -559,6 +559,23 @@ transcript-hygiene/whole-file-cat         8    6    0    2   1.00    0.75
 verification/no-verify                   11    3    0    8   1.00    0.27
 -------------------------------------------------------------------------------
 total                                    90   62    0   28   1.00    0.69  recall floor 0.68
+
+binder over the independent held-out set: 80 sections, 80 labels
+catalog entry                           pos   tp   fp   fn   prec  recall  note
+-------------------------------------------------------------------------------
+cache-hygiene/compact                     3    0    0    3      -    0.00
+cache-hygiene/model-switch                3    1    0    2   1.00    0.33
+commits/non-conventional-subject          4    1    0    3   1.00    0.25
+git-safety/force-push-default             4    1    0    3   1.00    0.25
+package-manager/pip-install               4    0    0    4      -    0.00
+secrets/secret-file-add                   4    0    0    4      -    0.00
+secrets/secret-in-write                   4    0    0    4      -    0.00
+testing/test-after-change                 4    0    0    4      -    0.00
+transcript-hygiene/unfiltered-find        3    1    0    2   1.00    0.33
+transcript-hygiene/whole-file-cat         3    0    0    3      -    0.00
+verification/no-verify                    4    1    0    3   1.00    0.25
+-------------------------------------------------------------------------------
+total                                    40    5    0   35   1.00    0.12  recall floor 0.12
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
@@ -582,6 +599,14 @@ detector is measured wrongly. On the shipped zoo, recall fails only under the re
 the recall the shipped binder measured, which rises as binding improves; a zoo of your own in
 a `--corpus` directory reports its recall and holds it to nothing. Labels naming a detector no catalog
 entry binds yet are counted apart. `--json` carries the same figures under `binding`.
+
+The third table scores the binder the same way over `ruleprobe/corpus/rules-heldout.json`: 80
+synthetic rule sentences, 40 of them labelled, written from each detector's claim by an author
+who never saw the catalog's patterns, and shipped as written. Its recall, 0.12, is the honest
+figure for rules the catalog was not written against: the catalog reads few of the ways people
+phrase a rule, and leaves the rest unmeasured rather than guess. Any false bind fails the
+command, and recall is held to its own floor on the shipped set's bytes. Once shipped it is a
+regression set, not a fresh measure. `--json` carries it under `heldout`.
 
 `ruleprobe report --validity` puts each detector's `p=` and `r=` beside its row. It is off
 by default because the report is meant to be read in a minute and an eight-column table is

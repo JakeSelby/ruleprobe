@@ -61,9 +61,13 @@ All notable changes to this project are documented here. The format follows
   not pip, in production" and "Never commit .env files (in the public repo)" bind nothing. A rule
   narrower than its detector by name no longer binds either: "Never skip pre-commit hooks" and
   "Do not pass `--no-verify` to `git commit`" leave out the pushes `verification/no-verify`
-  counts, and "Never commit a `.env` file" names one kind of secret-shaped file. On the rules
-  zoo's earlier 136 sections binding recall rises from 0.71 to 0.73, with no false bind; the zoo
-  gains a 65-item held-out set, and over all of it recall is 0.69 and the recorded floor 0.68
+  counts, and "Never commit a `.env` file" names one kind of secret-shaped file. `ruleprobe
+  corpus` also scores binding on `ruleprobe/corpus/rules-heldout.json`, 80 sentences written
+  from each detector's claim by an author who never saw the patterns, gated on zero false binds
+  and a recall floor of its own. Binding recall, with no false bind anywhere: 0.12 (5/40) on
+  that independent set, the honest figure for phrasings the catalog was not written against;
+  0.61 on a 65-item set added to the zoo, tuned against; 0.67 on the zoo's older held-out
+  labels; 0.69 over the whole zoo, whose floor is now 0.68
   ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
 
 ## 0.2.0 (2026-09-24)
