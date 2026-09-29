@@ -18,7 +18,9 @@
 Declarative detectors are read from `.ruleprobe/detectors.yaml` in the repository you are
 in and from `~/.config/ruleprobe/detectors.yaml`, unless `--no-config` says otherwise;
 `--rules <dir>` also reads a directory of markdown rule files, and reports which of them
-nothing measures.
+nothing measures. With neither `--rules` nor `--no-config`, `report` finds the rule files
+itself (`ruleprobe.rules.find_rule_files`): the global ones in the home directory, and the
+project ones at each working directory the transcripts recorded.
 
 Nothing leaves the machine, and every command but `label` writes nothing: the transcripts are
 read, the detectors are run over them in memory, and a table is printed. `label` writes one
@@ -43,7 +45,7 @@ from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
                      session_address)
-from .rules import catalog_detectors, load_bundle
+from .rules import catalog_detectors, find_rule_files, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
                        DEFAULT_FLOOR, below_floor, binding_as_dict, binding_failures,
                        binding_table, event_key, hit_key, load_corpus, read_events,
@@ -163,11 +165,13 @@ def _declarative_options(parser):
     them, so `ruleprobe detectors --rules docs/rules` answers "what would measure this?"
     without running anything over a transcript."""
     parser.add_argument("--rules", default=None, metavar="DIR",
-                        help="a directory of markdown rule files to bind detectors to")
+                        help="a directory of markdown rule files to bind detectors to; "
+                             "without it, report finds your rule files itself")
     parser.add_argument("--detectors", action="append", default=None, metavar="FILE",
                         help="a detector file to load; repeatable")
     parser.add_argument("--no-config", action="store_true",
-                        help="do not read .ruleprobe/detectors.yaml or the user's file")
+                        help="do not read .ruleprobe/detectors.yaml or the user's file, "
+                             "and do not find rule files")
 
 
 def _since(value):
@@ -248,12 +252,12 @@ def _score_restated(scores, registry):
     return scores
 
 
-def _bundle_and_registry(args, plugins=None, whole_catalog=False):
+def _bundle_and_registry(args, plugins=None, whole_catalog=False, rule_files=None):
     """The declarative bundle for this invocation, and the registry to run: the shipped
     detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
     them with `whole_catalog`, plus everything the bundle loaded."""
     bundle = load_bundle(paths=args.detectors, rules_dir=args.rules,
-                         config=not args.no_config)
+                         config=not args.no_config, rule_files=rule_files)
     if plugins is None:
         plugins = getattr(args, "plugins", False)
     base = Registry.from_entry_points() if plugins else DEFAULT
@@ -289,8 +293,24 @@ def _folder_and_name(path):
     return os.path.join(os.path.basename(folder), name)
 
 
+def _found_rule_files(args):
+    """The rule files `report` reads with no `--rules`: a first pass over the same
+    transcripts collects each session's runtime and recorded working directory, and
+    `find_rule_files` reads the places they name. The pass keeps no events, so memory stays
+    one session deep; it costs a second parse of every transcript. Its read errors are left
+    to the pass that measures."""
+    workdirs = set()
+    for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since):
+        if session.cwd:
+            workdirs.add((session.runtime, session.cwd))
+    return find_rule_files(workdirs)
+
+
 def cmd_report(args, out):
-    bundle, registry = _bundle_and_registry(args)
+    found = None
+    if args.rules is None and not args.no_config:
+        found = _found_rule_files(args)
+    bundle, registry = _bundle_and_registry(args, rule_files=found)
     stances = dict(args.stance or [])
     read_errors = []
     rows = [measure(session, stances=stances, registry=registry)

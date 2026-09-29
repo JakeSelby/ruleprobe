@@ -25,9 +25,11 @@ TEXT_KEPT_FOR = frozenset(("Bash", "Agent", "Task"))
 MAX_RESULT_TEXT = 64 * 1024
 
 #: One transcript: its id, the repository directory it ran in, the runtime that wrote it,
-#: the events, and where they were read from.
-Session = namedtuple("Session", "id repo runtime events path started ended")
-Session.__new__.__defaults__ = ("", "", "")
+#: the events, where they were read from, its first and last timestamps, and the working
+#: directory it recorded, whole, or the empty string. `cwd` is read only to find the rule files
+#: a run with no `--rules` binds; no report carries it.
+Session = namedtuple("Session", "id repo runtime events path started ended cwd")
+Session.__new__.__defaults__ = ("", "", "", "")
 
 #: What a detector returns, one per observation: the detector id, the turn it happened on,
 #: and the tool use it happened in, when there was one. Never a snippet of the transcript:

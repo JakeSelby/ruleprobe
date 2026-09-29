@@ -5,7 +5,7 @@
   "generated_at": "2026-09-23",
   "next_ids": {
     "epic": 18,
-    "story": 24,
+    "story": 25,
     "task": 11,
     "bug": 13,
     "chore": 10,
@@ -1152,6 +1152,19 @@
       "type": "story",
       "native_type": "Feature",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S023.md",
+      "parent_bmad_id": "RP-E010",
+      "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-S024",
+      "github_number": 149,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/149",
+      "title": "feat(rules): find the rule files with no --rules",
+      "type": "story",
+      "native_type": "Feature",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-S024.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
       "lifecycle": "active",

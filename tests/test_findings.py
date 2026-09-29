@@ -10,6 +10,7 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 from corpus import bash, tool_use
 from ruleprobe import Detector, Registry, iter_sessions, measure, report, run
@@ -207,8 +208,12 @@ class GatingFindingTests(unittest.TestCase):
     FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
     def run_cli(self, *argv):
+        # An empty home, so a run with no --rules finds no rule file of the machine's own.
         out = io.StringIO()
-        with contextlib.redirect_stderr(io.StringIO()):
+        with tempfile.TemporaryDirectory() as home, \
+                mock.patch.dict(os.environ, {"HOME": home, "USERPROFILE": home,
+                                             "XDG_CONFIG_HOME": home}), \
+                contextlib.redirect_stderr(io.StringIO()):
             return main(list(argv), out=out), out.getvalue()
 
     def test_finding_01_a_gated_detector_fires_once_the_stance_is_passed(self):
