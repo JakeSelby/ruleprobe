@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: MIT
 """The shipped catalog: declarative detectors for common rule shapes, bound by what a rule says.
 
-A rule file section that no front matter binds is matched against every entry here, and binds
-the one entry whose `pattern` matches its text, so a stranger's rule is measured without a
-detector written. `ruleprobe.rules` owns that binding and compiles each entry's `detector`
-with `compile_detector`; how a rule's text is read, and why none or several matches leave it
-unmeasured, is its docstring.
+A rule file section that no front matter binds is matched against every entry here, sentence
+by sentence, and each sentence binds the one entry whose `pattern` matches it, so a stranger's
+rule is measured without a detector written. `ruleprobe.rules` owns that binding and compiles
+each entry's `detector` with `compile_detector`; how a rule's text is read, and why none or
+several matches leave a sentence unbound, is its docstring.
 
 Each entry is a mapping of three keys:
 
@@ -18,6 +18,9 @@ Each entry is a mapping of three keys:
 - `detector` - a declarative detector entry, as a detector file holds one, carrying an
   `examples:` block with a deliberate near-miss beside each positive. `ruleprobe corpus`
   scores those examples, and the floor applies to them as to any detector.
+
+`NEGATED_EXCEPTIONS` below the entries is the closed list of phrases that deny an exception
+("admit no exception"), which never unbind a rule.
 
 A detector reads a Bash command through the shared parse only - `command`, `git` and `env`
 keys, per segment and per argument - and never through a regular expression over the whole
@@ -404,4 +407,21 @@ ENTRIES = (
             },
         },
     },
+)
+
+#: Negated exception markers: phrases that deny an exception rather than grant one, so a rule
+#: stating one ("Never force-push to main. No exceptions.") still binds. A closed list, read
+#: case-insensitively, each phrase also in the plural, with any whitespace between its words,
+#: and only where the clause ends after the phrase: "without exception approval" and "with no
+#: exception ticket open" name a thing and deny nothing. `ruleprobe.rules` removes them from a
+#: sentence before it looks for an exception or a condition word. A marker not listed here, or
+#: not ending its clause, unbinds, which under-counts.
+NEGATED_EXCEPTIONS = (
+    "admit no exception",
+    "allow no exception",
+    "make no exception",
+    "with no exception",
+    "without any exception",
+    "without exception",
+    "no exception",
 )

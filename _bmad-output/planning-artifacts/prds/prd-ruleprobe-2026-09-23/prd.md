@@ -714,8 +714,19 @@ One rule section can bind several detectors, each through its own sentence. **St
   sentence.
 - A sentence still binds an entry only when it matches exactly one entry's pattern (FR-16); a sentence
   that matches none or several binds nothing.
-- An exception or condition word ("unless", "except", "only when") unbinds only its own sentence.
-- A negated marker such as "no exception" or "without exception" does not unbind its sentence.
+- An exception or permission word ("unless", "except", "exempt", "fine") anywhere in a section, its
+  heading included, unbinds every rule in the section, so "Never force-push to main. Release managers
+  are the exception." binds nothing, and nor does a list under "Except on release branches:".
+- A condition or contrast word ("if", "when", "but") unbinds only its own sentence.
+- A negated marker such as "no exception" or "without exception" does not unbind its sentence where
+  its clause ends; "without exception approval" is no marker.
+- Amended 2026-09-25 (RP-SP004's decision, #141): the exception scope reaches the next sentence and
+  the heading's reaches the section, replacing "an exception or condition word unbinds only its own
+  sentence", which measured five false binds on the zoo. Amended again at #142's review: the scope
+  also reaches the sentence before and a colon lead-in's list, and a negated marker must end its
+  clause. Amended at #142's second review (variant S): an exception or permission anywhere in the
+  section unbinds every rule in it again, since each narrower reach let another markdown shape
+  carry an exception past it; the multi-bind and the negated-marker handling stay.
 - The catalog gains patterns for the four default detectors that have none: `compact`, `model-switch`,
   `secret-in-write` and `unfiltered-find`.
 - Binding still reads the rule text with no model (NFR-7), and an unsure sentence stays unmeasured
@@ -729,7 +740,10 @@ detectors. **Status:** proposed (v0.3.0).
 - The corpus ships a synthetic zoo of about 60 labelled rule sentences in common phrasings, with
   near-misses for conditions, exceptions and contrasts.
 - `corpus` prints a binder section with binding precision and recall.
-- Per-sentence binding ships only at recall ≥ 0.70 on the zoo with zero false binds.
+- Per-sentence binding ships only at zero false binds on the zoo, with recall held by a ratchet at
+  the recall measured. The recall bar of 0.70 applies to Epic 8 as a whole, binder and catalog
+  together. Amended 2026-09-25 (RP-SP004's decision, #141), replacing "ships only at recall ≥ 0.70 on
+  the zoo with zero false binds".
 - A false bind fails the corpus gate as a detector under the floor does.
 
 #### FR-38: Rule discovery
@@ -1073,8 +1087,9 @@ transcript giving a different report. Any one is a failure regardless of the oth
   it for parity only.
 - **0.3 roughly doubled (2026-09-25).** Mitigation: ship the field floor, rule discovery and history
   first, and recruit five testers before building `compare`.
-- **Per-sentence binding false-binds.** Mitigation: exactly-one-match and exception words kept per
-  sentence; FR-36 ships only at zero false binds on the zoo (FR-37).
+- **Per-sentence binding false-binds.** Mitigation: exactly-one-match per sentence, exception words
+  reaching the next sentence and the heading's the section; FR-36 ships only at zero false binds on
+  the zoo (FR-37).
 - **Before and after flatters the edit.** People edit rules after bad weeks. Mitigation: `compare`
   shows control detectors and warns about regression to the mean (FR-46).
 - **The field evidence base is deleted as it ages.** Claude Code deletes transcripts after 30 days by
