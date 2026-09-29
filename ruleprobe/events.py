@@ -24,12 +24,27 @@ from collections import namedtuple
 TEXT_KEPT_FOR = frozenset(("Bash", "Agent", "Task"))
 MAX_RESULT_TEXT = 64 * 1024
 
-#: One transcript: its id, the repository directory it ran in, the runtime that wrote it,
-#: the events, where they were read from, its first and last timestamps, and the working
-#: directory it recorded, whole, or the empty string. `cwd` is read only to find the rule files
-#: a run with no `--rules` binds; no report carries it.
-Session = namedtuple("Session", "id repo runtime events path started ended cwd")
-Session.__new__.__defaults__ = ("", "", "", "")
+_Session = namedtuple("Session", "id repo runtime events path started ended")
+
+
+class Session(_Session):
+    """One transcript: its id, the repository directory it ran in, the runtime that wrote it,
+    the events, where they were read from, and its first and last timestamps.
+
+    `cwd` is the working directory the transcript recorded, whole, or the empty string. It is
+    an attribute beside the seven fields rather than an eighth, so a session still unpacks
+    and compares as the seven-field tuple it always was; `_replace`, `_make` and a pickle
+    carry the fields and drop it. It is read only to find the rule files a run with no
+    `--rules` binds, and no report carries it."""
+
+    cwd = ""
+
+    def __new__(cls, id, repo, runtime, events, path="", started="", ended="", cwd=""):
+        self = _Session.__new__(cls, id, repo, runtime, events, path, started, ended)
+        if cwd:
+            self.cwd = cwd
+        return self
+
 
 #: What a detector returns, one per observation: the detector id, the turn it happened on,
 #: and the tool use it happened in, when there was one. Never a snippet of the transcript:

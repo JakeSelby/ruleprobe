@@ -252,12 +252,13 @@ def _score_restated(scores, registry):
     return scores
 
 
-def _bundle_and_registry(args, plugins=None, whole_catalog=False, rule_files=None):
+def _bundle_and_registry(args, plugins=None, whole_catalog=False, rule_files=None,
+                         refused=0):
     """The declarative bundle for this invocation, and the registry to run: the shipped
     detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
     them with `whole_catalog`, plus everything the bundle loaded."""
     bundle = load_bundle(paths=args.detectors, rules_dir=args.rules,
-                         config=not args.no_config, rule_files=rule_files)
+                         config=not args.no_config, rule_files=rule_files, refused=refused)
     if plugins is None:
         plugins = getattr(args, "plugins", False)
     base = Registry.from_entry_points() if plugins else DEFAULT
@@ -298,19 +299,20 @@ def _found_rule_files(args):
     transcripts collects each session's runtime and recorded working directory, and
     `find_rule_files` reads the places they name. The pass keeps no events, so memory stays
     one session deep; it costs a second parse of every transcript. Its read errors are left
-    to the pass that measures."""
+    to the pass that measures. `(files, how many imports were refused)`."""
     workdirs = set()
     for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since):
         if session.cwd:
             workdirs.add((session.runtime, session.cwd))
-    return find_rule_files(workdirs)
+    refused = []
+    return find_rule_files(workdirs, refused=refused), len(refused)
 
 
 def cmd_report(args, out):
-    found = None
+    found, refused = None, 0
     if args.rules is None and not args.no_config:
-        found = _found_rule_files(args)
-    bundle, registry = _bundle_and_registry(args, rule_files=found)
+        found, refused = _found_rule_files(args)
+    bundle, registry = _bundle_and_registry(args, rule_files=found, refused=refused)
     stances = dict(args.stance or [])
     read_errors = []
     rows = [measure(session, stances=stances, registry=registry)

@@ -40,8 +40,11 @@ since it intensifies as often as it narrows ("use only uv"), and so are `instead
 `rather than`, which the pip shape itself uses. A rule bound in its front matter is `own`,
 and so is a catalog-bound one whose detector id a detector file of the user's replaced.
 """
+import errno
+import hashlib
 import os
 import re
+import stat
 from collections import namedtuple
 
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
@@ -98,9 +101,10 @@ def _is_catalog(detector):
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
-    __slots__ = ("detectors", "rules", "findings", "sources", "found", "_bound")
+    __slots__ = ("detectors", "rules", "findings", "sources", "found", "refused", "_bound")
 
-    def __init__(self, detectors=None, rules=None, findings=None, sources=None, found=None):
+    def __init__(self, detectors=None, rules=None, findings=None, sources=None, found=None,
+                 refused=0):
         self.detectors = list(detectors or [])
         self.rules = list(rules or [])
         self.findings = list(findings or [])
@@ -108,6 +112,8 @@ class Bundle(object):
         # The rule files found with no `--rules` (`find_rule_files`), or None when the rules
         # were named or not read.
         self.found = None if found is None else list(found)
+        # How many imports of found files were refused for leaving their root.
+        self.refused = refused
         # Every entry any `registry()` call labelled, by identity, with the entry it was
         # labelled from: `{id(labelled): (labelled, bound)}`. The labelled entry is held so
         # its identity is never reused by another object.
@@ -183,6 +189,10 @@ class Bundle(object):
             lines.append("rules found with no --rules in %d file%s; the rule text is today's, "
                          "not the text in force when an older session ran"
                          % (len(self.found), "" if len(self.found) == 1 else "s"))
+        if self.found is not None and self.refused:
+            # A count, never the paths: a refused import may name anything on the machine.
+            lines.append("imports refused: %d outside their rule file's project or global "
+                         "folder, not read" % self.refused)
         if self.rules:
             coverage = self.coverage()
             lines.append("rules: %d measured, %d dark, %d unmeasured%s"
@@ -313,77 +323,132 @@ _IMPORT = re.compile(r"(?:^|(?<=\s))@((?:~/|\.{1,2}/|/)?[^\s`@]+)")
 _CODE_SPAN = re.compile(r"(`+).*?\1")
 
 
-def find_rule_files(workdirs=(), home=None):
-    """The rule files a run with no `--rules` reads, sorted and each once, by real path:
-    every global file of `GLOBAL_RULE_FILES` under `home` (the user's home by default), and
-    at each `(runtime, directory)` in `workdirs` - the working directory a session recorded -
-    that runtime's `PROJECT_RULE_FILES` and the markdown under its `PROJECT_RULE_DIRS`, when
-    they exist on disk. A Claude Code or Gemini file's `@path` imports of other markdown files
-    are followed, `IMPORT_DEPTH` hops at most. Files with the same bytes are one file
-    (`_distinct`). Nothing is written, and a file that cannot be read imports nothing.
+def find_rule_files(workdirs=(), home=None, refused=None):
+    """The rule files a run with no `--rules` reads, sorted, each once: every global file of
+    `GLOBAL_RULE_FILES` under `home` (the user's home by default), and at each
+    `(runtime, directory)` in `workdirs` - the absolute working directory a session recorded;
+    a relative one is ignored - that runtime's `PROJECT_RULE_FILES` and the markdown under
+    its `PROJECT_RULE_DIRS`, when they are regular files on disk. A Claude Code or Gemini
+    file's `@path` imports of other markdown files are followed, `IMPORT_DEPTH` hops at most.
+    Each file is named by the path it was found at, not its real path, and one reached by
+    two names, or holding the same bytes as another, is read once (`_distinct`). Nothing is
+    written, and a file that cannot be read imports nothing.
+
+    A found file is untrusted text: it may sit in a clone of somebody else's repository. An
+    import is followed only inside its root - the working directory for a project file, the
+    runtime's global folder (`~/.claude`, `~/.codex`, `~/.gemini`) for a global one, and an
+    imported file keeps its importer's root - checked on the path as written and again on the
+    real path, so neither `..` nor a symlink leaves it. A refused import is read and checked
+    no further; when `refused` is a list, each distinct refused target is appended to it.
 
     Known misses: parent directories of a working directory are not searched, though every
     runtime reads some of them; nor are `~/.claude/rules`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`
-    or a Gemini `context.fileName` setting; and an import is read only from a line of text,
-    never from code."""
+    or a Gemini `context.fileName` setting; an import is read only from a line of text, never
+    from code; and an import out of a project into another is refused even where the runtime
+    would read it."""
     home = os.path.expanduser("~") if home is None else home
     check = _Checks()
-    picked = [(runtime, check.first_file(home, alternatives))
-              for runtime, places in GLOBAL_RULE_FILES for alternatives in places]
+    # (runtime, the path as found, the root its imports stay inside)
+    picked = []
+    for runtime, places in GLOBAL_RULE_FILES:
+        for alternatives in places:
+            path = check.first_file(home, alternatives)
+            if path is not None:
+                picked.append((runtime, path, os.path.dirname(path)))
     # Each directory once, with every runtime that recorded it, however many sessions did
     # and however its path was spelled. A transcript is untrusted shape, so a directory
-    # that is not a string is left out before the sort, which would fail comparing it.
+    # that is not an absolute path string is left out.
     runtimes = {}
     for runtime, directory in workdirs:
-        if isinstance(runtime, str) and isinstance(directory, str) and directory:
+        if isinstance(runtime, str) and isinstance(directory, str) and directory \
+                and os.path.isabs(directory):
             runtimes.setdefault(os.path.normpath(directory), set()).add(runtime)
     for directory in sorted(runtimes):
         if not check.isdir(directory):
             continue
         for runtime in sorted(runtimes[directory]):
-            picked.extend((runtime, check.first_file(directory, alternatives))
-                          for alternatives in PROJECT_RULE_FILES.get(runtime, ()))
+            for alternatives in PROJECT_RULE_FILES.get(runtime, ()):
+                path = check.first_file(directory, alternatives)
+                if path is not None:
+                    picked.append((runtime, path, directory))
             for folder in PROJECT_RULE_DIRS.get(runtime, ()):
                 folder = os.path.join(directory, *folder.split("/"))
                 if check.isdir(folder):
-                    picked.extend((runtime, path) for path in _markdown(folder))
-    found, importing = set(), set()
-    for runtime, path in picked:
-        if path is not None:
-            found.add(check.realpath(path))
-            if runtime in IMPORTING:
-                importing.add(check.realpath(path))
-    seen, level = set(importing), sorted(importing)
+                    picked.extend((runtime, path, directory) for path in _markdown(folder)
+                                  if check.isfile(path))
+    names = {}
+    level = set()
+    for runtime, path, root in picked:
+        names.setdefault(check.realpath(path), set()).add(path)
+        if runtime in IMPORTING:
+            level.add((path, root))
+    followed = set(check.realpath(path) for path, _root in level)
+    refusals = set()
+    level = sorted(level)
     for _hop in range(IMPORT_DEPTH):
         reached = set()
-        for path in level:
-            for target in _imports(path, home, check):
+        for path, root in level:
+            for target in _imports(path, home, root, check, refusals):
                 real = check.realpath(target)
-                found.add(real)
-                if real not in seen:
-                    seen.add(real)
-                    reached.add(real)
+                names.setdefault(real, set()).add(target)
+                if real not in followed:
+                    followed.add(real)
+                    reached.add((target, root))
         level = sorted(reached)
-    return _distinct(found)
+    if refused is not None:
+        refused.extend(sorted(refusals))
+    # Two names of one file: the shorter, then the first in sorted order.
+    return _distinct([min(found, key=lambda p: (len(p), p)) for found in names.values()])
 
 
 def _distinct(paths):
-    """`paths`, sorted, less each file whose bytes another already holds, so the same rule
-    file in several worktrees or checkouts of one repository is one file, named by its
-    shortest path - the checkout rather than a worktree nested in it - and the first in
-    sorted order among paths as short. A file that cannot be read is kept, to be a finding."""
+    """`paths`, sorted, less each file whose content another already holds (compared by its
+    SHA-256), so the same rule file in several worktrees or checkouts of one repository is
+    one file, named by its shortest path - the checkout rather than a worktree nested in
+    it - and the first in sorted order among paths as short. A file that cannot be read is
+    kept, to be a finding."""
     kept, seen = [], set()
     for path in sorted(paths, key=lambda p: (len(p), p)):
         try:
-            with open(path, "rb") as handle:
-                content = handle.read()
+            digest = hashlib.sha256(_read_regular(path)).hexdigest()
         except OSError:
             kept.append(path)
             continue
-        if content not in seen:
-            seen.add(content)
+        if digest not in seen:
+            seen.add(digest)
             kept.append(path)
     return sorted(kept)
+
+
+#: A front-matter line giving a key only `--rules` reads.
+_BINDING_KEYS = re.compile(r"^(?:detectors?|opt_out|rule)[ \t]*:", re.MULTILINE)
+
+
+def _read_regular(path):
+    """The bytes of `path`, or `OSError` when it is not a regular file. It is opened without
+    blocking and checked on the open descriptor, so a FIFO or a device named like a rule file
+    never stalls a run."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1 << 16)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+
+
+def _inside(path, root):
+    """True when `path` is `root` or under it; both are compared as given."""
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # pragma: no cover - a different drive on Windows, or mixed kinds
+        return False
 
 
 class _Checks(object):
@@ -409,7 +474,7 @@ class _Checks(object):
 
     def first_file(self, directory, alternatives):
         """The first of `alternatives`, `/`-separated paths under `directory`, that is a
-        file."""
+        regular file."""
         for name in alternatives:
             path = os.path.join(directory, *name.split("/"))
             if self.isfile(path):
@@ -417,15 +482,17 @@ class _Checks(object):
         return None
 
 
-def _imports(path, home, check=None):
-    """The existing `.md` files `path` imports with `@path`, relative to its own folder, to
-    `home` for `~/`, or absolute; in document order."""
+def _imports(path, home, root, check, refused):
+    """The regular `.md` files `path` imports with `@path` and may read, in document order:
+    relative to the folder `path` was found in (not its real path's), to `home` for `~/`, or
+    absolute. A target outside `root`, as written or once its links are resolved, is added
+    to `refused` instead, and nothing more is asked of the disk about it."""
     try:
-        with open(path, encoding="utf-8-sig") as handle:
-            text = handle.read()
+        text = _read_regular(path).decode("utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return []
     kinds, visible = _kinds_of(split_front_matter(text)[2])
+    base = os.path.normpath(root)
     out = []
     for kind, line in zip(kinds, visible):
         if kind not in ("text", "heading"):
@@ -438,7 +505,12 @@ def _imports(path, home, check=None):
                 target = os.path.join(home, *target[2:].split("/"))
             elif not os.path.isabs(target):
                 target = os.path.join(os.path.dirname(path), *target.split("/"))
-            if (check.isfile(target) if check else os.path.isfile(target)):
+            target = os.path.normpath(target)
+            if not _inside(target, base) or \
+                    not _inside(check.realpath(target), check.realpath(base)):
+                refused.add(target)
+                continue
+            if check.isfile(target):
                 out.append(target)
     return out
 
@@ -570,7 +642,7 @@ def _markdown(directory):
     return out
 
 
-def read_rule_file(path, root=None, label=None):
+def read_rule_file(path, root=None, label=None, trusted=True):
     """`(detectors, [RuleEntry], findings)` for one markdown rule file.
 
     Front matter keys this reads are `rule`, `detector` and `opt_out`; every other key is
@@ -584,6 +656,12 @@ def read_rule_file(path, root=None, label=None):
     one-rule file that has no `rule:` key: a rule file found with no `--rules` is named by
     where it is (`~/.claude/CLAUDE.md`), so two projects' `AGENTS.md` never share an id.
 
+    A file that is not `trusted` - one found with no `--rules`, which may be a clone of
+    somebody else's repository - binds through the catalog alone: its front matter is skipped
+    unread, so no detector of its own is compiled, none replaces a catalog or shipped one,
+    and no `opt_out` reason or `rule:` name of its reaches the report. A front matter giving
+    one of those keys is a finding saying it was ignored.
+
     A file with no heading, or none of whose sections is a rule, binds the catalog by its
     whole text, text above the first heading included. Known miss: in a file with a rule
     section, text above the first heading is no rule.
@@ -591,12 +669,24 @@ def read_rule_file(path, root=None, label=None):
     stem = os.path.splitext(os.path.basename(path))[0]
     rule = label or stem
     try:
-        with open(path, encoding="utf-8-sig") as handle:
-            text = handle.read()
+        text = _read_regular(path).decode("utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
+        # The reason alone: an OSError's text carries the whole path, which the finding
+        # already names in short.
+        reason = ("not UTF-8 text" if isinstance(exc, UnicodeDecodeError)
+                  else exc.strerror or type(exc).__name__)
         return [], [RuleEntry(rule, path, "unmeasured", "unreadable", [])], \
-            [Finding(path, 0, "cannot read: %s" % exc)]
+            [Finding(path, 0, "cannot read: %s" % reason)]
     front, first_line, body = split_front_matter(text)
+    if front is not None and not trusted:
+        findings = []
+        if _BINDING_KEYS.search(front):
+            findings.append(Finding(path, first_line,
+                                    "front matter is read only under --rules; this found file "
+                                    "binds through the catalog alone"))
+        body_line = text.count("\n") - body.count("\n") + 1
+        entries, problems = _section_rules(path, root, body, body_line, rule, label)
+        return [], entries, findings + problems
     if front is None:
         entries, findings = _section_rules(path, root, text, 1, rule, label)
         return [], entries, findings
@@ -1009,15 +1099,16 @@ def _section_rules(path, root, body, first_line, name, label=None):
 
 
 def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True,
-                rule_files=None):
+                rule_files=None, refused=0):
     """Every declarative detector a run should have: the files named, the ones discovered,
     the rule directory, and `rule_files`, the markdown rule files `find_rule_files` found,
-    each named in its rule ids by where it is (`_label`). Findings accumulate; nothing
-    raises."""
+    each named in its rule ids by where it is (`_label`) and bound through the catalog alone,
+    and `refused`, how many of their imports `find_rule_files` refused. Findings accumulate;
+    nothing raises."""
     sources = list(paths or [])
     if config:
         sources = discover(cwd=cwd, user=user) + sources
-    bundle = Bundle(sources=sources, found=rule_files)
+    bundle = Bundle(sources=sources, found=rule_files, refused=refused)
     for path in sources:
         detectors, findings = load_file(path)
         bundle.detectors.extend(detectors)
@@ -1028,7 +1119,7 @@ def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True,
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)
     for path in rule_files or ():
-        detectors, rules, findings = read_rule_file(path, label=_label(path))
+        detectors, rules, findings = read_rule_file(path, label=_label(path), trusted=False)
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)

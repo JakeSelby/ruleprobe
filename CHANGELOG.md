@@ -29,8 +29,10 @@ All notable changes to this project are documented here. The format follows
   `~/.codex/AGENTS.md` and `~/.gemini/GEMINI.md`, and each runtime's project rule files at every
   working directory the transcripts recorded, following Claude Code and Gemini `@path` imports of
   markdown five hops deep. It names each rule by where its file is, reads a file with the same
-  bytes as another once, and says in the coverage block that the rule text is today's.
-  `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
+  bytes as another once, and says in the coverage block that the rule text is today's. A found
+  file binds through the catalog alone, since it may be a clone of somebody else's repository: its
+  front matter is ignored, and an import leaving its project or global folder is refused and
+  counted, never read. `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
   that word ([#149](https://github.com/JakeSelby/ruleprobe/issues/149)).
 
 ### Changed

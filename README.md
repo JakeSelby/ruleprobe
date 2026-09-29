@@ -47,8 +47,11 @@ directory a transcript recorded, the project files that runtime reads there: `CL
 `@path` imports of other markdown files are followed, five hops at most. A file reached twice,
 or with the same bytes as another, as in several worktrees of one repository, is read once, and
 each rule is named by where its file is, `~/work/app/CLAUDE.md#testing`. The rule text is
-today's, not what was in force when an older session ran, and the block says so. Parent
-directories are not searched. `--rules DIR` reads that directory instead, and `--no-config`
+today's, not what was in force when an older session ran, and the block says so. A found file
+may be a clone of somebody else's repository, so it binds through the catalog alone: its front
+matter is ignored, only a regular file is read, and an import that leaves its project, or the
+runtime's global folder for a global file, is refused, counted in the block and never read.
+Parent directories are not searched. `--rules DIR` reads that directory instead, and `--no-config`
 reads no rule file.
 
 Nothing is sent anywhere, no model is asked anything, `report` and `explain` write nothing,
