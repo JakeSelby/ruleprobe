@@ -116,11 +116,13 @@ never switch models mid-session (`cache-hygiene/model-switch`), never write a se
 file (`secrets/secret-in-write`), and filter every `find` (`transcript-hygiene/unfiltered-find`).
 The last four bind the shipped detectors of the same ids, and only a rule as wide as what the
 detector counts. Their patterns must reach the end of the sentence, and name a session rather
-than a task, a file, repository or commit rather than a chat, and compaction rather than the
-typed `/compact`, since the detector also counts automatic compactions. So "never compact more
-than once per session", "never switch models mid-task", "never run a bare find from the home
-directory" and "never paste secrets" bind nothing rather than a detector that would count what
-the rule allows, and "do not change the model" alone is read as a data model and binds nothing.
+than a task, files in general rather than a commit, the repository, a config file or the code,
+since the detector counts a secret written to any file, a gitignored `.env` included, and the
+context's compaction rather than the typed `/compact` or compaction alone, since the detector
+counts automatic compactions and a database compacts too. So "never compact more than once per
+session", "never switch models mid-task", "never run a bare find from the home directory" and
+"never put secrets in a commit" bind nothing rather than a detector that would count what the
+rule allows, and "do not change the model" alone is read as a data model and binds nothing.
 
 One row reads the other way round. Every other row counts violations, so fewer hits is
 better; `testing/test-after-change` counts compliance - a hit is a file change that a later
@@ -505,7 +507,7 @@ verification/no-verify                   11   13   11    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 
-binder over the rules zoo: 127 sections, 163 labels
+binder over the rules zoo: 136 sections, 172 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
 cache-hygiene/compact                     4    3    0    1   1.00    0.75
@@ -514,13 +516,13 @@ commits/non-conventional-subject          5    3    0    2   1.00    0.60
 git-safety/force-push-default             8    5    0    3   1.00    0.62
 package-manager/pip-install               5    3    0    2   1.00    0.60
 secrets/secret-file-add                   4    2    0    2   1.00    0.50
-secrets/secret-in-write                   3    3    0    0   1.00    1.00
+secrets/secret-in-write                   4    4    0    0   1.00    1.00
 testing/test-after-change                 9    6    0    3   1.00    0.67
 transcript-hygiene/unfiltered-find        3    3    0    0   1.00    1.00
 transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
 verification/no-verify                    6    5    0    1   1.00    0.83
 -------------------------------------------------------------------------------
-total                                    55   39    0   16   1.00    0.71  recall floor 0.70
+total                                    56   40    0   16   1.00    0.71  recall floor 0.71
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector

@@ -388,9 +388,10 @@ default detector the seven left unbound. Each restates the shipped detector unde
 measured by it:
 
 8. Never compact the context: `kind` on compaction, as the shipped `compact`; a rule about the typed
-   command or a task binds nothing.
+   command, a task, or compaction without the context sense binds nothing.
 9. Never switch models mid-session: `change` on the assistant's model, as the shipped `model-switch`.
-10. Never write a secret into a file: `arg` and `text` on a secret shape, as the shipped `secret-in-write`.
+10. Never write a secret into a file: `arg` and `text` on a secret shape, as the shipped `secret-in-write`;
+    only files in general, never a commit, the repository, a config file or the code.
 11. Filter every `find`: event matcher on `command`, as the shipped `unfiltered-find`.
 
 **Consequences (testable):**

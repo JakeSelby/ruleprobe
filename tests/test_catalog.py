@@ -565,16 +565,17 @@ class BindingTests(Temp):
         cases = [
             ("cache-hygiene/compact", ("Never compact the conversation.",
                                        "Never compact mid-session.",
-                                       "Avoid triggering compaction.",
+                                       "Avoid triggering context compaction.",
+                                       "Never auto-compact.",
                                        "Avoid compacting the context window.",
                                        "Start a new session instead of compacting.")),
             ("cache-hygiene/model-switch", ("Never switch models mid-session.",
                                             "Don't change the model in the middle of a chat.",
                                             "Stick with the same model throughout the "
                                             "conversation.")),
-            ("secrets/secret-in-write", ("Never write a secret to disk.",
-                                         "Do not hard-code access tokens in the repository.",
-                                         "Never embed credentials in a commit.")),
+            ("secrets/secret-in-write", ("Never write secrets into files.",
+                                         "Do not put API keys in any file.",
+                                         "Do not hard-code access tokens in a file.")),
             ("transcript-hygiene/unfiltered-find", ("Filter each find command.",
                                                     "Narrow every `find` by name or type.",
                                                     "Do not run an unbounded find.")),
@@ -664,6 +665,46 @@ class BindingTests(Temp):
                 self.assertEqual([d.id for d in _catalog_matches(heading, [text])], [])
                 [entry] = self.rules("# %s\n\n%s\n" % (heading, text)).rules
                 self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+
+    def test_each_second_review_near_miss_fails_the_pattern_itself(self):
+        """PR #148's second review: the secret detector counts a secret written to any file,
+        a gitignored `.env` included, so a rule about commits, the repository, config files or
+        the code claims less; compaction without the context sense may be a database's; and
+        "by path" reads as a starting directory."""
+        for heading, text in (("Secrets", "Never put secrets in a commit."),
+                              ("Config", "Never hardcode keys in config files."),
+                              ("Secrets", "Keep secrets out of the code."),
+                              ("Secrets", "Do not put an API key in a commit."),
+                              ("Secrets", "Never write secrets to the repository."),
+                              ("Secrets", "Never write a secret into source control."),
+                              ("Secrets", "Never write a secret to disk."),
+                              ("RocksDB", "Avoid triggering compaction."),
+                              ("Database", "Never compact."),
+                              ("Sessions", "Avoid compaction."),
+                              ("Searching", "Narrow every find by path.")):
+            with self.subTest(text=text):
+                self.assertEqual([d.id for d in _catalog_matches(heading, [text])], [])
+
+    def test_each_default_shape_has_a_near_miss_with_no_binder_word(self):
+        """So the pattern alone rejects it: none of these carries an exception, permission or
+        condition word the binder would unbind on."""
+        cases = {"cache-hygiene/compact": ("Never compact the context more than once.",
+                                           "Avoid triggering compaction."),
+                 "cache-hygiene/model-switch": ("Do not change the model; write a migration.",
+                                                "Never switch models mid-task."),
+                 "secrets/secret-in-write": ("Never put secrets in a commit.",
+                                             "Never paste a secret into the chat."),
+                 "transcript-hygiene/unfiltered-find": (
+                     "Never run a bare find from the home directory.",
+                     "Narrow every find by path.")}
+        patterns = dict((d.id, p) for p, d in _CATALOG)
+        for did, texts in cases.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    for sentence in rules._sentences("", [text]):
+                        self.assertIsNone(rules._EXCEPTION.search(sentence))
+                        self.assertIsNone(rules._CONDITION.search(sentence))
+                        self.assertIsNone(patterns[did].match(sentence))
 
     def test_find_is_a_whole_word_in_the_find_pattern(self):
         """Removing the guard after "find" fails here: the end-of-sentence anchor refuses

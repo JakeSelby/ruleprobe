@@ -34,8 +34,9 @@ one for each in `DEFAULT`: a section binds the shipped detector and the report c
 line for it, not two. Where a rule in a shape could carry a narrowing the pattern cannot
 read ("never compact more than once", "never run a bare find from the home directory"), the
 pattern must reach the end of the sentence, so the narrowed rule, or one with a second clause,
-binds nothing. Those patterns also name only scopes as wide as the detector's: a session, never
-a task, and a file, a repository or a commit, never a chat.
+binds nothing. Those patterns also name only scopes as wide as the detector's: a session or the
+context, never a task or a database, and files in general, never a commit, a repository, a
+config file or the code.
 
 This module holds literals and nothing else - no import, no call, no function - so it loads
 through the import system the same way from a directory, a wheel or a zip on `sys.path`, and
@@ -413,12 +414,13 @@ ENTRIES = (
     },
     {
         "shape": "Never compact the context",
-        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:trigger(?:ing)?\s+)?(?:compact(?:ing)?"
-                   r"(?:\s+(?:the\s+|your\s+)?(?:context|conversation|session)(?:\s+window)?)?|"
-                   r"compaction)|(?:start|open)\s+a\s+(?:fresh|new)\s+(?:session|conversation)\s+"
-                   r"(?:rather\s+than|instead\s+of)\s+compacting)(?:\s+(?:mid-?(?:session|"
-                   r"conversation)|(?:in\s+the\s+middle\s+of|partway\s+through)\s+(?:a|the)\s+"
-                   r"(?:session|conversation)))?(?=[.!?]*$)",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:trigger(?:ing)?\s+)?(?:(?:context|"
+                   r"conversation)\s+compaction|auto-?compact(?:ion|ing)?|compaction\s+of\s+(?:the\s+|"
+                   r"your\s+)?(?:context|conversation|session)|compact(?:ing)?\s+(?:(?:the\s+|your\s+)?"
+                   r"(?:context|conversation|session)(?:\s+window)?|mid-?(?:session|conversation)|"
+                   r"(?:in\s+the\s+middle\s+of|partway\s+through)\s+(?:a|the)\s+(?:session|"
+                   r"conversation)))|(?:start|open)\s+a\s+(?:fresh|new)\s+(?:session|conversation)\s+"
+                   r"(?:rather\s+than|instead\s+of)\s+compacting)(?=[.!?]*$)",
         "detector": {
             "id": "cache-hygiene/compact",
             "rule": "cache-hygiene",
@@ -427,7 +429,8 @@ ENTRIES = (
                            "compaction, typed or automatic, since the transcript marks both "
                            "the same way, so a rule against the typed `/compact` alone, or "
                            "one scoped to a task, is not this shape and binds nothing; nor is "
-                           "\"never compact more than once\".",
+                           "\"never compact more than once\", nor compaction with no word "
+                           "saying it is the context's, which a database does too.",
             "when": {"kind": "compact"},
             "examples": {
                 "fire": [
@@ -499,8 +502,7 @@ ENTRIES = (
         "pattern": r"^(?:never|do\s+not|don't)\s+(?:write|hard-?code|paste|put|embed|inline)\s+"
                    r"(?:a\s+|an\s+|any\s+)?(?:secrets?|credentials?|(?:api|access)\s+keys?|"
                    r"(?:api|access|auth)\s+tokens?|tokens?|private\s+keys?)\s+(?:in|into|to)\s+"
-                   r"(?:a\s+|an\s+|the\s+|any\s+|your\s+)?(?:files?|disk|repo(?:sitory)?|"
-                   r"commits?|(?:source|version)\s+control)(?=[.!?]*$)",
+                   r"(?:a\s+|any\s+)?files?(?=[.!?]*$)",
         "detector": {
             "id": "secrets/secret-in-write",
             "rule": "secrets",
@@ -576,8 +578,8 @@ ENTRIES = (
         "shape": "Filter every find",
         "pattern": r"^(?:(?:always\s+)?(?:filter|narrow)\s+(?:every\s+|each\s+|any\s+|all\s+|"
                    r"your\s+)?find(?![\w-])(?:\s+(?:commands?|calls?|searches))?(?:\s+(?:by|with)\s+"
-                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|path|size|pattern)s?(?:\s+(?:or|and)\s+"
-                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|path|size|pattern)s?)*)?|(?:never|"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|size|pattern)s?(?:\s+(?:or|and)\s+"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|size|pattern)s?)*)?|(?:never|"
                    r"do\s+not|don't)\s+(?:run\s+)?(?:a\s+|an\s+)?(?:unfiltered|bare|unbounded)\s+"
                    r"find(?![\w-])(?:\s+(?:commands?|calls?|searches))?)(?=[.!?]*$)",
         "detector": {
