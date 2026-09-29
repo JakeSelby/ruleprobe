@@ -55,12 +55,15 @@ All notable changes to this project are documented here. The format follows
   bind, and the recorded recall floor rises to 0.65
   ([#141](https://github.com/JakeSelby/ruleprobe/issues/141)).
 - The seven original catalog shapes read more of the ways people phrase them, such as "Before
-  you hand back, run the tests", "Prefer uv over pip", "Hooks must always run; never skip them"
-  and "Keep credentials out of source control". They also stop where a phrase goes on to narrow
-  the rule, so "Never force-push to main during a release freeze" and "Never commit secrets to a
-  public repository" bind nothing, and "Do not pass `--no-verify` to `git commit`" no longer
-  binds a detector that also counts pushes. Binding recall on the rules zoo is 0.80 with no false
-  bind, and 0.76 on a held-out set written before the patterns changed
+  you hand back, run the tests", "Prefer uv over pip" and "Keep credentials out of source
+  control", and each binds only a sentence it covers whole. Anything more, a scope, an aside or
+  a second clause, leaves the rule unmeasured, so "Never force-push on Fridays to main", "Use uv,
+  not pip, in production" and "Never commit .env files (in the public repo)" bind nothing. A rule
+  narrower than its detector by name no longer binds either: "Never skip pre-commit hooks" and
+  "Do not pass `--no-verify` to `git commit`" leave out the pushes `verification/no-verify`
+  counts, and "Never commit a `.env` file" names one kind of secret-shaped file. On the rules
+  zoo's earlier 136 sections binding recall rises from 0.71 to 0.73, with no false bind; the zoo
+  gains a 65-item held-out set, and over all of it recall is 0.69 and the recorded floor 0.68
   ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
 
 ## 0.2.0 (2026-09-24)

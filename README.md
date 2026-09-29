@@ -125,7 +125,7 @@ ruleprobe report --root docs --rules tests/fixtures/catalog
 
 binds a file holding one section in each shape, and lists each section as `measured` with
 the note `catalog-bound, <detector id>`. The shapes are: run the tests before finishing
-(`testing/test-after-change`), never skip pre-commit hooks (`verification/no-verify`), never
+(`testing/test-after-change`), never skip git hooks (`verification/no-verify`), never
 force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 (`package-manager/pip-install`), do not read a whole file
 (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
@@ -134,16 +134,17 @@ force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 never switch models mid-session (`cache-hygiene/model-switch`), never write a secret into a
 file (`secrets/secret-in-write`), and filter every `find` (`transcript-hygiene/unfiltered-find`).
 The first seven read the common ways of saying them, not one wording each: "Before you hand
-back, run the tests", "Run the full test suite after every change", "Hooks must always run;
+back, run the tests", "Run the full test suite after every change", "Git hooks must always run;
 never skip them", "Main must never be force-pushed", "Prefer uv over pip", "Do not use pip; use
 uv", "Read narrowly: reach for head, grep or a sed range rather than cat", "Write commit
 messages in the Conventional Commits style" and "Keep credentials out of source control" all
-bind. Each stops only at the end of its sentence, at a clause break, or before a word that
-unbinds it, so a phrase that goes on to narrow the rule binds nothing: "Never force-push to main
-during a release freeze", "Use Conventional Commits on the release branch", "Never commit
-secrets to a public repository" and "Do not pass `--no-verify` to `git commit`", which leaves
-out the pushes the detector also counts. A narrowing after a comma is not read that way, and
-stays a known over-count, as a split at an unlisted abbreviation is.
+bind. Each binds only a sentence it covers whole, apart from a closing "no exceptions", so
+anything more - a scope, a destination, an aside in parentheses or after a dash, a second
+clause - leaves the rule unmeasured: "Never force-push on Fridays to main", "Use uv in CI, not
+pip", "Use uv, not pip, in production" and "Never commit .env files (in the public repo)" bind
+nothing. So do rules narrower than their detector by name: "Never skip pre-commit hooks" leaves
+out the pushes `verification/no-verify` counts, and "Never commit .env files" or "Never check in
+private keys" names one kind of the secret-shaped files `secrets/secret-file-add` counts.
 The last four bind the shipped detectors of the same ids, and only a rule as wide as what the
 detector counts. Their patterns must reach the end of the sentence, and name a session rather
 than a task, files in general rather than a commit, the repository, a config file or the code,
@@ -550,14 +551,14 @@ cache-hygiene/model-switch                4    3    0    1   1.00    0.75
 commits/non-conventional-subject          9    5    0    4   1.00    0.56
 git-safety/force-push-default            13    9    0    4   1.00    0.69
 package-manager/pip-install              10    8    0    2   1.00    0.80
-secrets/secret-file-add                   9    8    0    1   1.00    0.89
+secrets/secret-file-add                   9    4    0    5   1.00    0.44
 secrets/secret-in-write                   4    4    0    0   1.00    1.00
 testing/test-after-change                15   14    0    1   1.00    0.93
 transcript-hygiene/unfiltered-find        3    3    0    0   1.00    1.00
 transcript-hygiene/whole-file-cat         8    6    0    2   1.00    0.75
-verification/no-verify                   11    9    0    2   1.00    0.82
+verification/no-verify                   11    3    0    8   1.00    0.27
 -------------------------------------------------------------------------------
-total                                    90   72    0   18   1.00    0.80  recall floor 0.80
+total                                    90   62    0   28   1.00    0.69  recall floor 0.68
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
