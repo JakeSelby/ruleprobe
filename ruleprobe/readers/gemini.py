@@ -137,7 +137,8 @@ def read(path, empty=False):
                    repo=_basename(project_root),
                    runtime="gemini", events=events, path=path,
                    started=min(stamps) if stamps else "",
-                   ended=max(stamps) if stamps else "")
+                   ended=max(stamps) if stamps else "",
+                   cwd=project_root)
 
 
 def session_key(path):

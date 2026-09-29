@@ -117,7 +117,7 @@ def read(path, empty=False):
     return Session(id=_key(meta, path),
                    repo=os.path.basename(cwd.rstrip("/")) if cwd else "",
                    runtime="codex", events=events, path=path,
-                   started=started, ended=ended)
+                   started=started, ended=ended, cwd=cwd)
 
 
 def session_key(path):

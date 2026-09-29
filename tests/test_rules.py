@@ -10,16 +10,20 @@ Run: python3 -m unittest discover -s tests
 import io
 import json
 import os
+import pickle
 import shutil
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
 from corpus import bash, tool_use
 from ruleprobe import DEFAULT, Registry, iter_sessions, run
+from ruleprobe.events import Session
 from ruleprobe.cli import main
-from ruleprobe.rules import discover, load_bundle, load_file, load_rules_dir, read_rule_file
+from ruleprobe.rules import (IMPORT_DEPTH, RuleFile, discover, find_rule_files, load_bundle,
+                             load_file, load_rules_dir, read_rule_file)
 from test_readers import FIXTURES
 
 SUDO = {"detectors": [{"id": "house-style/sudo-install", "rule": "house-style",
@@ -459,6 +463,447 @@ class SentenceBindingTests(Temp):
         first = [tuple(e) for e in self.load(MULTI).rules]
         second = [tuple(e) for e in self.load(MULTI).rules]
         self.assertEqual(first, second)
+
+
+def paths(found):
+    """The paths of `find_rule_files`'s `RuleFile`s, in order."""
+    return [f.path for f in found]
+
+
+class RuleFileDiscoveryTests(Temp):
+    """With no `--rules`, the rule files are found: the three global ones under a synthetic
+    home, and each runtime's project files at the working directories sessions recorded."""
+
+    def setUp(self):
+        Temp.setUp(self)
+        self.home = os.path.join(self.dir, "home")
+        os.makedirs(self.home)
+        patched = mock.patch.dict(os.environ, {"HOME": self.home, "USERPROFILE": self.home})
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.project = os.path.join(self.home, "work", "project")
+        os.makedirs(self.project)
+
+    def at(self, *parts):
+        """A found file's path, as found: under the home as given, never resolved."""
+        return os.path.join(self.dir, *parts)
+
+    def found(self, workdirs=()):
+        return paths(self.files(workdirs))
+
+    def files(self, workdirs=()):
+        return find_rule_files(workdirs, home=self.home)
+
+    def test_the_three_global_files_and_each_runtime_s_project_files_are_read(self):
+        for name in ("home/.claude/CLAUDE.md", "home/.codex/AGENTS.md",
+                     "home/.gemini/GEMINI.md", "home/work/project/CLAUDE.md",
+                     "home/work/project/.claude/rules/testing.md",
+                     "home/work/project/AGENTS.md", "home/work/project/GEMINI.md",
+                     "home/work/project/README.md"):
+            self.write(name, "# %s\n\nSome rule text for %s.\n" % (name, name))
+        globals_only = [self.at("home/.claude/CLAUDE.md"), self.at("home/.codex/AGENTS.md"),
+                        self.at("home/.gemini/GEMINI.md")]
+        self.assertEqual(self.found(), sorted(globals_only))
+        claude = self.found([("claude-code", self.project)])
+        self.assertEqual(claude, sorted(globals_only + [
+            self.at("home/work/project/CLAUDE.md"),
+            self.at("home/work/project/.claude/rules/testing.md")]))
+        every = self.found([("codex", self.project), ("gemini", self.project),
+                            ("claude-code", self.project)])
+        self.assertEqual(every, sorted(claude + [self.at("home/work/project/AGENTS.md"),
+                                                 self.at("home/work/project/GEMINI.md")]))
+        self.assertNotIn(self.at("home/work/project/README.md"), every)
+
+    def test_a_working_directory_that_is_gone_or_blank_reads_nothing(self):
+        self.assertEqual(self.found([("claude-code", os.path.join(self.dir, "gone")),
+                                     ("codex", ""), ("claude-code", None)]), [])
+
+    def test_the_list_is_the_same_whatever_order_the_sessions_came_in(self):
+        other = os.path.join(self.home, "work", "other")
+        for name in ("home/work/project/CLAUDE.md", "home/work/other/CLAUDE.md"):
+            self.write(name, "# Rules\n\nText of %s.\n" % name)
+        workdirs = [("claude-code", other), ("claude-code", self.project)]
+        self.assertEqual(self.found(workdirs), self.found(list(reversed(workdirs))))
+        self.assertEqual(len(self.found(workdirs)), 2)
+
+    def test_a_file_reached_twice_or_copied_into_a_worktree_is_read_once(self):
+        self.write("home/work/project/AGENTS.md", "# Rules\n\nNever force-push to main.\n")
+        link = os.path.join(self.project, "CLAUDE.md")
+        try:
+            os.symlink("AGENTS.md", link)
+        except (OSError, NotImplementedError):  # pragma: no cover - no symlinks here
+            self.skipTest("symlinks are not available")
+        self.write("home/work/project/.claude/worktrees/one/AGENTS.md",
+                   "# Rules\n\nNever force-push to main.\n")
+        found = self.found([("claude-code", self.project), ("codex", self.project),
+                            ("codex", os.path.join(self.project, ".claude", "worktrees",
+                                                   "one"))])
+        self.assertEqual(found, [self.at("home/work/project/AGENTS.md")])
+
+    def test_each_directory_and_candidate_file_is_checked_once(self):
+        self.write("home/work/project/CLAUDE.md", "# Git\n\nNever force-push to main.\n")
+        spelled = [self.project, self.project + os.sep, os.path.join(self.project, ".")]
+        workdirs = [("claude-code", d) for d in spelled for _ in range(50)]
+        workdirs += [("codex", self.project)] * 50
+        real_isdir, real_isfile = os.path.isdir, os.path.isfile
+        with mock.patch("os.path.isdir", side_effect=real_isdir) as isdir, \
+                mock.patch("os.path.isfile", side_effect=real_isfile) as isfile:
+            found = self.found(workdirs)
+        self.assertEqual(found, [self.at("home/work/project/CLAUDE.md")])
+        dirs = [c[0][0] for c in isdir.call_args_list]
+        files = [c[0][0] for c in isfile.call_args_list]
+        self.assertEqual(dirs.count(self.project), 1)
+        self.assertEqual(len(files), len(set(files)))
+
+    def test_codex_reads_its_override_in_place_of_agents_md(self):
+        self.write("home/work/project/AGENTS.md", "# Rules\n\nOne.\n")
+        self.write("home/work/project/AGENTS.override.md", "# Rules\n\nTwo.\n")
+        self.assertEqual(self.found([("codex", self.project)]),
+                         [self.at("home/work/project/AGENTS.override.md")])
+
+    def test_local_markdown_imports_are_followed_and_nothing_else_is(self):
+        self.write("home/.claude/CLAUDE.md",
+                   "# Global\n\n@~/.claude/personal.md\nSee @docs/house.md, too.\n\n"
+                   "```\n@docs/fenced.md\n```\n\nNot `@docs/spanned.md` and not "
+                   "@docs/data.json or someone@docs/mail.md or @docs/missing.md.\n")
+        for name in ("personal.md", "docs/house.md", "docs/fenced.md", "docs/spanned.md",
+                     "docs/data.json", "docs/mail.md"):
+            self.write("home/.claude/" + name, "# Imported\n\nText.\n" + name)
+        self.assertEqual(self.found(), sorted([self.at("home/.claude/CLAUDE.md"),
+                                               self.at("home/.claude/personal.md"),
+                                               self.at("home/.claude/docs/house.md")]))
+
+    def test_imports_stop_after_the_depth_limit_and_a_cycle_ends(self):
+        chain = IMPORT_DEPTH + 2
+        self.write("home/.gemini/GEMINI.md", "# Top\n\n@hop1.md\n")
+        for hop in range(1, chain + 1):
+            self.write("home/.gemini/hop%d.md" % hop,
+                       "# Hop %d\n\n@hop%d.md @GEMINI.md\n" % (hop, hop + 1))
+        found = self.found()
+        self.assertIn(self.at("home/.gemini/hop%d.md" % IMPORT_DEPTH), found)
+        self.assertNotIn(self.at("home/.gemini/hop%d.md" % (IMPORT_DEPTH + 1)), found)
+        self.assertEqual(len(found), IMPORT_DEPTH + 1)
+
+    def test_a_codex_file_s_imports_are_not_followed(self):
+        self.write("home/.codex/AGENTS.md", "# Global\n\n@extra.md\n")
+        self.write("home/.codex/extra.md", "# Extra\n\nText.\n")
+        self.assertEqual(self.found(), [self.at("home/.codex/AGENTS.md")])
+
+    def test_a_found_file_is_named_by_where_it_is_so_two_projects_never_share_an_id(self):
+        other = os.path.join(self.home, "work", "other")
+        self.write("home/work/project/AGENTS.md", "# Git\n\nNever force-push to main.\n")
+        self.write("home/work/other/AGENTS.md", "# Git\n\nUse uv, not pip.\n")
+        self.write("home/.codex/AGENTS.md", "Never force-push to main.\n")
+        files = self.files([("codex", self.project), ("codex", other)])
+        bundle = load_bundle(config=False, rule_files=files)
+        self.assertEqual([(e.rule, e.state, e.detectors) for e in bundle.rules], [
+            ("~/.codex/AGENTS.md", "measured", ["git-safety/force-push-default"]),
+            ("~/work/other/AGENTS.md#git", "measured", ["package-manager/pip-install"]),
+            ("~/work/project/AGENTS.md#git", "measured", ["git-safety/force-push-default"])])
+
+    def test_a_found_file_binds_the_four_default_detector_shapes_too(self):
+        self.write("home/.claude/CLAUDE.md",
+                   "# Sessions\n\nNever compact the context.\n\n"
+                   "# Models\n\nDo not switch models in the middle of a session.\n\n"
+                   "# Credentials\n\nNever write an API key to a file.\n\n"
+                   "# Searching\n\nFilter every `find` by name or type.\n")
+        bundle = load_bundle(config=False, rule_files=self.files())
+        bundle.registry()
+        self.assertEqual([(e.rule, e.state, e.detectors) for e in bundle.rules], [
+            ("~/.claude/CLAUDE.md#sessions", "measured", ["cache-hygiene/compact"]),
+            ("~/.claude/CLAUDE.md#models", "measured", ["cache-hygiene/model-switch"]),
+            ("~/.claude/CLAUDE.md#credentials", "measured", ["secrets/secret-in-write"]),
+            ("~/.claude/CLAUDE.md#searching", "measured",
+             ["transcript-hygiene/unfiltered-find"])])
+
+    def test_a_path_outside_the_working_directory_prints_under_the_home_as_a_tilde(self):
+        from ruleprobe.rules import _short
+        path = os.path.join(self.home, "work", "project", "CLAUDE.md")
+        self.assertEqual(_short(path, relative_to=self.project), "CLAUDE.md")
+        self.assertEqual(_short(path, relative_to=os.path.join(self.dir, "elsewhere")),
+                         "~/work/project/CLAUDE.md")
+        outside = os.path.join(self.dir, "other", "rules.md")
+        self.assertEqual(_short(outside, relative_to=self.home), outside)
+
+    def test_a_blocked_section_names_its_nearest_entry_and_the_blocking_word(self):
+        self.write("home/.claude/CLAUDE.md",
+                   "# Git\n\nNever force-push to main unless the release lead says so.\n\n"
+                   "# Style\n\nKeep functions short.\n")
+        bundle = load_bundle(config=False, rule_files=self.files())
+        bundle.registry()
+        blocked, plain = bundle.rules
+        self.assertEqual(blocked.state, "unmeasured")
+        self.assertIn("(unless)", blocked.reason)
+        self.assertIn("nearest git-safety/force-push-default", blocked.reason)
+        self.assertEqual(plain.reason, "")
+        text = bundle.summary()
+        line = [x for x in text.split("\n") if "#git" in x][0]
+        self.assertIn("(unless), nearest git-safety/force-push-default", line)
+
+    def test_the_coverage_block_says_once_that_found_rule_text_is_today_s(self):
+        self.write("home/.claude/CLAUDE.md", "# Git\n\nNever force-push to main.\n")
+        self.write("home/.gemini/GEMINI.md", "# Style\n\nKeep functions short.\n")
+        text = load_bundle(config=False, rule_files=self.files()).summary()
+        self.assertEqual(text.count("the rule text is today's"), 1)
+        self.assertTrue(text.startswith("rules found with no --rules in 2 files; the rule text "
+                                        "is today's, not the text in force when an older "
+                                        "session ran\n"))
+        self.write("rules/git.md", "# Git\n\nNever force-push to main.\n")
+        named = load_bundle(config=False, rules_dir=os.path.join(self.dir, "rules"))
+        self.assertNotIn("today's", named.summary())
+        self.assertEqual(load_bundle(config=False, rule_files=[]).summary(), "")
+
+
+class UntrustedRuleFileTests(Temp):
+    """A found rule file is untrusted text: it may be a clone of somebody else's repository."""
+
+    def setUp(self):
+        Temp.setUp(self)
+        self.home = os.path.join(self.dir, "home")
+        os.makedirs(self.home)
+        patched = mock.patch.dict(os.environ, {"HOME": self.home, "USERPROFILE": self.home})
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.project = os.path.join(self.home, "clone")
+        os.makedirs(self.project)
+        self.outside = self.write("outside/private.md", "# Private heading\n\nSecret text.\n")
+
+    def found(self, workdirs=(), refused=None):
+        return paths(self.files(workdirs, refused))
+
+    def files(self, workdirs=(), refused=None, skipped=None):
+        return find_rule_files(workdirs or [("claude-code", self.project)], home=self.home,
+                               refused=refused, skipped=skipped)
+
+    def symlink(self, target, link):
+        try:
+            os.symlink(target, link)
+        except (OSError, NotImplementedError):  # pragma: no cover - no symlinks here
+            self.skipTest("symlinks are not available")
+
+    def test_an_import_is_checked_as_written_before_its_real_path(self):
+        self.write("home/clone/docs/ok.md", "# Inside\n\nText.\n")
+        alias = os.path.join(self.dir, "outside", "alias.md")
+        self.symlink(os.path.join(self.project, "docs", "ok.md"), alias)
+        self.write("home/clone/CLAUDE.md", "# Rules\n\n@%s\n" % alias.replace(os.sep, "/"))
+        refused = []
+        self.assertEqual(self.found(refused=refused), [os.path.join(self.project, "CLAUDE.md")])
+        self.assertEqual(refused, [alias])
+
+    def test_a_project_file_linked_out_of_its_project_is_refused(self):
+        self.symlink(os.path.join(os.pardir, os.pardir, "outside", "private.md"),
+                     os.path.join(self.project, "CLAUDE.md"))
+        self.write("home/clone/.claude/rules/ok.md", "# Ok\n\nText.\n")
+        refused = []
+        files = self.files(refused=refused)
+        self.assertEqual(paths(files), [os.path.join(self.project, ".claude", "rules", "ok.md")])
+        self.assertEqual(refused, [os.path.join(self.project, "CLAUDE.md")])
+        text = load_bundle(config=False, rule_files=files, refused=len(refused)).summary()
+        self.assertIn("rule files refused: 1", text)
+        self.assertNotIn("private", text.lower())
+
+    def test_a_global_file_may_link_anywhere_under_home_and_nowhere_else(self):
+        self.write("home/dotfiles/CLAUDE.md", "# Global\n\nNever force-push to main.\n")
+        os.makedirs(os.path.join(self.home, ".claude"))
+        os.makedirs(os.path.join(self.home, ".codex"))
+        self.symlink(os.path.join(self.home, "dotfiles", "CLAUDE.md"),
+                     os.path.join(self.home, ".claude", "CLAUDE.md"))
+        self.symlink(self.outside, os.path.join(self.home, ".codex", "AGENTS.md"))
+        refused = []
+        files = find_rule_files((), home=self.home, refused=refused)
+        self.assertEqual(files, [RuleFile(os.path.join(self.home, ".claude", "CLAUDE.md"),
+                                          os.path.realpath(os.path.join(self.home, "dotfiles",
+                                                                        "CLAUDE.md")))])
+        self.assertEqual(refused, [os.path.join(self.home, ".codex", "AGENTS.md")])
+
+    def test_a_linked_rules_folder_or_subfolder_is_never_walked(self):
+        rules = os.path.join(self.project, ".claude", "rules")
+        os.makedirs(os.path.join(self.project, ".claude"))
+        self.symlink(os.path.join(os.pardir, os.pardir), rules)
+        refused = []
+        self.assertEqual(self.found(refused=refused), [])
+        self.assertEqual(refused, [rules])
+        os.remove(rules)
+        self.write("home/clone/.claude/rules/ok.md", "# Ok\n\nText.\n")
+        self.write("home/notes/deep.md", "# Deep\n\nText.\n")
+        self.symlink(os.path.join(self.home, "notes"), os.path.join(rules, "notes"))
+        self.symlink(self.outside, os.path.join(rules, "leak.md"))
+        refused = []
+        self.assertEqual(self.found(refused=refused), [os.path.join(rules, "ok.md")])
+        self.assertEqual(refused, [os.path.join(rules, "leak.md")])
+
+    def test_a_rules_folder_is_read_up_to_its_cap_and_the_rest_counted(self):
+        for n in range(5):
+            self.write("home/clone/.claude/rules/r%d.md" % n, "# R%d\n\nText %d.\n" % (n, n))
+        skipped = []
+        with mock.patch("ruleprobe.rules.MAX_RULE_DIR_FILES", 3):
+            files = self.files(skipped=skipped)
+            text = load_bundle(config=False, rule_files=files, skipped=len(skipped)).summary()
+        self.assertEqual(len(files), 3)
+        self.assertEqual(len(skipped), 2)
+        self.assertIn("rule files skipped: 2 over 1024 KB, or past 3 in one rules folder, "
+                      "not read", text)
+
+    def test_a_rule_file_over_the_size_cap_is_skipped_and_counted(self):
+        self.write("home/clone/CLAUDE.md", "# Big\n\n" + "Never force-push to main. " * 20)
+        self.write("home/clone/AGENTS.md", "# Small\n\nText.\n")
+        skipped = []
+        with mock.patch("ruleprobe.rules.MAX_RULE_FILE_BYTES", 128):
+            files = self.files([("claude-code", self.project), ("codex", self.project)],
+                               skipped=skipped)
+            text = load_bundle(config=False, rule_files=files, skipped=len(skipped)).summary()
+        self.assertEqual(paths(files), [os.path.join(self.project, "AGENTS.md")])
+        self.assertEqual(skipped, [os.path.join(self.project, "CLAUDE.md")])
+        self.assertIn("rule files skipped: 1", text)
+        self.assertNotIn("CLAUDE.md", text)
+
+    def test_a_found_file_is_read_at_its_checked_real_path_without_following_a_link(self):
+        self.write("home/dotfiles/a.md", "# Checked\n\nText.\n")
+        self.write("home/dotfiles/b.md", "# Swapped\n\nText.\n")
+        named = os.path.join(self.home, ".gemini", "GEMINI.md")
+        os.makedirs(os.path.dirname(named))
+        self.symlink(os.path.join(self.home, "dotfiles", "a.md"), named)
+        [found] = find_rule_files((), home=self.home)
+        # After the check, the name is pointed elsewhere: the checked file is still the one read.
+        os.remove(named)
+        os.symlink(os.path.join(self.home, "dotfiles", "b.md"), named)
+        [entry] = load_bundle(config=False, rule_files=[found]).rules
+        self.assertEqual(entry.rule, "~/.gemini/GEMINI.md#checked")
+        if not hasattr(os, "O_NOFOLLOW"):  # pragma: no cover - Windows
+            return
+        # And a link swapped in at the checked real path itself is refused, not followed.
+        os.remove(found.real)
+        os.symlink(self.outside, found.real)
+        bundle = load_bundle(config=False, rule_files=[found])
+        self.assertEqual([e.reason for e in bundle.rules], ["unreadable"])
+        self.assertTrue(bundle.findings[0].reason.startswith("cannot read: "))
+        self.assertNotIn("private", bundle.summary().lower())
+
+    def test_a_found_file_s_front_matter_detector_is_never_compiled(self):
+        self.write("home/clone/AGENTS.md",
+                   "---\ndetectors:\n"
+                   "  - id: git-safety/force-push-default\n    rule: git\n"
+                   "    event: tool_use\n    when: {command: {starts_with: [ls]}}\n"
+                   "  - id: clone/slow\n    rule: git\n    event: tool_use\n"
+                   "    when: {command: {regex: '^(a+)+$'}}\n---\n\n"
+                   "# Git\n\nNever force-push to main.\n")
+        files = self.files([("codex", self.project)])
+        bundle = load_bundle(config=False, rule_files=files)
+        registry = bundle.registry()
+        self.assertEqual(bundle.detectors[0].id, "git-safety/force-push-default")
+        self.assertEqual(len(bundle.detectors), 1)
+        self.assertIs(registry.get("git-safety/force-push-default"), bundle.detectors[0])
+        self.assertNotIn("clone/slow", registry)
+        [entry] = bundle.rules
+        self.assertEqual((entry.rule, entry.state, entry.source),
+                         ("~/clone/AGENTS.md#git", "measured", "catalog"))
+        self.assertIn("read only under --rules", bundle.findings[0].reason)
+        # A command the pathological pattern would take far too long over, run in memory.
+        events = [bash("a" * 40 + "!"), bash("ls")]
+        self.assertEqual(sorted(run(events, registry=registry)), [])
+        # The same file named with --rules is trusted, as before.
+        shutil.copy(files[0].path, self.write("rules/AGENTS.md", ""))
+        named = load_bundle(config=False, rules_dir=os.path.join(self.dir, "rules"))
+        self.assertEqual(sorted(d.id for d in named.detectors),
+                         ["clone/slow", "git-safety/force-push-default"])
+
+    def test_an_import_outside_its_root_is_refused_and_only_counted(self):
+        other = self.write("outside/other.md", "# Other private heading\n\nText.\n")
+        relative = os.path.relpath(other, self.project).replace(os.sep, "/")
+        self.write("home/clone/docs/ok.md", "# Inside\n\nText.\n")
+        self.write("home/clone/CLAUDE.md",
+                   "# Rules\n\n@%s @%s @link.md @docs/ok.md @docs/../../clone/docs/ok.md\n"
+                   % (self.outside.replace(os.sep, "/"), relative))
+        self.symlink(self.outside, os.path.join(self.project, "link.md"))
+        refused = []
+        files = self.files(refused=refused)
+        self.assertEqual(paths(files), [os.path.join(self.project, "CLAUDE.md"),
+                                 os.path.join(self.project, "docs", "ok.md")])
+        self.assertEqual(len(refused), 3)
+        text = load_bundle(config=False, rule_files=files, refused=len(refused)).summary()
+        self.assertIn("rule files refused: 3 outside the folder they may be read from, not read",
+                      text)
+        self.assertNotIn("private", text.lower())
+        self.assertNotIn("outside", text.split("rule files refused")[0])
+
+    def test_a_global_file_s_imports_stay_in_its_global_folder(self):
+        self.write("home/.claude/CLAUDE.md", "# G\n\n@~/.claude/mine.md @~/elsewhere.md\n")
+        self.write("home/.claude/mine.md", "# Mine\n\nText.\n")
+        self.write("home/elsewhere.md", "# Elsewhere\n\nText.\n")
+        refused = []
+        self.assertEqual(paths(find_rule_files((), home=self.home, refused=refused)),
+                         [os.path.join(self.home, ".claude", "CLAUDE.md"),
+                          os.path.join(self.home, ".claude", "mine.md")])
+        self.assertEqual(refused, [os.path.join(self.home, "elsewhere.md")])
+
+    def test_an_unreadable_file_s_finding_names_the_reason_and_not_the_path(self):
+        path = self.write("home/clone/CLAUDE.md", "# Rules\n\nText.\n")
+        with mock.patch("ruleprobe.rules._read_regular",
+                        side_effect=PermissionError(13, "Permission denied", path)):
+            _detectors, [entry], [finding] = read_rule_file(path, label="~/clone/CLAUDE.md",
+                                                            trusted=False)
+        self.assertEqual(finding.reason, "cannot read: Permission denied")
+        self.assertEqual(entry.reason, "unreadable")
+
+    def test_a_fifo_named_like_a_rule_file_never_blocks_or_loads(self):
+        if not hasattr(os, "mkfifo"):  # pragma: no cover - Windows
+            self.skipTest("no FIFOs here")
+        os.makedirs(os.path.join(self.project, ".claude", "rules"))
+        fifo = os.path.join(self.project, ".claude", "rules", "pipe.md")
+        os.mkfifo(fifo)
+        result = {}
+
+        def read():
+            result["files"] = self.found()
+            result["direct"] = read_rule_file(fifo)[2]
+
+        worker = threading.Thread(target=read, daemon=True)
+        worker.start()
+        worker.join(10)
+        self.assertFalse(worker.is_alive(), "reading a FIFO blocked")
+        self.assertEqual(result["files"], [])
+        self.assertEqual([f.reason for f in result["direct"]],
+                         ["cannot read: not a regular file"])
+
+    def test_identical_files_are_compared_by_digest(self):
+        for name in ("home/clone/CLAUDE.md", "home/clone/.claude/CLAUDE.md"):
+            self.write(name, "# Rules\n\nNever force-push to main.\n")
+        import hashlib
+        with mock.patch("ruleprobe.rules.hashlib.sha256", wraps=hashlib.sha256) as digest:
+            self.assertEqual(self.found(), [os.path.join(self.project, "CLAUDE.md")])
+        self.assertEqual(digest.call_count, 2)
+
+    def test_a_relative_import_resolves_from_the_file_as_named_not_its_real_path(self):
+        dotfiles = os.path.join(self.home, "dotfiles")
+        self.write("home/dotfiles/CLAUDE.md", "# Global\n\n@rules/git.md\n")
+        self.write("home/dotfiles/rules/git.md", "# Decoy\n\nWrong file.\n")
+        self.write("home/.claude/rules/git.md", "# Git\n\nNever force-push to main.\n")
+        self.symlink(os.path.join(dotfiles, "CLAUDE.md"),
+                     os.path.join(self.home, ".claude", "CLAUDE.md"))
+        refused = []
+        self.assertEqual(paths(find_rule_files((), home=self.home, refused=refused)),
+                         [os.path.join(self.home, ".claude", "CLAUDE.md"),
+                          os.path.join(self.home, ".claude", "rules", "git.md")])
+        self.assertEqual(refused, [])
+
+    def test_a_relative_recorded_working_directory_is_ignored(self):
+        self.write("rel/app/CLAUDE.md", "# Rules\n\nNever force-push to main.\n")
+        self.write("CLAUDE.md", "# Rules\n\nUse uv, not pip.\n")
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.dir)
+        workdirs = [("claude-code", "rel/app"), ("claude-code", "."),
+                    ("claude-code", "rel/../rel/app")]
+        self.assertEqual(find_rule_files(workdirs, home=self.home), [])
+
+    def test_a_session_keeps_its_seven_fields_and_carries_cwd_beside_them(self):
+        [session] = [s for s in iter_sessions(root=FIXTURES) if s.runtime == "claude-code"]
+        self.assertEqual(len(session), 7)
+        _id, _repo, _runtime, _events, _path, _started, _ended = session
+        self.assertEqual(session.cwd, "/tmp/demo-repo")
+        self.assertEqual(Session("x", "", "codex", []).cwd, "")
+        self.assertEqual(pickle.loads(pickle.dumps(session)).cwd, "/tmp/demo-repo")
+        self.assertEqual(session._replace(id="other").cwd, "")
 
 
 if __name__ == "__main__":

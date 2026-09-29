@@ -38,6 +38,25 @@ it has never fired in the window. `frequent` means it fired in more than 30 perc
 it describes the share and advises nothing. Both notes stay blank until there are twenty
 measured sessions, because a share over five sessions is noise.
 
+With no `--rules`, `report` also finds your rule files itself and prints a coverage block under
+the table, saying which rules a detector measures. It reads `~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md` (or `AGENTS.override.md`) and `~/.gemini/GEMINI.md`, and at each working
+directory a transcript recorded, the project files that runtime reads there: `CLAUDE.md`,
+`.claude/CLAUDE.md`, `CLAUDE.local.md` and `.claude/rules/**/*.md` for Claude Code, `AGENTS.md`
+(or `AGENTS.override.md`) for Codex, `GEMINI.md` for Gemini CLI. A Claude Code or Gemini file's
+`@path` imports of other markdown files are followed, five hops at most. A file reached twice,
+or with the same bytes as another, as in several worktrees of one repository, is read once, and
+each rule is named by where its file is, `~/work/app/CLAUDE.md#testing`. The rule text is
+today's, not what was in force when an older session ran, and the block says so. A found file
+may be a clone of somebody else's repository, so it binds through the catalog alone: its front
+matter is ignored, and only a regular file of at most 1 MB is read, at most 200 from one rules
+folder. Every file must resolve inside its project, a global file anywhere under the home
+folder, and an import that leaves its project, or the runtime's global folder for a global
+file, is refused; linked folders are not walked. Refused and skipped files are counted in the
+block, never named.
+Parent directories are not searched. `--rules DIR` reads that directory instead, and `--no-config`
+reads no rule file.
+
 Nothing is sent anywhere, no model is asked anything, `report` and `explain` write nothing,
 `label` writes only under the directory you name, and the same transcript gives the same
 answer every time. Python 3.9 or newer, standard library only.
@@ -132,7 +151,10 @@ followed, so read its followed share as a floor. Its description lists the runne
 
 The binding under-counts on purpose. A sentence matching no entry, or more than one, binds
 nothing, and a section none of whose sentences binds stays unmeasured; the coverage block names
-the entries when a sentence matched several. A section whose sentences bind different entries
+the entries when a sentence matched several, and when a sentence matched an entry and a word
+below unbound it, it names that word and the entry, its nearest, as in
+`a catalog shape with an exception or condition (unless), nearest git-safety/force-push-default`.
+A section whose sentences bind different entries
 is measured by each, and the coverage block lists them all: "Never force-push to main. Use uv,
 not pip." binds both. A pattern never reaches across a clause break (`;`, `,`, `:`, a run of
 hyphens between spaces such as ` - ` or ` -- `, a dash), except the comma of its own contrast

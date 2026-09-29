@@ -7,7 +7,8 @@ Three places hold a declarative detector, and all three are read into one bundle
   by walking up from the working directory;
 - `~/.config/ruleprobe/detectors.yaml`, honouring `XDG_CONFIG_HOME`, for the ones you want
   everywhere;
-- front matter inside a markdown rule file, when `--rules <dir>` points at your rules.
+- front matter inside a markdown rule file, when `--rules <dir>` points at your rules, or
+  when `report` finds the rule files itself with no `--rules` (`find_rule_files`).
 
 The third is the one that makes a report readable, because it also says what is *not*
 measured. A rule file carrying a `detector:` block is measured; one carrying
@@ -39,8 +40,11 @@ since it intensifies as often as it narrows ("use only uv"), and so are `instead
 `rather than`, which the pip shape itself uses. A rule bound in its front matter is `own`,
 and so is a catalog-bound one whose detector id a detector file of the user's replaced.
 """
+import errno
+import hashlib
 import os
 import re
+import stat
 from collections import namedtuple
 
 from .declarative import DeclarativeError, load, parse_with_lines, split_front_matter
@@ -48,8 +52,8 @@ from .detectors import catalog as _catalog
 from .matchers import compile_detector, schema_version_error
 from .registry import DEFAULT, Registry, fold_map
 
-__all__ = ["Bundle", "Finding", "RuleEntry", "catalog_detectors", "discover", "load_bundle",
-           "load_file", "load_rules_dir"]
+__all__ = ["Bundle", "Finding", "RuleEntry", "RuleFile", "catalog_detectors", "discover",
+           "find_rule_files", "load_bundle", "load_file", "load_rules_dir"]
 
 #: The sidecar a repository keeps its own detectors in, in preference order.
 REPO_DIR = ".ruleprobe"
@@ -97,13 +101,22 @@ def _is_catalog(detector):
 class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
-    __slots__ = ("detectors", "rules", "findings", "sources", "_bound")
+    __slots__ = ("detectors", "rules", "findings", "sources", "found", "refused", "skipped",
+                 "_bound")
 
-    def __init__(self, detectors=None, rules=None, findings=None, sources=None):
+    def __init__(self, detectors=None, rules=None, findings=None, sources=None, found=None,
+                 refused=0, skipped=0):
         self.detectors = list(detectors or [])
         self.rules = list(rules or [])
         self.findings = list(findings or [])
         self.sources = list(sources or [])
+        # The rule files found with no `--rules` (`find_rule_files`), or None when the rules
+        # were named or not read.
+        self.found = None if found is None else list(found)
+        # How many found files and imports were refused for leaving their root, and how
+        # many were skipped for their size or a rules folder's cap.
+        self.refused = refused
+        self.skipped = skipped
         # Every entry any `registry()` call labelled, by identity, with the entry it was
         # labelled from: `{id(labelled): (labelled, bound)}`. The labelled entry is held so
         # its identity is never reused by another object.
@@ -172,8 +185,21 @@ class Bundle(object):
 
     def summary(self, relative_to=None):
         """The coverage block a report prints under its table, or `""` when nothing was
-        loaded and there is nothing to say."""
+        loaded and there is nothing to say. When the rule files were found rather than named,
+        it opens by saying so, once, and that their text is today's."""
         lines = []
+        if self.found and (self.rules or self.findings):
+            lines.append("rules found with no --rules in %d file%s; the rule text is today's, "
+                         "not the text in force when an older session ran"
+                         % (len(self.found), "" if len(self.found) == 1 else "s"))
+        # Counts, never the paths: a refused file or import may name anything on the machine.
+        if self.found is not None and self.refused:
+            lines.append("rule files refused: %d outside the folder they may be read from, "
+                         "not read" % self.refused)
+        if self.found is not None and self.skipped:
+            lines.append("rule files skipped: %d over %d KB, or past %d in one rules folder, "
+                         "not read" % (self.skipped, MAX_RULE_FILE_BYTES // 1024,
+                                       MAX_RULE_DIR_FILES))
         if self.rules:
             coverage = self.coverage()
             lines.append("rules: %d measured, %d dark, %d unmeasured%s"
@@ -185,9 +211,12 @@ class Bundle(object):
                 note = ": " + entry.reason if entry.reason else ""
                 if entry.source == "catalog":
                     note = ": catalog-bound, " + ", ".join(entry.detectors)
-                lines.append("  %-11s%-*s%s%s"
-                             % (entry.state, width, entry.rule,
-                                _short(entry.path, relative_to), note))
+                # A found file's rule id already says where it is.
+                where = _short(entry.path, relative_to)
+                if self.found and entry.rule.split("#")[0] == _label(entry.path):
+                    where, note = "", note[2:] if note else ""
+                lines.append(("  %-11s%-*s%s%s" % (entry.state, width, entry.rule, where,
+                                                   note)).rstrip())
         if self.findings:
             lines.append("findings: %d (everything else still loaded)"
                          % len(self.findings))
@@ -231,13 +260,17 @@ def _percent(coverage):
 
 
 def _short(path, relative_to=None):
-    """A path to print: relative to the working directory when it is under it, so a report
-    never carries somebody's home directory."""
+    """A path to print: relative to the working directory when it is under it, else `~/`
+    and its path under the home directory when it is under that, so a report never carries
+    somebody's home directory."""
     try:
         relative = os.path.relpath(path, relative_to or os.getcwd())
     except ValueError:  # pragma: no cover - a different drive on Windows
         return path
-    return path if relative.startswith("..") else relative
+    if not relative.startswith(".."):
+        return relative
+    label = _label(path)
+    return label if label.startswith("~/") else path
 
 
 # --- discovery -------------------------------------------------------------------------
@@ -266,6 +299,325 @@ def discover(cwd=None, user=True):
             break
         directory = parent
     return found
+
+
+# --- rule files found with no --rules -----------------------------------------------------
+
+#: The global rule file each runtime reads, under the home directory. Each place is a tuple of
+#: alternatives, and the first that is a file is the one read: Codex reads
+#: `AGENTS.override.md` in place of `AGENTS.md` when both are there.
+GLOBAL_RULE_FILES = (
+    ("claude-code", ((".claude/CLAUDE.md",),)),
+    ("codex", ((".codex/AGENTS.override.md", ".codex/AGENTS.md"),)),
+    ("gemini", ((".gemini/GEMINI.md",),)),
+)
+#: The project rule files each runtime documents at the directory it runs in, as above.
+PROJECT_RULE_FILES = {
+    "claude-code": (("CLAUDE.md",), (".claude/CLAUDE.md",), ("CLAUDE.local.md",)),
+    "codex": (("AGENTS.override.md", "AGENTS.md"),),
+    "gemini": (("GEMINI.md",),),
+}
+#: The project folders whose markdown files a runtime reads as rules, every one.
+PROJECT_RULE_DIRS = {"claude-code": (".claude/rules",)}
+#: The runtimes whose rule files import others with `@path`, and how many hops are followed,
+#: the most Claude Code documents.
+IMPORTING = ("claude-code", "gemini")
+IMPORT_DEPTH = 5
+
+#: An import: `@` at the start of a line or after a space, then a path; only one naming an
+#: existing `.md` file is followed.
+_IMPORT = re.compile(r"(?:^|(?<=\s))@((?:~/|\.{1,2}/|/)?[^\s`@]+)")
+_CODE_SPAN = re.compile(r"(`+).*?\1")
+
+
+#: The largest rule file a run with no `--rules` reads, and how many files it takes from one
+#: rules folder; a file past either is skipped and counted.
+MAX_RULE_FILE_BYTES = 1 << 20
+MAX_RULE_DIR_FILES = 200
+
+#: A found rule file: the path it was found at, which names it, and the real path it was
+#: checked at, which is the one read.
+RuleFile = namedtuple("RuleFile", "path real")
+
+
+def find_rule_files(workdirs=(), home=None, refused=None, skipped=None):
+    """The rule files a run with no `--rules` reads, as `RuleFile`s sorted by path, each
+    once: every global file of `GLOBAL_RULE_FILES` under `home` (the user's home by
+    default), and at each `(runtime, directory)` in `workdirs` - the absolute working
+    directory a session recorded; a relative one is ignored - that runtime's
+    `PROJECT_RULE_FILES` and the markdown under its `PROJECT_RULE_DIRS`. A Claude Code or
+    Gemini file's `@path` imports of other markdown files are followed, `IMPORT_DEPTH` hops at
+    most. A file is named by the path it was found at, and one reached by two names, or
+    holding the same bytes as another, is read once (`_distinct`). Nothing is written.
+
+    A found file is untrusted text: it may sit in a clone of somebody else's repository. So
+    every file is confined, by its real path, before anything reads it:
+
+    - a project file, a rules-folder entry and a project file's import to the working
+      directory it was found under;
+    - a global file to the home folder, so `~/.claude/CLAUDE.md` may be a link into dotfiles;
+    - a global file's import to that runtime's global folder (`~/.claude`, `~/.codex`,
+      `~/.gemini`), and an imported file's imports to its importer's root.
+
+    An import is checked on its path as written first, and nothing is asked of the disk about
+    one outside its root. A rules folder is walked only when its real path is inside the
+    project, without following a linked subfolder, `MAX_RULE_DIR_FILES` files at most. Only a
+    regular file of at most `MAX_RULE_FILE_BYTES` is taken. When `refused` or `skipped` is a
+    list, each distinct path refused for leaving its root, or skipped for its size or a
+    folder's cap, is appended to it.
+
+    Known misses: parent directories of a working directory are not searched, though every
+    runtime reads some of them; nor are `~/.claude/rules`, `CLAUDE_CONFIG_DIR`, `CODEX_HOME`
+    or a Gemini `context.fileName` setting; an import is read only from a line of text, never
+    from code; and an import out of a project into another is refused even where the runtime
+    would read it."""
+    home = os.path.expanduser("~") if home is None else home
+    check = _Checks()
+    refusals, skips = set(), set()
+
+    def take(path, root):
+        """`path`'s real path when it may be read under `root`, else None, noted."""
+        real = check.realpath(path)
+        if not _inside(real, check.realpath(root)):
+            refusals.add(path)
+            return None
+        size = check.regular_size(real)
+        if size is None:
+            return None
+        if size > MAX_RULE_FILE_BYTES:
+            skips.add(path)
+            return None
+        return real
+
+    # (runtime, the path as found, its real path, the root its imports stay inside)
+    picked = []
+    for runtime, places in GLOBAL_RULE_FILES:
+        for alternatives in places:
+            path = check.first_file(home, alternatives)
+            real = take(path, home) if path is not None else None
+            if real is not None:
+                picked.append((runtime, path, real, os.path.dirname(path)))
+    # Each directory once, with every runtime that recorded it, however many sessions did
+    # and however its path was spelled. A transcript is untrusted shape, so a directory
+    # that is not an absolute path string is left out.
+    runtimes = {}
+    for runtime, directory in workdirs:
+        if isinstance(runtime, str) and isinstance(directory, str) and directory \
+                and os.path.isabs(directory):
+            runtimes.setdefault(os.path.normpath(directory), set()).add(runtime)
+    for directory in sorted(runtimes):
+        if not check.isdir(directory):
+            continue
+        for runtime in sorted(runtimes[directory]):
+            for alternatives in PROJECT_RULE_FILES.get(runtime, ()):
+                path = check.first_file(directory, alternatives)
+                real = take(path, directory) if path is not None else None
+                if real is not None:
+                    picked.append((runtime, path, real, directory))
+            for folder in PROJECT_RULE_DIRS.get(runtime, ()):
+                folder = os.path.join(directory, *folder.split("/"))
+                if not check.isdir(folder):
+                    continue
+                if not _inside(check.realpath(folder), check.realpath(directory)):
+                    refusals.add(folder)
+                    continue
+                for path in _rule_folder(folder, skips):
+                    real = take(path, directory)
+                    if real is not None:
+                        picked.append((runtime, path, real, directory))
+    names = {}
+    level = set()
+    for runtime, path, real, root in picked:
+        names.setdefault(real, set()).add(path)
+        if runtime in IMPORTING:
+            level.add((path, real, root))
+    followed = set(real for _path, real, _root in level)
+    level = sorted(level)
+    for _hop in range(IMPORT_DEPTH):
+        reached = set()
+        for path, real, root in level:
+            for target in _imports(path, real, home, root, check, refusals):
+                target_real = take(target, root)
+                if target_real is None:
+                    continue
+                names.setdefault(target_real, set()).add(target)
+                if target_real not in followed:
+                    followed.add(target_real)
+                    reached.add((target, target_real, root))
+        level = sorted(reached)
+    if refused is not None:
+        refused.extend(sorted(refusals))
+    if skipped is not None:
+        skipped.extend(sorted(skips))
+    # Two names of one file: the shorter, then the first in sorted order.
+    return _distinct([RuleFile(min(found, key=lambda p: (len(p), p)), real)
+                      for real, found in names.items()])
+
+
+def _rule_folder(folder, skips):
+    """The markdown files under a rules folder, sorted, `MAX_RULE_DIR_FILES` at most, the
+    rest added to `skips`. A dot-named entry and a linked subfolder are never entered."""
+    out = []
+    for base, dirs, files in os.walk(folder):
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".")
+                         and not os.path.islink(os.path.join(base, d)))
+        for name in sorted(files):
+            if name.endswith(".md") and not name.startswith("."):
+                path = os.path.join(base, name)
+                if len(out) < MAX_RULE_DIR_FILES:
+                    out.append(path)
+                else:
+                    skips.add(path)
+    return out
+
+
+def _distinct(files):
+    """`files`, sorted by path, less each whose content another already holds (compared by
+    its SHA-256), so the same rule file in several worktrees or checkouts of one repository
+    is one file, named by its shortest path - the checkout rather than a worktree nested in
+    it - and the first in sorted order among paths as short. A file that cannot be read is
+    kept, to be a finding."""
+    kept, seen = [], set()
+    for found in sorted(files, key=lambda f: (len(f.path), f.path)):
+        try:
+            digest = hashlib.sha256(_read_regular(found.real, nofollow=True,
+                                                  limit=MAX_RULE_FILE_BYTES)).hexdigest()
+        except OSError:
+            kept.append(found)
+            continue
+        if digest not in seen:
+            seen.add(digest)
+            kept.append(found)
+    return sorted(kept)
+
+
+#: A front-matter line giving a key only `--rules` reads.
+_BINDING_KEYS = re.compile(r"^(?:detectors?|opt_out|rule)[ \t]*:", re.MULTILINE)
+
+
+def _read_regular(path, nofollow=False, limit=None):
+    """The bytes of `path`, or `OSError` when it is not a regular file, or when `limit` is
+    given and it holds more bytes than that. It is opened without blocking, with
+    `O_NOFOLLOW` where the platform has it when `nofollow` is set (so a found file is read at
+    the real path it was checked at, and a link swapped in there is refused), and checked on
+    the open descriptor, so a FIFO or a device named like a rule file never stalls a run."""
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
+    if nofollow:
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        status = os.fstat(descriptor)
+        if not stat.S_ISREG(status.st_mode):
+            raise OSError(errno.EINVAL, "not a regular file")
+        too_big = OSError(errno.EFBIG, "larger than %d bytes" % limit) if limit else None
+        if limit is not None and status.st_size > limit:
+            raise too_big
+        chunks, total = [], 0
+        while True:
+            chunk = os.read(descriptor, 1 << 16)
+            if not chunk:
+                return b"".join(chunks)
+            total += len(chunk)
+            if limit is not None and total > limit:
+                raise too_big
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+
+
+def _inside(path, root):
+    """True when `path` is `root` or under it; both are compared as given."""
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:  # pragma: no cover - a different drive on Windows, or mixed kinds
+        return False
+
+
+class _Checks(object):
+    """The filesystem questions one `find_rule_files` call asks, each asked of the disk once."""
+
+    def __init__(self):
+        self._answers = {}
+
+    def _ask(self, kind, path, question):
+        key = (kind, path)
+        if key not in self._answers:
+            self._answers[key] = question(path)
+        return self._answers[key]
+
+    def isdir(self, path):
+        return self._ask("dir", path, os.path.isdir)
+
+    def isfile(self, path):
+        return self._ask("file", path, os.path.isfile)
+
+    def realpath(self, path):
+        return self._ask("real", path, os.path.realpath)
+
+    def regular_size(self, path):
+        """`path`'s size when it is a regular file, else None."""
+        def size(target):
+            try:
+                status = os.stat(target)
+            except OSError:
+                return None
+            return status.st_size if stat.S_ISREG(status.st_mode) else None
+        return self._ask("size", path, size)
+
+    def first_file(self, directory, alternatives):
+        """The first of `alternatives`, `/`-separated paths under `directory`, that is a
+        regular file."""
+        for name in alternatives:
+            path = os.path.join(directory, *name.split("/"))
+            if self.isfile(path):
+                return path
+        return None
+
+
+def _imports(path, real, home, root, check, refused):
+    """The `.md` files `path`, read at its checked `real` path, imports with `@path`, in
+    document order: relative to the folder `path` was found in (not its real path's), to
+    `home` for `~/`, or absolute. A target outside `root` as written is added to `refused`,
+    and nothing is asked of the disk about it; the caller confines the rest by real path."""
+    try:
+        text = _read_regular(real, nofollow=True, limit=MAX_RULE_FILE_BYTES).decode("utf-8-sig")
+    except (OSError, UnicodeDecodeError):
+        return []
+    kinds, visible = _kinds_of(split_front_matter(text)[2])
+    base = os.path.normpath(root)
+    out = []
+    for kind, line in zip(kinds, visible):
+        if kind not in ("text", "heading"):
+            continue
+        for found in _IMPORT.finditer(_CODE_SPAN.sub(" ", line)):
+            target = found.group(1).rstrip(".,;:!?)]'\"")
+            if not target.lower().endswith(".md"):
+                continue
+            if target.startswith("~/"):
+                target = os.path.join(home, *target[2:].split("/"))
+            elif not os.path.isabs(target):
+                target = os.path.join(os.path.dirname(path), *target.split("/"))
+            target = os.path.normpath(target)
+            if not _inside(target, base):
+                refused.add(target)
+                continue
+            if check.isfile(target):
+                out.append(target)
+    return out
+
+
+def _label(path, home=None):
+    """How a rule file found with no `--rules` is named in its rule ids: `~/` and its path
+    under the home directory, else its whole path, with `/` between the parts."""
+    home = os.path.expanduser("~") if home is None else home
+    for base in (home, os.path.realpath(home)):
+        try:
+            relative = os.path.relpath(path, base) if base else os.pardir
+        except ValueError:  # pragma: no cover - a different drive on Windows
+            continue
+        if relative != os.pardir and not relative.startswith(os.pardir + os.sep):
+            return "~/" + relative.replace(os.sep, "/")
+    return path.replace(os.sep, "/")
 
 
 # --- detector files ----------------------------------------------------------------------
@@ -381,7 +733,7 @@ def _markdown(directory):
     return out
 
 
-def read_rule_file(path, root=None):
+def read_rule_file(path, root=None, label=None, trusted=True, real=None):
     """`(detectors, [RuleEntry], findings)` for one markdown rule file.
 
     Front matter keys this reads are `rule`, `detector` and `opt_out`; every other key is
@@ -390,22 +742,50 @@ def read_rule_file(path, root=None):
     a value, or cannot be read as a mapping, is one rule, and so is a file with no heading or
     none of whose sections is a rule; a key with no value binds nothing and is a finding.
     Any other file is split into section rules (`_sections`); `root` is the `--rules`
-    directory their ids are relative to, the file's own directory when not given.
+    directory their ids are relative to, the file's own directory when not given. `label`,
+    when given, names the file in its rule ids in place of that relative path, and names a
+    one-rule file that has no `rule:` key: a rule file found with no `--rules` is named by
+    where it is (`~/.claude/CLAUDE.md`), so two projects' `AGENTS.md` never share an id.
+
+    A file that is not `trusted` - one found with no `--rules`, which may be a clone of
+    somebody else's repository - binds through the catalog alone: its front matter is skipped
+    unread, so no detector of its own is compiled, none replaces a catalog or shipped one,
+    and no `opt_out` reason or `rule:` name of its reaches the report. A front matter giving
+    one of those keys is a finding saying it was ignored. It is read at `real`, the real path
+    it was checked at, when given, without following a link there, and only when it is a
+    regular file of at most `MAX_RULE_FILE_BYTES`.
 
     A file with no heading, or none of whose sections is a rule, binds the catalog by its
     whole text, text above the first heading included. Known miss: in a file with a rule
     section, text above the first heading is no rule.
     """
-    rule = os.path.splitext(os.path.basename(path))[0]
+    stem = os.path.splitext(os.path.basename(path))[0]
+    rule = label or stem
     try:
-        with open(path, encoding="utf-8-sig") as handle:
-            text = handle.read()
+        if trusted:
+            data = _read_regular(path)
+        else:
+            data = _read_regular(real or path, nofollow=True, limit=MAX_RULE_FILE_BYTES)
+        text = data.decode("utf-8-sig")
     except (OSError, UnicodeDecodeError) as exc:
+        # The reason alone: an OSError's text carries the whole path, which the finding
+        # already names in short.
+        reason = ("not UTF-8 text" if isinstance(exc, UnicodeDecodeError)
+                  else exc.strerror or type(exc).__name__)
         return [], [RuleEntry(rule, path, "unmeasured", "unreadable", [])], \
-            [Finding(path, 0, "cannot read: %s" % exc)]
+            [Finding(path, 0, "cannot read: %s" % reason)]
     front, first_line, body = split_front_matter(text)
+    if front is not None and not trusted:
+        findings = []
+        if _BINDING_KEYS.search(front):
+            findings.append(Finding(path, first_line,
+                                    "front matter is read only under --rules; this found file "
+                                    "binds through the catalog alone"))
+        body_line = text.count("\n") - body.count("\n") + 1
+        entries, problems = _section_rules(path, root, body, body_line, rule, label)
+        return [], entries, findings + problems
     if front is None:
-        entries, findings = _section_rules(path, root, text, 1, rule)
+        entries, findings = _section_rules(path, root, text, 1, rule, label)
         return [], entries, findings
     try:
         doc, lines = parse_with_lines(front, path, first_line)
@@ -440,8 +820,10 @@ def read_rule_file(path, root=None):
                                 "a rule name is a slash-free string"))
     if spec is not None:
         entries = spec if isinstance(spec, list) else [spec]
-        detectors, problems = _compile_entries(entries, path, lines, rule=rule,
-                                               default_prefix=rule)
+        # A detector's own `rule` and default id stay slash-free, whatever the label.
+        name = stem if label and rule == label else rule
+        detectors, problems = _compile_entries(entries, path, lines, rule=name,
+                                               default_prefix=name)
         findings.extend(problems)
         if detectors:
             return detectors, [RuleEntry(rule, path, "measured", "",
@@ -451,7 +833,7 @@ def read_rule_file(path, root=None):
     if opt_out is not None:
         reason = opt_out if isinstance(opt_out, str) and opt_out else "no reason given"
         return [], [RuleEntry(rule, path, "dark", reason, [])], findings
-    entries, problems = _section_rules(path, root, body, body_line, rule)
+    entries, problems = _section_rules(path, root, body, body_line, rule, label)
     return [], entries, findings + problems
 
 
@@ -653,8 +1035,10 @@ def _binding(rule, path, heading, paragraphs, reason=""):
     """`(entry, [(sentence, detector id)])`: the rule's entry, and the sentences that bound
     the detectors it lists, which `ruleprobe corpus` scores line by line. The entry is
     measured and catalog-bound to every detector a sentence binds, in catalog order, when at
-    least one does. Else it is unmeasured, naming the word that unbound a matching sentence,
-    or else the entries a sentence matched together, or else `reason`, and lists none."""
+    least one does. Else it is unmeasured, naming the word that unbound a matching sentence
+    and the entries that sentence matched, its nearest, or else the entries a sentence
+    matched together, or else `reason`, and lists none. A section no pattern matched has no
+    nearest entry, and none is guessed."""
     matches = _match(heading, paragraphs)
     bound = _bound(matches)
     if bound:
@@ -663,8 +1047,9 @@ def _binding(rule, path, heading, paragraphs, reason=""):
     for sentence in matches:
         if sentence.detectors and sentence.marker:
             return RuleEntry(rule, path, "unmeasured",
-                             "a catalog shape with an exception or condition (%s)"
-                             % sentence.marker, []), []
+                             "a catalog shape with an exception or condition (%s), nearest "
+                             "%s" % (sentence.marker,
+                                     ", ".join(d.id for d in sentence.detectors)), []), []
     for sentence in matches:
         if len(sentence.detectors) > 1:
             return RuleEntry(rule, path, "unmeasured", "matches %d catalog entries: %s"
@@ -771,7 +1156,7 @@ def _slug(heading):
     return kept.replace(" ", "-") or "section"
 
 
-def _section_rules(path, root, body, first_line, name):
+def _section_rules(path, root, body, first_line, name, label=None):
     """One `RuleEntry` per section of `body` that is a rule, with its id, bound to the
     catalog entry each of its sentences binds (`_bind`) and unmeasured when none does; or,
     when `body` has no heading or none of its sections is a rule, one rule called `name`, as
@@ -785,7 +1170,7 @@ def _section_rules(path, root, body, first_line, name):
     id that still repeats, as when a later heading's own text is `Testing 2`, is a finding
     against that heading's line, and both rules are still listed.
     """
-    relative = os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
+    relative = label or os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
     units = _units(body)
     if not units:
         return [_bind(name, path, "", _file_prose(body))], []
@@ -810,19 +1195,30 @@ def _section_rules(path, root, body, first_line, name):
 # --- the whole load ------------------------------------------------------------------------
 
 
-def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True):
+def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True,
+                rule_files=None, refused=0, skipped=0):
     """Every declarative detector a run should have: the files named, the ones discovered,
-    and the rule directory. Findings accumulate; nothing raises."""
+    the rule directory, and `rule_files`, the `RuleFile`s `find_rule_files` found, each read
+    at its checked real path, named in its rule ids by where it was found (`_label`) and
+    bound through the catalog alone; `refused` and `skipped` are how many files
+    `find_rule_files` refused and skipped. Findings accumulate; nothing raises."""
     sources = list(paths or [])
     if config:
         sources = discover(cwd=cwd, user=user) + sources
-    bundle = Bundle(sources=sources)
+    bundle = Bundle(sources=sources, found=rule_files, refused=refused, skipped=skipped)
     for path in sources:
         detectors, findings = load_file(path)
         bundle.detectors.extend(detectors)
         bundle.findings.extend(findings)
     if rules_dir:
         detectors, rules, findings = load_rules_dir(rules_dir)
+        bundle.detectors.extend(detectors)
+        bundle.rules.extend(rules)
+        bundle.findings.extend(findings)
+    for found in rule_files or ():
+        path, real = found if isinstance(found, RuleFile) else (found, None)
+        detectors, rules, findings = read_rule_file(path, label=_label(path), trusted=False,
+                                                    real=real)
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)

@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""The command line, over the fixture transcripts."""
+"""The command line, over the fixture transcripts.
+
+The home directory is an empty temporary one for the whole module, so a run with no `--rules`
+finds no rule file of the machine's own, and the discovery tests build a synthetic home.
+"""
+import contextlib
 import io
 import json
 import os
@@ -7,12 +12,29 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
 from ruleprobe import contract_data
 from ruleprobe.cli import main
+from test_envelope import no_network_no_writes
 from test_readers import FIXTURES
+
+_HOME = mock.patch.dict(os.environ)
+
+
+def setUpModule():
+    home = tempfile.mkdtemp(prefix="ruleprobe-home-")
+    _HOME.start()
+    os.environ.update({"HOME": home, "USERPROFILE": home,
+                       "XDG_CONFIG_HOME": os.path.join(home, ".config")})
+
+
+def tearDownModule():
+    home = os.environ["HOME"]
+    _HOME.stop()
+    shutil.rmtree(home, True)
 
 
 def run_cli(*argv):
@@ -166,6 +188,114 @@ class ComplianceCommandTests(unittest.TestCase):
         group = json.loads(outputs[0])["groups"][0]
         self.assertEqual(group["key"], "commits=on")
         self.assertEqual(group["compliance"]["fixture/commit-then-push"]["undecided"], 0)
+
+
+def transcript_line(cwd, stamp, message, kind="assistant"):
+    return json.dumps({"type": kind, "timestamp": stamp, "sessionId": "sess-found",
+                       "cwd": cwd, "message": message}) + "\n"
+
+
+class NoRulesFlagTests(unittest.TestCase):
+    """`report` with no flags finds the rule files in a synthetic home: a global file, and
+    the project file at the working directory the one transcript recorded."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp(prefix="ruleprobe-")
+        self.addCleanup(shutil.rmtree, self.base, True)
+        self.home = os.path.join(self.base, "home")
+        project = os.path.join(self.home, "work", "project")
+        self.write(os.path.join(project, "CLAUDE.md"),
+                   "# Git\n\nNever force-push to main.\n")
+        self.write(os.path.join(project, "AGENTS.md"), "# Codex only\n\nUse uv, not pip.\n")
+        self.write(os.path.join(self.home, ".claude", "CLAUDE.md"),
+                   "# Style\n\nKeep functions short.\n\n"
+                   "# Tests\n\nRun the tests before finishing unless it is late.\n")
+        push = {"type": "tool_use", "id": "toolu_1", "name": "Bash",
+                "input": {"command": "git push --force origin main"}}
+        self.write(os.path.join(self.home, ".claude", "projects", "-work-project",
+                                "sess-found.jsonl"),
+                   transcript_line(project, "2026-09-20T10:00:00.000Z",
+                                   {"role": "user", "content": "ship it"}, kind="user")
+                   + transcript_line(project, "2026-09-20T10:00:05.000Z",
+                                     {"id": "msg_1", "model": "claude-opus-5",
+                                      "content": [push]}))
+        patched = mock.patch.dict(os.environ, {"HOME": self.home, "USERPROFILE": self.home,
+                                               "XDG_CONFIG_HOME": os.path.join(self.home,
+                                                                               ".config")})
+        patched.start()
+        self.addCleanup(patched.stop)
+        cwd = os.getcwd()
+        self.addCleanup(os.chdir, cwd)
+        os.chdir(self.base)
+
+    def write(self, path, text):
+        if not os.path.isdir(os.path.dirname(path)):
+            os.makedirs(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+
+    def snapshot(self):
+        out = []
+        for base, dirs, files in os.walk(self.base):
+            dirs.sort()
+            for name in sorted(dirs + files):
+                path = os.path.join(base, name)
+                out.append((path, os.stat(path).st_mtime_ns))
+        return out
+
+    def test_with_no_flags_the_project_and_global_rules_are_read(self):
+        _code, text = run_cli("report")
+        self.assertIn("~/work/project/CLAUDE.md#git", text)
+        self.assertIn("~/.claude/CLAUDE.md#style", text)
+        self.assertNotIn("AGENTS.md", text)
+
+    def test_a_blocked_section_names_its_nearest_entry_and_the_word(self):
+        _code, text = run_cli("report")
+        line = [x for x in text.split("\n") if "#tests" in x][0]
+        self.assertIn("unmeasured", line)
+        self.assertIn("(unless), nearest testing/test-after-change", line)
+
+    def test_a_found_run_says_once_that_the_rule_text_is_today_s(self):
+        _code, text = run_cli("report")
+        self.assertEqual(text.count("the rule text is today's, not the text in force when an "
+                                    "older session ran"), 1)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            _code, data = run_cli("report", "--json")
+        self.assertEqual(err.getvalue().count("the rule text is today's"), 1)
+        self.assertEqual(json.loads(data)["coverage"]["measured"], 1)
+
+    def test_the_bindable_rule_is_measured_inside_sixty_seconds(self):
+        started = time.monotonic()
+        code, text = run_cli("report")
+        elapsed = time.monotonic() - started
+        self.assertEqual(code, 0)
+        self.assertLess(elapsed, 60)
+        line = [x for x in text.split("\n") if "#git" in x][0]
+        self.assertEqual(line.split()[:2], ["measured", "~/work/project/CLAUDE.md#git"])
+        self.assertIn("catalog-bound, git-safety/force-push-default", line)
+        row = [x for x in text.split("\n") if x.startswith("git-safety/force-push-default")]
+        self.assertEqual(row[0].split()[1:3], ["1", "1"])
+
+    def test_a_found_run_writes_nothing(self):
+        before = self.snapshot()
+        with no_network_no_writes() as attempts, \
+                contextlib.redirect_stderr(io.StringIO()):
+            code, _text = run_cli("report")
+            json_code, _data = run_cli("report", "--json")
+        self.assertEqual((code, json_code, attempts), (0, 0, []))
+        self.assertEqual(self.snapshot(), before)
+
+    def test_rules_or_no_config_turns_finding_off(self):
+        rules = os.path.join(self.base, "rules")
+        self.write(os.path.join(rules, "git.md"), "# Git\n\nUse uv, not pip.\n")
+        _code, named = run_cli("report", "--rules", rules)
+        self.assertIn("git.md#git", named)
+        self.assertNotIn("today's", named)
+        self.assertNotIn("~/work/project", named)
+        _code, bare = run_cli("report", "--no-config")
+        self.assertNotIn("CLAUDE.md", bare)
+        self.assertNotIn("today's", bare)
 
 
 class OtherCommandTests(unittest.TestCase):
