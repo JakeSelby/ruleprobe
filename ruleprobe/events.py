@@ -33,8 +33,8 @@ class Session(_Session):
 
     `cwd` is the working directory the transcript recorded, whole, or the empty string. It is
     an attribute beside the seven fields rather than an eighth, so a session still unpacks
-    and compares as the seven-field tuple it always was; `_replace`, `_make` and a pickle
-    carry the fields and drop it. It is read only to find the rule files a run with no
+    and compares as the seven-field tuple it always was. `_replace` and `_make` carry the
+    fields and drop it; a pickle or a copy keeps it, in the instance `__dict__`. It is read only to find the rule files a run with no
     `--rules` binds, and no report carries it."""
 
     cwd = ""

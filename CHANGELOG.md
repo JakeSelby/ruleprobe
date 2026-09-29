@@ -31,8 +31,9 @@ All notable changes to this project are documented here. The format follows
   markdown five hops deep. It names each rule by where its file is, reads a file with the same
   bytes as another once, and says in the coverage block that the rule text is today's. A found
   file binds through the catalog alone, since it may be a clone of somebody else's repository: its
-  front matter is ignored, and an import leaving its project or global folder is refused and
-  counted, never read. `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
+  front matter is ignored, every file and import must resolve inside its project (a global file
+  anywhere under the home folder), and a file over 1 MB or past 200 in one rules folder is
+  skipped; refused and skipped files are counted, never read or named. `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
   that word ([#149](https://github.com/JakeSelby/ruleprobe/issues/149)).
 
 ### Changed

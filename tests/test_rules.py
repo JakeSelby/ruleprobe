@@ -10,6 +10,7 @@ Run: python3 -m unittest discover -s tests
 import io
 import json
 import os
+import pickle
 import shutil
 import sys
 import tempfile
@@ -21,8 +22,8 @@ from corpus import bash, tool_use
 from ruleprobe import DEFAULT, Registry, iter_sessions, run
 from ruleprobe.events import Session
 from ruleprobe.cli import main
-from ruleprobe.rules import (IMPORT_DEPTH, discover, find_rule_files, load_bundle, load_file,
-                             load_rules_dir, read_rule_file)
+from ruleprobe.rules import (IMPORT_DEPTH, RuleFile, discover, find_rule_files, load_bundle,
+                             load_file, load_rules_dir, read_rule_file)
 from test_readers import FIXTURES
 
 SUDO = {"detectors": [{"id": "house-style/sudo-install", "rule": "house-style",
@@ -464,6 +465,11 @@ class SentenceBindingTests(Temp):
         self.assertEqual(first, second)
 
 
+def paths(found):
+    """The paths of `find_rule_files`'s `RuleFile`s, in order."""
+    return [f.path for f in found]
+
+
 class RuleFileDiscoveryTests(Temp):
     """With no `--rules`, the rule files are found: the three global ones under a synthetic
     home, and each runtime's project files at the working directories sessions recorded."""
@@ -483,6 +489,9 @@ class RuleFileDiscoveryTests(Temp):
         return os.path.join(self.dir, *parts)
 
     def found(self, workdirs=()):
+        return paths(self.files(workdirs))
+
+    def files(self, workdirs=()):
         return find_rule_files(workdirs, home=self.home)
 
     def test_the_three_global_files_and_each_runtime_s_project_files_are_read(self):
@@ -585,7 +594,7 @@ class RuleFileDiscoveryTests(Temp):
         self.write("home/work/project/AGENTS.md", "# Git\n\nNever force-push to main.\n")
         self.write("home/work/other/AGENTS.md", "# Git\n\nUse uv, not pip.\n")
         self.write("home/.codex/AGENTS.md", "Never force-push to main.\n")
-        files = self.found([("codex", self.project), ("codex", other)])
+        files = self.files([("codex", self.project), ("codex", other)])
         bundle = load_bundle(config=False, rule_files=files)
         self.assertEqual([(e.rule, e.state, e.detectors) for e in bundle.rules], [
             ("~/.codex/AGENTS.md", "measured", ["git-safety/force-push-default"]),
@@ -598,7 +607,7 @@ class RuleFileDiscoveryTests(Temp):
                    "# Models\n\nDo not switch models in the middle of a session.\n\n"
                    "# Credentials\n\nNever write an API key to a file.\n\n"
                    "# Searching\n\nFilter every `find` by name or type.\n")
-        bundle = load_bundle(config=False, rule_files=self.found())
+        bundle = load_bundle(config=False, rule_files=self.files())
         bundle.registry()
         self.assertEqual([(e.rule, e.state, e.detectors) for e in bundle.rules], [
             ("~/.claude/CLAUDE.md#sessions", "measured", ["cache-hygiene/compact"]),
@@ -620,7 +629,7 @@ class RuleFileDiscoveryTests(Temp):
         self.write("home/.claude/CLAUDE.md",
                    "# Git\n\nNever force-push to main unless the release lead says so.\n\n"
                    "# Style\n\nKeep functions short.\n")
-        bundle = load_bundle(config=False, rule_files=self.found())
+        bundle = load_bundle(config=False, rule_files=self.files())
         bundle.registry()
         blocked, plain = bundle.rules
         self.assertEqual(blocked.state, "unmeasured")
@@ -634,7 +643,7 @@ class RuleFileDiscoveryTests(Temp):
     def test_the_coverage_block_says_once_that_found_rule_text_is_today_s(self):
         self.write("home/.claude/CLAUDE.md", "# Git\n\nNever force-push to main.\n")
         self.write("home/.gemini/GEMINI.md", "# Style\n\nKeep functions short.\n")
-        text = load_bundle(config=False, rule_files=self.found()).summary()
+        text = load_bundle(config=False, rule_files=self.files()).summary()
         self.assertEqual(text.count("the rule text is today's"), 1)
         self.assertTrue(text.startswith("rules found with no --rules in 2 files; the rule text "
                                         "is today's, not the text in force when an older "
@@ -660,14 +669,115 @@ class UntrustedRuleFileTests(Temp):
         self.outside = self.write("outside/private.md", "# Private heading\n\nSecret text.\n")
 
     def found(self, workdirs=(), refused=None):
+        return paths(self.files(workdirs, refused))
+
+    def files(self, workdirs=(), refused=None, skipped=None):
         return find_rule_files(workdirs or [("claude-code", self.project)], home=self.home,
-                               refused=refused)
+                               refused=refused, skipped=skipped)
 
     def symlink(self, target, link):
         try:
             os.symlink(target, link)
         except (OSError, NotImplementedError):  # pragma: no cover - no symlinks here
             self.skipTest("symlinks are not available")
+
+    def test_an_import_is_checked_as_written_before_its_real_path(self):
+        self.write("home/clone/docs/ok.md", "# Inside\n\nText.\n")
+        alias = os.path.join(self.dir, "outside", "alias.md")
+        self.symlink(os.path.join(self.project, "docs", "ok.md"), alias)
+        self.write("home/clone/CLAUDE.md", "# Rules\n\n@%s\n" % alias.replace(os.sep, "/"))
+        refused = []
+        self.assertEqual(self.found(refused=refused), [os.path.join(self.project, "CLAUDE.md")])
+        self.assertEqual(refused, [alias])
+
+    def test_a_project_file_linked_out_of_its_project_is_refused(self):
+        self.symlink(os.path.join(os.pardir, os.pardir, "outside", "private.md"),
+                     os.path.join(self.project, "CLAUDE.md"))
+        self.write("home/clone/.claude/rules/ok.md", "# Ok\n\nText.\n")
+        refused = []
+        files = self.files(refused=refused)
+        self.assertEqual(paths(files), [os.path.join(self.project, ".claude", "rules", "ok.md")])
+        self.assertEqual(refused, [os.path.join(self.project, "CLAUDE.md")])
+        text = load_bundle(config=False, rule_files=files, refused=len(refused)).summary()
+        self.assertIn("rule files refused: 1", text)
+        self.assertNotIn("private", text.lower())
+
+    def test_a_global_file_may_link_anywhere_under_home_and_nowhere_else(self):
+        self.write("home/dotfiles/CLAUDE.md", "# Global\n\nNever force-push to main.\n")
+        os.makedirs(os.path.join(self.home, ".claude"))
+        os.makedirs(os.path.join(self.home, ".codex"))
+        self.symlink(os.path.join(self.home, "dotfiles", "CLAUDE.md"),
+                     os.path.join(self.home, ".claude", "CLAUDE.md"))
+        self.symlink(self.outside, os.path.join(self.home, ".codex", "AGENTS.md"))
+        refused = []
+        files = find_rule_files((), home=self.home, refused=refused)
+        self.assertEqual(files, [RuleFile(os.path.join(self.home, ".claude", "CLAUDE.md"),
+                                          os.path.realpath(os.path.join(self.home, "dotfiles",
+                                                                        "CLAUDE.md")))])
+        self.assertEqual(refused, [os.path.join(self.home, ".codex", "AGENTS.md")])
+
+    def test_a_linked_rules_folder_or_subfolder_is_never_walked(self):
+        rules = os.path.join(self.project, ".claude", "rules")
+        os.makedirs(os.path.join(self.project, ".claude"))
+        self.symlink(os.path.join(os.pardir, os.pardir), rules)
+        refused = []
+        self.assertEqual(self.found(refused=refused), [])
+        self.assertEqual(refused, [rules])
+        os.remove(rules)
+        self.write("home/clone/.claude/rules/ok.md", "# Ok\n\nText.\n")
+        self.write("home/notes/deep.md", "# Deep\n\nText.\n")
+        self.symlink(os.path.join(self.home, "notes"), os.path.join(rules, "notes"))
+        self.symlink(self.outside, os.path.join(rules, "leak.md"))
+        refused = []
+        self.assertEqual(self.found(refused=refused), [os.path.join(rules, "ok.md")])
+        self.assertEqual(refused, [os.path.join(rules, "leak.md")])
+
+    def test_a_rules_folder_is_read_up_to_its_cap_and_the_rest_counted(self):
+        for n in range(5):
+            self.write("home/clone/.claude/rules/r%d.md" % n, "# R%d\n\nText %d.\n" % (n, n))
+        skipped = []
+        with mock.patch("ruleprobe.rules.MAX_RULE_DIR_FILES", 3):
+            files = self.files(skipped=skipped)
+            text = load_bundle(config=False, rule_files=files, skipped=len(skipped)).summary()
+        self.assertEqual(len(files), 3)
+        self.assertEqual(len(skipped), 2)
+        self.assertIn("rule files skipped: 2 over 1024 KB, or past 3 in one rules folder, "
+                      "not read", text)
+
+    def test_a_rule_file_over_the_size_cap_is_skipped_and_counted(self):
+        self.write("home/clone/CLAUDE.md", "# Big\n\n" + "Never force-push to main. " * 20)
+        self.write("home/clone/AGENTS.md", "# Small\n\nText.\n")
+        skipped = []
+        with mock.patch("ruleprobe.rules.MAX_RULE_FILE_BYTES", 128):
+            files = self.files([("claude-code", self.project), ("codex", self.project)],
+                               skipped=skipped)
+            text = load_bundle(config=False, rule_files=files, skipped=len(skipped)).summary()
+        self.assertEqual(paths(files), [os.path.join(self.project, "AGENTS.md")])
+        self.assertEqual(skipped, [os.path.join(self.project, "CLAUDE.md")])
+        self.assertIn("rule files skipped: 1", text)
+        self.assertNotIn("CLAUDE.md", text)
+
+    def test_a_found_file_is_read_at_its_checked_real_path_without_following_a_link(self):
+        self.write("home/dotfiles/a.md", "# Checked\n\nText.\n")
+        self.write("home/dotfiles/b.md", "# Swapped\n\nText.\n")
+        named = os.path.join(self.home, ".gemini", "GEMINI.md")
+        os.makedirs(os.path.dirname(named))
+        self.symlink(os.path.join(self.home, "dotfiles", "a.md"), named)
+        [found] = find_rule_files((), home=self.home)
+        # After the check, the name is pointed elsewhere: the checked file is still the one read.
+        os.remove(named)
+        os.symlink(os.path.join(self.home, "dotfiles", "b.md"), named)
+        [entry] = load_bundle(config=False, rule_files=[found]).rules
+        self.assertEqual(entry.rule, "~/.gemini/GEMINI.md#checked")
+        if not hasattr(os, "O_NOFOLLOW"):  # pragma: no cover - Windows
+            return
+        # And a link swapped in at the checked real path itself is refused, not followed.
+        os.remove(found.real)
+        os.symlink(self.outside, found.real)
+        bundle = load_bundle(config=False, rule_files=[found])
+        self.assertEqual([e.reason for e in bundle.rules], ["unreadable"])
+        self.assertTrue(bundle.findings[0].reason.startswith("cannot read: "))
+        self.assertNotIn("private", bundle.summary().lower())
 
     def test_a_found_file_s_front_matter_detector_is_never_compiled(self):
         self.write("home/clone/AGENTS.md",
@@ -677,7 +787,7 @@ class UntrustedRuleFileTests(Temp):
                    "  - id: clone/slow\n    rule: git\n    event: tool_use\n"
                    "    when: {command: {regex: '^(a+)+$'}}\n---\n\n"
                    "# Git\n\nNever force-push to main.\n")
-        files = self.found([("codex", self.project)])
+        files = self.files([("codex", self.project)])
         bundle = load_bundle(config=False, rule_files=files)
         registry = bundle.registry()
         self.assertEqual(bundle.detectors[0].id, "git-safety/force-push-default")
@@ -692,7 +802,7 @@ class UntrustedRuleFileTests(Temp):
         events = [bash("a" * 40 + "!"), bash("ls")]
         self.assertEqual(sorted(run(events, registry=registry)), [])
         # The same file named with --rules is trusted, as before.
-        shutil.copy(files[0], self.write("rules/AGENTS.md", ""))
+        shutil.copy(files[0].path, self.write("rules/AGENTS.md", ""))
         named = load_bundle(config=False, rules_dir=os.path.join(self.dir, "rules"))
         self.assertEqual(sorted(d.id for d in named.detectors),
                          ["clone/slow", "git-safety/force-push-default"])
@@ -706,22 +816,22 @@ class UntrustedRuleFileTests(Temp):
                    % (self.outside.replace(os.sep, "/"), relative))
         self.symlink(self.outside, os.path.join(self.project, "link.md"))
         refused = []
-        files = self.found(refused=refused)
-        self.assertEqual(files, [os.path.join(self.project, "CLAUDE.md"),
+        files = self.files(refused=refused)
+        self.assertEqual(paths(files), [os.path.join(self.project, "CLAUDE.md"),
                                  os.path.join(self.project, "docs", "ok.md")])
         self.assertEqual(len(refused), 3)
         text = load_bundle(config=False, rule_files=files, refused=len(refused)).summary()
-        self.assertIn("imports refused: 3 outside their rule file's project or global folder, "
-                      "not read", text)
+        self.assertIn("rule files refused: 3 outside the folder they may be read from, not read",
+                      text)
         self.assertNotIn("private", text.lower())
-        self.assertNotIn("outside", text.split("imports refused")[0])
+        self.assertNotIn("outside", text.split("rule files refused")[0])
 
     def test_a_global_file_s_imports_stay_in_its_global_folder(self):
         self.write("home/.claude/CLAUDE.md", "# G\n\n@~/.claude/mine.md @~/elsewhere.md\n")
         self.write("home/.claude/mine.md", "# Mine\n\nText.\n")
         self.write("home/elsewhere.md", "# Elsewhere\n\nText.\n")
         refused = []
-        self.assertEqual(find_rule_files((), home=self.home, refused=refused),
+        self.assertEqual(paths(find_rule_files((), home=self.home, refused=refused)),
                          [os.path.join(self.home, ".claude", "CLAUDE.md"),
                           os.path.join(self.home, ".claude", "mine.md")])
         self.assertEqual(refused, [os.path.join(self.home, "elsewhere.md")])
@@ -771,7 +881,7 @@ class UntrustedRuleFileTests(Temp):
         self.symlink(os.path.join(dotfiles, "CLAUDE.md"),
                      os.path.join(self.home, ".claude", "CLAUDE.md"))
         refused = []
-        self.assertEqual(find_rule_files((), home=self.home, refused=refused),
+        self.assertEqual(paths(find_rule_files((), home=self.home, refused=refused)),
                          [os.path.join(self.home, ".claude", "CLAUDE.md"),
                           os.path.join(self.home, ".claude", "rules", "git.md")])
         self.assertEqual(refused, [])
@@ -782,9 +892,9 @@ class UntrustedRuleFileTests(Temp):
         cwd = os.getcwd()
         self.addCleanup(os.chdir, cwd)
         os.chdir(self.dir)
-        self.assertEqual(find_rule_files([("claude-code", "rel/app"), ("claude-code", "."),
-                                          ("claude-code", "rel/../rel/app")],
-                                         home=self.home), [])
+        workdirs = [("claude-code", "rel/app"), ("claude-code", "."),
+                    ("claude-code", "rel/../rel/app")]
+        self.assertEqual(find_rule_files(workdirs, home=self.home), [])
 
     def test_a_session_keeps_its_seven_fields_and_carries_cwd_beside_them(self):
         [session] = [s for s in iter_sessions(root=FIXTURES) if s.runtime == "claude-code"]
@@ -792,6 +902,8 @@ class UntrustedRuleFileTests(Temp):
         _id, _repo, _runtime, _events, _path, _started, _ended = session
         self.assertEqual(session.cwd, "/tmp/demo-repo")
         self.assertEqual(Session("x", "", "codex", []).cwd, "")
+        self.assertEqual(pickle.loads(pickle.dumps(session)).cwd, "/tmp/demo-repo")
+        self.assertEqual(session._replace(id="other").cwd, "")
 
 
 if __name__ == "__main__":

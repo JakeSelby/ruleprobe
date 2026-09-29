@@ -49,8 +49,11 @@ or with the same bytes as another, as in several worktrees of one repository, is
 each rule is named by where its file is, `~/work/app/CLAUDE.md#testing`. The rule text is
 today's, not what was in force when an older session ran, and the block says so. A found file
 may be a clone of somebody else's repository, so it binds through the catalog alone: its front
-matter is ignored, only a regular file is read, and an import that leaves its project, or the
-runtime's global folder for a global file, is refused, counted in the block and never read.
+matter is ignored, and only a regular file of at most 1 MB is read, at most 200 from one rules
+folder. Every file must resolve inside its project, a global file anywhere under the home
+folder, and an import that leaves its project, or the runtime's global folder for a global
+file, is refused; linked folders are not walked. Refused and skipped files are counted in the
+block, never named.
 Parent directories are not searched. `--rules DIR` reads that directory instead, and `--no-config`
 reads no rule file.
 
