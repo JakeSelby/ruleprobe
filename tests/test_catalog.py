@@ -354,7 +354,9 @@ HOSTILE = ("cd a && " * 2000 + "echo done",
            "never compact the context" + " mid-task" * 3000, "never compact " + "x" * 8000,
            "stay on one model for " + "the " * 5000, "never switch models" + " -" * 7000,
            "never hardcode " + "api " * 5000, "never write a secret into " + "a " * 7000,
-           "filter " + "every " * 5000, "never run " + "a " * 7000 + "bare")
+           "filter " + "every " * 5000, "never run " + "a " * 7000 + "bare",
+           "never commit " + "secrets or " * 3000 + "x", "use " + "head, " * 3000 + "x",
+           "keep " + "secrets " * 5000, "run the tests before " + "you " * 5000)
 
 
 class HostileInputTests(unittest.TestCase):
@@ -730,6 +732,106 @@ class BindingTests(Temp):
                      "Filter every find: by name.", "Never run a bare find \u2014 ever.",
                      "Never compact the context twice.", "Never switch models lightly.",
                      "Never write a secret into a file twice."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+
+    #: Phrasings of the seven original shapes that story RP-S025 widened them to read, among
+    #: them RP-SP004's pattern misses (`t02`, `t04`, `h04`, `p03`, `p04`, `c03`, `m03`, `s03`).
+    WIDENED = {
+        "testing/test-after-change": (
+            "Before you hand back, run the tests.",
+            "Always run the full test suite before you finish a task.",
+            "Run the whole test suite after each edit.", "Test every change before pushing.",
+            "Ensure the tests pass before committing.",
+            "Run the tests before declaring the fix done.",
+            "Before finishing, run all the tests."),
+        "verification/no-verify": (
+            "Hooks must always run; never skip them.", "Never disable the git hooks.",
+            "Git hooks should never be bypassed.", "Let the commit hooks run."),
+        "git-safety/force-push-default": (
+            "Force-pushing to master is prohibited.",
+            "The default branch must never be force-pushed.",
+            "Don't force-push to main or master."),
+        "package-manager/pip-install": (
+            "Prefer uv over pip.", "Do not use pip; use uv.",
+            "Never pip install; use uv instead.", "Don't use pip."),
+        "transcript-hygiene/whole-file-cat": (
+            "Read narrowly: reach for head, grep or a sed range rather than cat.",
+            "Use grep -n or a line range instead of cat.", "Avoid catting an entire file.",
+            "Never load a whole file into the conversation."),
+        "commits/non-conventional-subject": (
+            "Write commit messages in the Conventional Commits style: type(scope): summary.",
+            "Write every commit subject as a Conventional Commit.",
+            "Use the Conventional Commits format for every commit."),
+        "secrets/secret-file-add": (
+            "Keep credentials out of source control.", "Never check in private keys.",
+            "Don't commit a .env file or credentials to the repository.",
+            "Never add credentials to git.", "Private keys must never be committed."),
+    }
+    #: A near-miss beside each widened form, narrower than its detector's count or another
+    #: rule, carrying no exception, permission or condition word: the pattern alone refuses it.
+    WIDENED_NEAR = {
+        "testing/test-after-change": (
+            "Run the tests before finishing a refactor.",
+            "Run the unit tests after every schema change.", "Ensure the tests pass on CI.",
+            "Before a release, run the tests."),
+        "verification/no-verify": (
+            "Never skip the hooks on the release branch.", "Hooks must always run in CI.",
+            "Never use --no-verify on main.", "Let the hooks run twice."),
+        "git-safety/force-push-default": (
+            "Never force-push to main on Fridays.",
+            "Force-pushing main is prohibited during a deploy.",
+            "Main must never be force-pushed by a bot."),
+        "package-manager/pip-install": (
+            "Prefer uv over pip in CI.", "Never use pip in the Docker image.",
+            "Don't pip install globally."),
+        "transcript-hygiene/whole-file-cat": (
+            "Never cat a whole file over ssh.", "Use grep instead of cat on logs.",
+            "Avoid catting whole files in scripts."),
+        "commits/non-conventional-subject": (
+            "Use Conventional Commits for release commits.",
+            "Write commit messages in the Conventional Commits style on main."),
+        "secrets/secret-file-add": (
+            "Never commit credentials to a shared drive.", "Keep secrets out of the logs.",
+            "Private keys must never be committed to a fork."),
+    }
+
+    def test_each_widened_phrasing_binds_its_original_entry_catalog_bound(self):
+        for did, texts in self.WIDENED.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    [entry] = self.rules("# Rule\n\n%s\n" % text).rules
+                    self.assertEqual((entry.state, entry.detectors, entry.source),
+                                     ("measured", [did], "catalog"))
+
+    def test_a_widened_phrasing_s_near_miss_fails_the_pattern_itself(self):
+        patterns = dict((d.id, p) for p, d in _CATALOG)
+        for did, texts in self.WIDENED_NEAR.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    self.assertIsNone(rules._EXCEPTION.search(text))
+                    self.assertIsNone(rules._CONDITION.search(text))
+                    self.assertIsNone(patterns[did].match(text))
+                    self.assertEqual(matched(text), [])
+
+    def test_an_original_shape_stops_only_at_a_break_or_an_unbinding_word(self):
+        """A phrase going on with the clause narrows the rule and binds nothing; a clause
+        after a break still binds, and a condition or exception word still unbinds."""
+        for text in ("Never force-push to main during a code freeze.",
+                     "Use Conventional Commits in the changelog.",
+                     "Never commit secrets to a gist.", "Never skip hooks for docs.",
+                     "Do not read a whole file into context to find one line.",
+                     "Run the tests before finishing a migration.",
+                     "Never use pip at work."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+        for text in ("Never force-push to main, whatever the reason.",
+                     "Never commit secrets (ever).", "Never skip hooks - ever.",
+                     "Run the tests before finishing; always."):
+            with self.subTest(text=text):
+                self.assertEqual(len(matched(text)), 1)
+        for text in ("Never force-push to main during a freeze unless told.",
+                     "Use Conventional Commits except in forks."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
 

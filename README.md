@@ -133,6 +133,17 @@ force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 (`secrets/secret-file-add`), never compact the context (`cache-hygiene/compact`),
 never switch models mid-session (`cache-hygiene/model-switch`), never write a secret into a
 file (`secrets/secret-in-write`), and filter every `find` (`transcript-hygiene/unfiltered-find`).
+The first seven read the common ways of saying them, not one wording each: "Before you hand
+back, run the tests", "Run the full test suite after every change", "Hooks must always run;
+never skip them", "Main must never be force-pushed", "Prefer uv over pip", "Do not use pip; use
+uv", "Read narrowly: reach for head, grep or a sed range rather than cat", "Write commit
+messages in the Conventional Commits style" and "Keep credentials out of source control" all
+bind. Each stops only at the end of its sentence, at a clause break, or before a word that
+unbinds it, so a phrase that goes on to narrow the rule binds nothing: "Never force-push to main
+during a release freeze", "Use Conventional Commits on the release branch", "Never commit
+secrets to a public repository" and "Do not pass `--no-verify` to `git commit`", which leaves
+out the pushes the detector also counts. A narrowing after a comma is not read that way, and
+stays a known over-count, as a split at an unlisted abbreviation is.
 The last four bind the shipped detectors of the same ids, and only a rule as wide as what the
 detector counts. Their patterns must reach the end of the sentence, and name a session rather
 than a task, files in general rather than a commit, the repository, a config file or the code,
@@ -157,8 +168,10 @@ below unbound it, it names that word and the entry, its nearest, as in
 A section whose sentences bind different entries
 is measured by each, and the coverage block lists them all: "Never force-push to main. Use uv,
 not pip." binds both. A pattern never reaches across a clause break (`;`, `,`, `:`, a run of
-hyphens between spaces such as ` - ` or ` -- `, a dash), except the comma of its own contrast
-("use uv, not pip"). An exception or a permission - except (excepted, exception), exempt
+hyphens between spaces such as ` - ` or ` -- `, a dash), except inside a closed form of its own
+rule: the comma of its contrast ("use uv, not pip"), the comma after a fronted clause ("before
+you hand back, run the tests"), the semicolon before its restatement ("do not use pip; use uv")
+and the colon of a closed lead-in or a commit format. An exception or a permission - except (excepted, exception), exempt
 (exempted, exempting, exempts, exemption), unless, other than, apart from, excluding, allowed,
 fine, okay, ok - anywhere in a section, its heading included, unbinds every rule in it, so "Never
 force-push to main. Hotfixes excepted." is left unmeasured rather than read as a rule it is not,
@@ -529,22 +542,22 @@ verification/no-verify                   11   13   11    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 
-binder over the rules zoo: 136 sections, 172 labels
+binder over the rules zoo: 201 sections, 240 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
 cache-hygiene/compact                     4    3    0    1   1.00    0.75
 cache-hygiene/model-switch                4    3    0    1   1.00    0.75
-commits/non-conventional-subject          5    3    0    2   1.00    0.60
-git-safety/force-push-default             8    5    0    3   1.00    0.62
-package-manager/pip-install               5    3    0    2   1.00    0.60
-secrets/secret-file-add                   4    2    0    2   1.00    0.50
+commits/non-conventional-subject          9    5    0    4   1.00    0.56
+git-safety/force-push-default            13    9    0    4   1.00    0.69
+package-manager/pip-install              10    8    0    2   1.00    0.80
+secrets/secret-file-add                   9    8    0    1   1.00    0.89
 secrets/secret-in-write                   4    4    0    0   1.00    1.00
-testing/test-after-change                 9    6    0    3   1.00    0.67
+testing/test-after-change                15   14    0    1   1.00    0.93
 transcript-hygiene/unfiltered-find        3    3    0    0   1.00    1.00
-transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
-verification/no-verify                    6    5    0    1   1.00    0.83
+transcript-hygiene/whole-file-cat         8    6    0    2   1.00    0.75
+verification/no-verify                   11    9    0    2   1.00    0.82
 -------------------------------------------------------------------------------
-total                                    56   40    0   16   1.00    0.71  recall floor 0.71
+total                                    90   72    0   18   1.00    0.80  recall floor 0.80
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector

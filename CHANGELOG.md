@@ -54,6 +54,14 @@ All notable changes to this project are documented here. The format follows
   six near-misses. On the rules zoo, binding recall rises from 0.44 to 0.66 (27/41) with no false
   bind, and the recorded recall floor rises to 0.65
   ([#141](https://github.com/JakeSelby/ruleprobe/issues/141)).
+- The seven original catalog shapes read more of the ways people phrase them, such as "Before
+  you hand back, run the tests", "Prefer uv over pip", "Hooks must always run; never skip them"
+  and "Keep credentials out of source control". They also stop where a phrase goes on to narrow
+  the rule, so "Never force-push to main during a release freeze" and "Never commit secrets to a
+  public repository" bind nothing, and "Do not pass `--no-verify` to `git commit`" no longer
+  binds a detector that also counts pushes. Binding recall on the rules zoo is 0.80 with no false
+  bind, and 0.76 on a held-out set written before the patterns changed
+  ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
 
 ## 0.2.0 (2026-09-24)
 
