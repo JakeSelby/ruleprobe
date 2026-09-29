@@ -377,7 +377,7 @@ MULTI_IDS = ["verification/no-verify", "git-safety/force-push-default",
              "commits/non-conventional-subject"]
 
 #: One section stating the four default shapes the 0.2 catalog left unbound.
-DEFAULTS = ("# Sessions\n\nFilter every `find`. Never hardcode API keys.\n"
+DEFAULTS = ("# Sessions\n\nFilter every `find`. Never write API keys to a file.\n"
             "Do not switch models mid-session. Never compact the conversation.\n")
 #: What `DEFAULTS` binds, in catalog order.
 DEFAULTS_IDS = ["cache-hygiene/compact", "cache-hygiene/model-switch",

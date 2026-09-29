@@ -32,8 +32,10 @@ and all, on the rule entry that lists this detector's id, so a rule file in a su
 binds as one at the root does. Six entries restate a shipped detector under the shipped id,
 one for each in `DEFAULT`: a section binds the shipped detector and the report carries one
 line for it, not two. Where a rule in a shape could carry a narrowing the pattern cannot
-read ("never compact more than once"), the pattern ends at a clause break or the end of the
-sentence, so the narrowed rule binds nothing.
+read ("never compact more than once", "never run a bare find from the home directory"), the
+pattern must reach the end of the sentence, so the narrowed rule, or one with a second clause,
+binds nothing. Those patterns also name only scopes as wide as the detector's: a session, never
+a task, and a file, a repository or a commit, never a chat.
 
 This module holds literals and nothing else - no import, no call, no function - so it loads
 through the import system the same way from a directory, a wheel or a zip on `sys.path`, and
@@ -410,23 +412,22 @@ ENTRIES = (
         },
     },
     {
-        "shape": "Never compact the context mid-task",
-        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:(?:run|running|use|using|trigger|"
-                   r"triggering)\s+)?(?:/compact|compact(?:ing|ion)?)(?:\s+(?:the\s+|your\s+)?"
-                   r"(?:context|conversation|session)(?:\s+window)?)?|(?:start|open)\s+a\s+"
-                   r"(?:fresh|new)\s+(?:session|conversation)\s+(?:rather\s+than|instead\s+of)\s+"
-                   r"(?:running\s+/compact|compacting))(?:\s+(?:mid-?(?:task|session|conversation)|"
-                   r"(?:in\s+the\s+middle\s+of|partway\s+through)\s+(?:a|the)\s+"
-                   r"(?:task|session|conversation)))?(?=\s*[.!?;,:–—]|\s*$|\s+-+\s)",
+        "shape": "Never compact the context",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:trigger(?:ing)?\s+)?(?:compact(?:ing)?"
+                   r"(?:\s+(?:the\s+|your\s+)?(?:context|conversation|session)(?:\s+window)?)?|"
+                   r"compaction)|(?:start|open)\s+a\s+(?:fresh|new)\s+(?:session|conversation)\s+"
+                   r"(?:rather\s+than|instead\s+of)\s+compacting)(?:\s+(?:mid-?(?:session|"
+                   r"conversation)|(?:in\s+the\s+middle\s+of|partway\s+through)\s+(?:a|the)\s+"
+                   r"(?:session|conversation)))?(?=[.!?]*$)",
         "detector": {
             "id": "cache-hygiene/compact",
             "rule": "cache-hygiene",
             "event": "session",
             "description": "The shipped detector, written as data: one hit per context "
                            "compaction, typed or automatic, since the transcript marks both "
-                           "the same way. A rule scoped to more than a session, such as "
-                           "\"never compact more than once\", is not this shape and binds "
-                           "nothing.",
+                           "the same way, so a rule against the typed `/compact` alone, or "
+                           "one scoped to a task, is not this shape and binds nothing; nor is "
+                           "\"never compact more than once\".",
             "when": {"kind": "compact"},
             "examples": {
                 "fire": [
@@ -448,13 +449,13 @@ ENTRIES = (
     },
     {
         "shape": "Never switch models mid-session",
-        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:switch|switching|change|changing|"
-                   r"swap|swapping)\s+(?:the\s+|your\s+)?models?|(?:always\s+)?(?:stay|stick)\s+"
-                   r"(?:on|with)\s+(?:one|a\s+single|the\s+same)\s+model\s+(?:for|throughout)\s+"
-                   r"(?:the\s+(?:whole\s+|entire\s+)?|a\s+|each\s+)?(?:session|conversation))"
-                   r"(?:\s+(?:mid-?(?:task|session|conversation)|(?:in\s+the\s+middle\s+of|"
-                   r"partway\s+through)\s+(?:a|the)\s+(?:task|session|conversation)))?"
-                   r"(?=\s*[.!?;,:–—]|\s*$|\s+-+\s)",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:switch(?:ing)?|chang(?:e|ing)|"
+                   r"swap(?:ping)?)\s+(?:the\s+|your\s+)?models?\s+(?:mid-?(?:session|conversation|"
+                   r"chat)|(?:in\s+the\s+middle\s+of|partway\s+through|during)\s+(?:a|the)\s+"
+                   r"(?:session|conversation|chat))|(?:always\s+)?(?:stay|stick)\s+(?:on|with)\s+"
+                   r"(?:one|a\s+single|the\s+same)\s+model\s+(?:for|throughout)\s+(?:the\s+"
+                   r"(?:whole\s+|entire\s+)?|a\s+|each\s+)?(?:session|conversation|chat))"
+                   r"(?=[.!?]*$)",
         "detector": {
             "id": "cache-hygiene/model-switch",
             "rule": "cache-hygiene",
@@ -497,10 +498,9 @@ ENTRIES = (
         "shape": "Never write a secret into a file",
         "pattern": r"^(?:never|do\s+not|don't)\s+(?:write|hard-?code|paste|put|embed|inline)\s+"
                    r"(?:a\s+|an\s+|any\s+)?(?:secrets?|credentials?|(?:api|access)\s+keys?|"
-                   r"(?:api|access|auth)\s+tokens?|tokens?|private\s+keys?)(?:\s+(?:in|into|to)\s+"
-                   r"(?:a\s+|an\s+|the\s+|any\s+|your\s+)?(?:files?|source(?:\s+(?:code|files?))?|"
-                   r"code|config(?:uration)?(?:\s+files?)?|scripts?|disk))?"
-                   r"(?=\s*[.!?;,:–—]|\s*$|\s+-+\s)",
+                   r"(?:api|access|auth)\s+tokens?|tokens?|private\s+keys?)\s+(?:in|into|to)\s+"
+                   r"(?:a\s+|an\s+|the\s+|any\s+|your\s+)?(?:files?|disk|repo(?:sitory)?|"
+                   r"commits?|(?:source|version)\s+control)(?=[.!?]*$)",
         "detector": {
             "id": "secrets/secret-in-write",
             "rule": "secrets",
@@ -575,8 +575,11 @@ ENTRIES = (
     {
         "shape": "Filter every find",
         "pattern": r"^(?:(?:always\s+)?(?:filter|narrow)\s+(?:every\s+|each\s+|any\s+|all\s+|"
-                   r"your\s+)?find(?:\s+(?:commands?|calls?|searches))?\b|(?:never|do\s+not|"
-                   r"don't)\s+(?:run\s+)?(?:a\s+|an\s+)?(?:unfiltered|bare|unbounded)\s+find\b)",
+                   r"your\s+)?find(?![\w-])(?:\s+(?:commands?|calls?|searches))?(?:\s+(?:by|with)\s+"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|path|size|pattern)s?(?:\s+(?:or|and)\s+"
+                   r"(?:(?:a|an|its|the)\s+)?(?:name|type|depth|path|size|pattern)s?)*)?|(?:never|"
+                   r"do\s+not|don't)\s+(?:run\s+)?(?:a\s+|an\s+)?(?:unfiltered|bare|unbounded)\s+"
+                   r"find(?![\w-])(?:\s+(?:commands?|calls?|searches))?)(?=[.!?]*$)",
         "detector": {
             "id": "transcript-hygiene/unfiltered-find",
             "rule": "transcript-hygiene",

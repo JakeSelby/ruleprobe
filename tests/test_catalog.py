@@ -564,16 +564,17 @@ class BindingTests(Temp):
     def test_each_default_shape_binds_its_shipped_detector_catalog_bound(self):
         cases = [
             ("cache-hygiene/compact", ("Never compact the conversation.",
-                                       "Do not run `/compact` mid-task.",
+                                       "Never compact mid-session.",
+                                       "Avoid triggering compaction.",
                                        "Avoid compacting the context window.",
                                        "Start a new session instead of compacting.")),
             ("cache-hygiene/model-switch", ("Never switch models mid-session.",
-                                            "Don't change the model in the middle of a task.",
+                                            "Don't change the model in the middle of a chat.",
                                             "Stick with the same model throughout the "
                                             "conversation.")),
             ("secrets/secret-in-write", ("Never write a secret to disk.",
-                                         "Do not hard-code access tokens in config files.",
-                                         "Never embed credentials.")),
+                                         "Do not hard-code access tokens in the repository.",
+                                         "Never embed credentials in a commit.")),
             ("transcript-hygiene/unfiltered-find", ("Filter each find command.",
                                                     "Narrow every `find` by name or type.",
                                                     "Do not run an unbounded find.")),
@@ -621,33 +622,90 @@ class BindingTests(Temp):
                      "Never run find with -delete.",
                      "Filter the findings before you report them."):
             with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
                 [entry] = self.rules("# Rule\n\n%s\n" % text).rules
                 self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
 
-    def test_a_default_shape_ends_at_a_clause_break_or_the_sentence_s_end(self):
-        for text in ("Never compact the context; start a new session.",
-                     "Never switch models mid-session - the cache is lost.",
-                     "Never hardcode API keys, tokens included.",
-                     "Never compact the conversation"):
+    def test_each_review_finding_s_near_miss_fails_the_pattern_itself(self):
+        """PR #148's review: each rule below narrows what the detector counts, or is not about
+        its observable at all, so the pattern alone must refuse it, whatever the binder's
+        exception and condition words would do."""
+        cases = {
+            # A data or ML model, not the agent's.
+            "Do not change the model; write a migration.": "Database",
+            "Do not change the model, only the data.": "Data",
+            "Never switch models.": "Models",
+            # The typed command, while the detector also counts automatic compactions.
+            "Never run /compact.": "Sessions",
+            "Don't use /compact.": "Sessions",
+            "Don't use `/compact`.": "Sessions",
+            "Do not run /compact mid-task; compact between tasks.": "Sessions",
+            # A task, while the detectors count across the whole session.
+            "Never compact the context mid-task.": "Sessions",
+            "Never compact partway through a task.": "Sessions",
+            "Never compact in the middle of a task.": "Sessions",
+            "Do not switch models mid-task.": "Models",
+            "Never switch models partway through a task.": "Models",
+            "Never switch models in the middle of a task.": "Models",
+            # A location narrower than every find, and another tool's name.
+            "Never run a bare find from the home directory.": "Searching",
+            "Don't run a bare find over the repository.": "Searching",
+            "Narrow every find-and-replace to the selection.": "Editing",
+            "Filter every find-in-files result.": "Editing",
+            # No file, repository or commit destination, or a narrower one.
+            "Never paste secrets.": "Secrets",
+            "Never paste tokens, even in DMs.": "Secrets",
+            "Never hardcode API keys.": "Secrets",
+            "Do not put credentials in source code.": "Secrets",
+            "Don't paste a private key into a script.": "Keys",
+        }
+        for text, heading in cases.items():
+            with self.subTest(text=text):
+                self.assertEqual([d.id for d in _catalog_matches(heading, [text])], [])
+                [entry] = self.rules("# %s\n\n%s\n" % (heading, text)).rules
+                self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
+
+    def test_find_is_a_whole_word_in_the_find_pattern(self):
+        """Removing the guard after "find" fails here: the end-of-sentence anchor refuses
+        "find-and-replace" today, so the guard is checked in the pattern as written, and
+        each hyphenated or longer word is refused as well."""
+        pattern = dict((e["detector"]["id"], e["pattern"]) for e in catalog.ENTRIES)[
+            "transcript-hygiene/unfiltered-find"]
+        self.assertEqual(len(re.findall(r"find", pattern)), 2)
+        self.assertEqual(len(re.findall(r"find\(\?!\[\\w-\]\)", pattern)), 2)
+        for text in ("Filter every find-and-replace.", "Filter every finder.",
+                     "Never run a bare find-in-files.", "Never run an unfiltered findstr."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+
+    def test_a_default_shape_must_reach_the_end_of_its_sentence(self):
+        for text in ("Never compact the conversation", "Filter every find!",
+                     "Never switch models mid-session."):
             with self.subTest(text=text):
                 self.assertEqual(len(matched(text)), 1)
-        for text in ("Never compact the context twice.", "Never switch models lightly.",
+        for text in ("Never compact the context; start a new session.",
+                     "Never switch models mid-session - the cache is lost.",
+                     "Never write API keys to a file, tokens included.",
+                     "Filter every find: by name.", "Never run a bare find \u2014 ever.",
+                     "Never compact the context twice.", "Never switch models lightly.",
                      "Never write a secret into a file twice."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
 
     def test_the_two_secret_shapes_bind_apart(self):
         self.assertEqual(matched("Never commit secrets."), ["secrets/secret-file-add"])
-        self.assertEqual(matched("Never hardcode secrets."), ["secrets/secret-in-write"])
-        [entry] = self.rules("# Secrets\n\nNever hardcode secrets. Never commit a `.env` "
-                             "file.\n").rules
+        self.assertEqual(matched("Never hardcode secrets in a file."),
+                         ["secrets/secret-in-write"])
+        [entry] = self.rules("# Secrets\n\nNever hardcode secrets in a file. Never commit a "
+                             "`.env` file.\n").rules
         self.assertEqual(entry.detectors, ["secrets/secret-file-add",
                                            "secrets/secret-in-write"])
 
     def test_an_exception_after_a_default_shape_unbinds_it(self):
-        for body in ("Never run /compact.\nVery long research sessions are the exception.",
+        for body in ("Never compact the context.\nVery long research sessions are the "
+                     "exception.",
                      "Never switch models mid-session.\nA smaller model for a summary is okay.",
-                     "Never hardcode secrets.\nThrowaway demo keys are allowed.",
+                     "Never hardcode secrets in a file.\nThrowaway demo keys are allowed.",
                      "Filter every find.\nListing a single folder is fine."):
             with self.subTest(body=body):
                 [entry] = self.rules("# Rule\n\n%s\n" % body).rules

@@ -73,10 +73,10 @@ ZOO_FILE = "rules-zoo.json"
 #: places. `corpus` fails under it on that zoo alone, known by `SHIPPED_ZOO_SHA256`. It is a
 #: ratchet, not a bar: a binder or catalog change that raises recall raises it in the same
 #: change, and the suite says when it is stale.
-BINDING_RECALL_FLOOR = 0.75
+BINDING_RECALL_FLOOR = 0.70
 #: The sha256 of the shipped zoo's bytes. A zoo with other bytes - a corpus of your own, or
 #: the shipped one edited - gets no recall floor; a change to the shipped zoo updates this.
-SHIPPED_ZOO_SHA256 = "21b34673286a3e30398324a66ce594812af3c7653ee01bf84361a4d35dd9638f"
+SHIPPED_ZOO_SHA256 = "d4db076ea011a8739e63adba3d85df18673ca6b016ae1a59a6792c81dd46d99c"
 _ZOO_KEYS = ("about", "items")
 _ITEM_KEYS = ("id", "kind", "heading", "heading_label", "lines")
 

@@ -31,7 +31,7 @@ Use Conventional Commits for every commit subject.
 
 ## Sessions
 
-Never compact the context mid-task. Start a new session instead.
+Never compact the context. Start a new session instead.
 
 ## Models
 
@@ -39,8 +39,8 @@ Do not switch models in the middle of a session.
 
 ## Credentials
 
-Never hardcode an API key.
+Never write an API key to a file.
 
 ## Searching
 
-Filter every `find` by name, type or depth.
+Filter every `find` by name or type.

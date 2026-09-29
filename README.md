@@ -111,13 +111,16 @@ force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 (`package-manager/pip-install`), do not read a whole file
 (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
 (`commits/non-conventional-subject`), never commit a secret-shaped file
-(`secrets/secret-file-add`), never compact the context mid-task (`cache-hygiene/compact`),
+(`secrets/secret-file-add`), never compact the context (`cache-hygiene/compact`),
 never switch models mid-session (`cache-hygiene/model-switch`), never write a secret into a
 file (`secrets/secret-in-write`), and filter every `find` (`transcript-hygiene/unfiltered-find`).
-The last four bind the shipped detectors of the same ids. Their patterns end at a clause break
-or the end of the sentence, so a rule that narrows the shape - "never compact more than once
-per session", "never switch models to save money", "never paste a secret into the chat" - binds
-nothing rather than a detector that would count what the rule allows.
+The last four bind the shipped detectors of the same ids, and only a rule as wide as what the
+detector counts. Their patterns must reach the end of the sentence, and name a session rather
+than a task, a file, repository or commit rather than a chat, and compaction rather than the
+typed `/compact`, since the detector also counts automatic compactions. So "never compact more
+than once per session", "never switch models mid-task", "never run a bare find from the home
+directory" and "never paste secrets" bind nothing rather than a detector that would count what
+the rule allows, and "do not change the model" alone is read as a data model and binds nothing.
 
 One row reads the other way round. Every other row counts violations, so fewer hits is
 better; `testing/test-after-change` counts compliance - a hit is a file change that a later
@@ -157,7 +160,7 @@ anywhere stays unmeasured - in a long file, the likelier outcome.
 
 A catalog entry measures the shape it names and no more. "Never commit secrets" binds
 `secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
-inline into a file or a command is not what it counts. "Never hardcode API keys" binds
+inline into a file or a command is not what it counts. "Never write API keys to a file" binds
 `secrets/secret-in-write`, which counts a secret-shaped string a Write or Edit writes, or a
 heredoc carries; a key on a command line outside a heredoc is not what it counts.
 
@@ -502,22 +505,22 @@ verification/no-verify                   11   13   11    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 
-binder over the rules zoo: 111 sections, 147 labels
+binder over the rules zoo: 127 sections, 163 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
-cache-hygiene/compact                     4    4    0    0   1.00    1.00
-cache-hygiene/model-switch                4    4    0    0   1.00    1.00
+cache-hygiene/compact                     4    3    0    1   1.00    0.75
+cache-hygiene/model-switch                4    3    0    1   1.00    0.75
 commits/non-conventional-subject          5    3    0    2   1.00    0.60
 git-safety/force-push-default             8    5    0    3   1.00    0.62
 package-manager/pip-install               5    3    0    2   1.00    0.60
 secrets/secret-file-add                   4    2    0    2   1.00    0.50
-secrets/secret-in-write                   4    4    0    0   1.00    1.00
+secrets/secret-in-write                   3    3    0    0   1.00    1.00
 testing/test-after-change                 9    6    0    3   1.00    0.67
-transcript-hygiene/unfiltered-find        4    4    0    0   1.00    1.00
+transcript-hygiene/unfiltered-find        3    3    0    0   1.00    1.00
 transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
 verification/no-verify                    6    5    0    1   1.00    0.83
 -------------------------------------------------------------------------------
-total                                    57   43    0   14   1.00    0.75  recall floor 0.75
+total                                    55   39    0   16   1.00    0.71  recall floor 0.70
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
