@@ -19,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The origins section names Model Citizen (formerly agent-harness) and links to the current
+  repository while preserving Ruleprobe's extraction history
+  ([#146](https://github.com/JakeSelby/ruleprobe/issues/146)).
 - "exempt", "exempted", "exempting", "exempts" and "exemptions" join the exception words, so "Run the tests before
   finishing. Docs-only changes are exempt." leaves its section unmeasured rather than binding it
   ([#139](https://github.com/JakeSelby/ruleprobe/issues/139)).
