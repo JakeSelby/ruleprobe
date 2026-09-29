@@ -125,7 +125,7 @@ ruleprobe report --root docs --rules tests/fixtures/catalog
 
 binds a file holding one section in each shape, and lists each section as `measured` with
 the note `catalog-bound, <detector id>`. The shapes are: run the tests before finishing
-(`testing/test-after-change`), never skip pre-commit hooks (`verification/no-verify`), never
+(`testing/test-after-change`), never skip git hooks (`verification/no-verify`), never
 force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 (`package-manager/pip-install`), do not read a whole file
 (`transcript-hygiene/whole-file-cat`), Conventional Commit subjects
@@ -133,6 +133,18 @@ force-push the default branch (`git-safety/force-push-default`), use uv, not pip
 (`secrets/secret-file-add`), never compact the context (`cache-hygiene/compact`),
 never switch models mid-session (`cache-hygiene/model-switch`), never write a secret into a
 file (`secrets/secret-in-write`), and filter every `find` (`transcript-hygiene/unfiltered-find`).
+The first seven read the common ways of saying them, not one wording each: "Before you hand
+back, run the tests", "Run the full test suite after every change", "Git hooks must always run;
+never skip them", "Main must never be force-pushed", "Prefer uv over pip", "Do not use pip; use
+uv", "Read narrowly: reach for head, grep or a sed range rather than cat", "Write commit
+messages in the Conventional Commits style" and "Keep credentials out of source control" all
+bind. Each binds only a sentence it covers whole, apart from a closing "no exceptions", so
+anything more - a scope, a destination, an aside in parentheses or after a dash, a second
+clause - leaves the rule unmeasured: "Never force-push on Fridays to main", "Use uv in CI, not
+pip", "Use uv, not pip, in production" and "Never commit .env files (in the public repo)" bind
+nothing. So do rules narrower than their detector by name: "Never skip pre-commit hooks" leaves
+out the pushes `verification/no-verify` counts, and "Never commit .env files" or "Never check in
+private keys" names one kind of the secret-shaped files `secrets/secret-file-add` counts.
 The last four bind the shipped detectors of the same ids, and only a rule as wide as what the
 detector counts. Their patterns must reach the end of the sentence, and name a session rather
 than a task, files in general rather than a commit, the repository, a config file or the code,
@@ -157,8 +169,10 @@ below unbound it, it names that word and the entry, its nearest, as in
 A section whose sentences bind different entries
 is measured by each, and the coverage block lists them all: "Never force-push to main. Use uv,
 not pip." binds both. A pattern never reaches across a clause break (`;`, `,`, `:`, a run of
-hyphens between spaces such as ` - ` or ` -- `, a dash), except the comma of its own contrast
-("use uv, not pip"). An exception or a permission - except (excepted, exception), exempt
+hyphens between spaces such as ` - ` or ` -- `, a dash), except inside a closed form of its own
+rule: the comma of its contrast ("use uv, not pip"), the comma after a fronted clause ("before
+you hand back, run the tests"), the semicolon before its restatement ("do not use pip; use uv")
+and the colon of a closed lead-in or a commit format. An exception or a permission - except (excepted, exception), exempt
 (exempted, exempting, exempts, exemption), unless, other than, apart from, excluding, allowed,
 fine, okay, ok - anywhere in a section, its heading included, unbinds every rule in it, so "Never
 force-push to main. Hotfixes excepted." is left unmeasured rather than read as a rule it is not,
@@ -529,22 +543,39 @@ verification/no-verify                   11   13   11    0    0   1.00    1.00  
 -------------------------------------------------------------------------------------------
 total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
 
-binder over the rules zoo: 136 sections, 172 labels
+binder over the rules zoo: 201 sections, 240 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
 -------------------------------------------------------------------------------
 cache-hygiene/compact                     4    3    0    1   1.00    0.75
 cache-hygiene/model-switch                4    3    0    1   1.00    0.75
-commits/non-conventional-subject          5    3    0    2   1.00    0.60
-git-safety/force-push-default             8    5    0    3   1.00    0.62
-package-manager/pip-install               5    3    0    2   1.00    0.60
-secrets/secret-file-add                   4    2    0    2   1.00    0.50
+commits/non-conventional-subject          9    5    0    4   1.00    0.56
+git-safety/force-push-default            13    9    0    4   1.00    0.69
+package-manager/pip-install              10    8    0    2   1.00    0.80
+secrets/secret-file-add                   9    4    0    5   1.00    0.44
 secrets/secret-in-write                   4    4    0    0   1.00    1.00
-testing/test-after-change                 9    6    0    3   1.00    0.67
+testing/test-after-change                15   14    0    1   1.00    0.93
 transcript-hygiene/unfiltered-find        3    3    0    0   1.00    1.00
-transcript-hygiene/whole-file-cat         4    3    0    1   1.00    0.75
-verification/no-verify                    6    5    0    1   1.00    0.83
+transcript-hygiene/whole-file-cat         8    6    0    2   1.00    0.75
+verification/no-verify                   11    3    0    8   1.00    0.27
 -------------------------------------------------------------------------------
-total                                    56   40    0   16   1.00    0.71  recall floor 0.71
+total                                    90   62    0   28   1.00    0.69  recall floor 0.68
+
+binder over the independent held-out set: 80 sections, 80 labels
+catalog entry                           pos   tp   fp   fn   prec  recall  note
+-------------------------------------------------------------------------------
+cache-hygiene/compact                     3    0    0    3      -    0.00
+cache-hygiene/model-switch                3    1    0    2   1.00    0.33
+commits/non-conventional-subject          4    1    0    3   1.00    0.25
+git-safety/force-push-default             4    1    0    3   1.00    0.25
+package-manager/pip-install               4    0    0    4      -    0.00
+secrets/secret-file-add                   4    0    0    4      -    0.00
+secrets/secret-in-write                   4    0    0    4      -    0.00
+testing/test-after-change                 4    0    0    4      -    0.00
+transcript-hygiene/unfiltered-find        3    1    0    2   1.00    0.33
+transcript-hygiene/whole-file-cat         3    0    0    3      -    0.00
+verification/no-verify                    4    1    0    3   1.00    0.25
+-------------------------------------------------------------------------------
+total                                    40    5    0   35   1.00    0.12  recall floor 0.12
 ```
 
 The six shipped detectors and every catalog entry are scored over the corpus. A detector
@@ -568,6 +599,14 @@ detector is measured wrongly. On the shipped zoo, recall fails only under the re
 the recall the shipped binder measured, which rises as binding improves; a zoo of your own in
 a `--corpus` directory reports its recall and holds it to nothing. Labels naming a detector no catalog
 entry binds yet are counted apart. `--json` carries the same figures under `binding`.
+
+The third table scores the binder the same way over `ruleprobe/corpus/rules-heldout.json`: 80
+synthetic rule sentences, 40 of them labelled, written from each detector's claim by an author
+who never saw the catalog's patterns, and shipped as written. Its recall, 0.12, is the honest
+figure for rules the catalog was not written against: the catalog reads few of the ways people
+phrase a rule, and leaves the rest unmeasured rather than guess. Any false bind fails the
+command, and recall is held to its own floor on the shipped set's bytes. Once shipped it is a
+regression set, not a fresh measure. `--json` carries it under `heldout`.
 
 `ruleprobe report --validity` puts each detector's `p=` and `r=` beside its row. It is off
 by default because the report is meant to be read in a minute and an eight-column table is

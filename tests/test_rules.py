@@ -375,7 +375,7 @@ class CliTests(Temp):
 
 #: One section of three rules, each sentence binding a different catalog entry.
 MULTI = ("# Git\n\n- Use Conventional Commits.\n- Never force-push to main.\n"
-         "- Never skip pre-commit hooks.\n")
+         "- Never skip git hooks.\n")
 #: What `MULTI` binds, in catalog order, whatever order its sentences come in.
 MULTI_IDS = ["verification/no-verify", "git-safety/force-push-default",
              "commits/non-conventional-subject"]
@@ -399,7 +399,7 @@ class SentenceBindingTests(Temp):
         [entry] = self.load(MULTI).rules
         self.assertEqual((entry.rule, entry.state, entry.detectors, entry.source),
                          ("CLAUDE.md#git", "measured", MULTI_IDS, "catalog"))
-        [again] = self.load("# Git\n\nNever skip pre-commit hooks. Use Conventional Commits. "
+        [again] = self.load("# Git\n\nNever skip git hooks. Use Conventional Commits. "
                             "Never force-push to main.\n").rules
         self.assertEqual(again.detectors, MULTI_IDS)
 

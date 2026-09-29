@@ -54,6 +54,21 @@ All notable changes to this project are documented here. The format follows
   six near-misses. On the rules zoo, binding recall rises from 0.44 to 0.66 (27/41) with no false
   bind, and the recorded recall floor rises to 0.65
   ([#141](https://github.com/JakeSelby/ruleprobe/issues/141)).
+- The seven original catalog shapes read more of the ways people phrase them, such as "Before
+  you hand back, run the tests", "Prefer uv over pip" and "Keep credentials out of source
+  control", and each binds only a sentence it covers whole. Anything more, a scope, an aside or
+  a second clause, leaves the rule unmeasured, so "Never force-push on Fridays to main", "Use uv,
+  not pip, in production" and "Never commit .env files (in the public repo)" bind nothing. A rule
+  narrower than its detector by name no longer binds either: "Never skip pre-commit hooks" and
+  "Do not pass `--no-verify` to `git commit`" leave out the pushes `verification/no-verify`
+  counts, and "Never commit a `.env` file" names one kind of secret-shaped file. `ruleprobe
+  corpus` also scores binding on `ruleprobe/corpus/rules-heldout.json`, 80 sentences written
+  from each detector's claim by an author who never saw the patterns, gated on zero false binds
+  and a recall floor of its own. Binding recall, with no false bind anywhere: 0.12 (5/40) on
+  that independent set, the honest figure for phrasings the catalog was not written against;
+  0.61 on a 65-item set added to the zoo, tuned against; 0.67 on the zoo's older held-out
+  labels; 0.69 over the whole zoo, whose floor is now 0.68
+  ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
 
 ## 0.2.0 (2026-09-24)
 

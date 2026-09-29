@@ -5,7 +5,7 @@
   "generated_at": "2026-09-23",
   "next_ids": {
     "epic": 18,
-    "story": 25,
+    "story": 26,
     "task": 11,
     "bug": 13,
     "chore": 10,
@@ -1106,32 +1106,6 @@
       "provenance": "authored"
     },
     {
-      "bmad_id": "RP-C009",
-      "github_number": 144,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/144",
-      "title": "Move repository-internal agent instructions into a path-scoped rule",
-      "type": "chore",
-      "native_type": "Task",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-C009.md",
-      "parent_bmad_id": null,
-      "parent_github_number": null,
-      "lifecycle": "active",
-      "provenance": "authored"
-    },
-    {
-      "bmad_id": "RP-T010",
-      "github_number": 146,
-      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/146",
-      "title": "docs(readme): update the Model Citizen origin reference",
-      "type": "task",
-      "native_type": "Task",
-      "artifact_path": "_bmad-output/implementation-artifacts/RP-T010.md",
-      "parent_bmad_id": null,
-      "parent_github_number": null,
-      "lifecycle": "active",
-      "provenance": "authored"
-    },
-    {
       "bmad_id": "RP-S022",
       "github_number": 141,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/141",
@@ -1158,6 +1132,32 @@
       "provenance": "authored"
     },
     {
+      "bmad_id": "RP-C009",
+      "github_number": 144,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/144",
+      "title": "Move repository-internal agent instructions into a path-scoped rule",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C009.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-T010",
+      "github_number": 146,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/146",
+      "title": "docs(readme): update the Model Citizen origin reference",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T010.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
       "bmad_id": "RP-S024",
       "github_number": 149,
       "github_url": "https://github.com/JakeSelby/ruleprobe/issues/149",
@@ -1165,6 +1165,19 @@
       "type": "story",
       "native_type": "Feature",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S024.md",
+      "parent_bmad_id": "RP-E010",
+      "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-S025",
+      "github_number": 151,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/151",
+      "title": "feat(detectors): widen the phrasings the catalog reads",
+      "type": "story",
+      "native_type": "Feature",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-S025.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
       "lifecycle": "active",

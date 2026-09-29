@@ -7,7 +7,7 @@ Run the tests before you say a change works.
 
 ## Hooks
 
-Never skip the pre-commit hooks. Fix what a failing hook found.
+Never skip the git hooks. Fix what a failing hook found.
 
 ## Pushing
 
@@ -27,7 +27,7 @@ Use Conventional Commits for every commit subject.
 
 ## Secrets
 
-- Never commit a `.env` file or a private key.
+- Never commit secrets or credentials.
 
 ## Sessions
 

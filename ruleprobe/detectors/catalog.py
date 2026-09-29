@@ -13,8 +13,11 @@ Each entry is a mapping of three keys:
 - `pattern` - one regular expression, anchored with `^`, matched case-insensitively at the
   start of each sentence of a rule's text. It never crosses a clause break (`;`, `,`, `:`,
   a run of hyphens between spaces such as ` - ` or ` -- `, an en or em dash): where it
-  needs words between two it spans a run of characters that stops at one, never `.*`, and
-  the one comma it may cross is the one opening its own contrast, as in "use uv, not pip".
+  needs words between two it spans a run of characters that stops at one, never `.*`. It
+  crosses a break only inside a closed form of its own rule: the comma opening its contrast
+  ("use uv, not pip"), the comma after a fronted clause ("before you hand back, run the
+  tests"), the semicolon before its own restatement ("do not use pip; use uv") and the colon
+  of a closed lead-in or a commit format ("read narrowly: reach for head...").
 - `detector` - a declarative detector entry, as a detector file holds one, carrying an
   `examples:` block with a deliberate near-miss beside each positive. `ruleprobe corpus`
   scores those examples, and the floor applies to them as to any detector.
@@ -38,6 +41,17 @@ binds nothing. Those patterns also name only scopes as wide as the detector's: a
 context, never a task or a database, and files in general, never a commit, a repository, a
 config file or the code.
 
+The seven entries before them bind only a sentence they cover whole: past the rule's own
+words may come a negated exception marker and the sentence's end, and nothing else. A scope, a
+destination, a narrower name, a parenthetical, a dash or colon aside, a second clause or mere
+emphasis anywhere in the sentence ("never force-push on Fridays to main", "never commit .env
+files (in the public repo)", "use uv, not pip, in production") leaves the rule unmeasured. The
+one exception is a clause opening with a word the binder unbinds on ("never force-push to main
+when others share it"): the pattern matches up to it so the report can name the word and the
+nearest entry, and the word unbinds it. Each names its objects from a closed list as wide as
+its detector: git hooks or `--no-verify`, never pre-commit hooks alone, which leave out the
+pushes the detector counts; secrets or credentials in general, never one kind of secret file.
+
 This module holds literals and nothing else - no import, no call, no function - so it loads
 through the import system the same way from a directory, a wheel or a zip on `sys.path`, and
 reads no file beside itself; `tests/test_catalog.py` holds it to that. An id added here joins
@@ -47,8 +61,30 @@ reads no file beside itself; `tests/test_catalog.py` holds it to that. An id add
 ENTRIES = (
     {
         "shape": "Run the tests before finishing",
-        "pattern": r"^(?:always\s+)?run\s+(?:the\s+|all\s+(?:the\s+)?|your\s+)?(?:unit\s+)?"
-                   r"tests?\b(?:(?!\s-+\s)[^;,:–—])*?\bbefore\b",
+        "pattern": r"^(?:(?:always\s+)?(?:run\s+(?:the\s+|all\s+(?:the\s+)?|your\s+)?(?:full\s+|"
+                   r"whole\s+|entire\s+)?(?:unit\s+)?(?:tests?|test\s+suite)|test\s+(?:your|"
+                   r"every|each|all)\s+(?:code\s+)?changes?|(?:make\s+sure|"
+                   r"ensure)\s+(?:that\s+)?(?:all\s+)?(?:the\s+|"
+                   r"your\s+)?tests\s+pass)\s+(?:before\s+(?:finishing|completing|"
+                   r"handing\s+(?:it\s+)?back|pushing|committing|(?:every|each|a)\s+commit|"
+                   r"you\s+(?:finish|complete|hand\s+(?:it\s+)?back|push|commit)|you(?:\s+are|"
+                   r"'re)\s+(?:done|finished)|(?:you\s+)?(?:say(?:ing)?|declar(?:e|ing)|"
+                   r"claim(?:ing)?)\s+(?:that\s+)?(?:(?:a|the|your)\s+(?:change|task|fix)|"
+                   r"it)\s+(?:is\s+)?(?:done|finished|complete|works))(?:\s+(?:a|the|each|every|"
+                   r"your)\s+(?:task|change))?|after\s+(?:(?:every|each|"
+                   r"any)\s+(?:code\s+)?(?:change|edit)|(?:making|you\s+make)\s+(?:a\s+|"
+                   r"any\s+)?(?:code\s+)?changes?))|before\s+(?:finishing|"
+                   r"handing\s+(?:it\s+)?back|you\s+(?:finish|hand\s+(?:it\s+)?back|push|commit)|"
+                   r"(?:you\s+)?(?:say(?:ing)?|declar(?:e|ing)|"
+                   r"claim(?:ing)?)\s+(?:that\s+)?(?:(?:a|the|your)\s+(?:change|task|fix)|"
+                   r"it)\s+(?:is\s+)?(?:done|finished|complete|works))(?:\s+(?:a|the|each|every|"
+                   r"your)\s+(?:task|change))?\s*,?\s+(?:always\s+)?run\s+(?:the\s+|"
+                   r"all\s+(?:the\s+)?|your\s+)?(?:full\s+|whole\s+|"
+                   r"entire\s+)?(?:unit\s+)?(?:tests?|test\s+suite))(?:(?:(?:\s*,\s*|\s*\(\s*|"
+                   r"\s+-+\s+|\s*[–—]\s*|\s+)(?:(?:admit|allow|make|with)\s+no|"
+                   r"without(?:\s+any)?|no)\s+exceptions?\)?)?(?=[.!?]*$)|(?=\s*[,;]?\s+(?:if|"
+                   r"when|unless|except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|however|other\s+than|"
+                   r"apart\s+from|excluding|without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "testing/test-after-change",
             "rule": "testing",
@@ -144,8 +180,17 @@ ENTRIES = (
     },
     {
         "shape": "Never skip pre-commit hooks with --no-verify",
-        "pattern": r"^(?:never|do\s+not|don't)\s+(?:(?:skip|bypass)\s+(?:the\s+)?"
-                   r"(?:pre-commit\s+|commit\s+|git\s+)?hooks?\b|(?:use|pass)\s+--no-verify\b)",
+        "pattern": r"^(?:(?:never|do\s+not|don't)\s+(?:(?:skip|bypass)\s+(?:the\s+|"
+                   r"any\s+)?(?:git\s+)?hooks?|(?:use|pass)\s+--no-verify)(?:,?\s+(?:and|"
+                   r"or)\s+never\s+(?:use\s+|pass\s+)?--no-verify)?|"
+                   r"(?:always\s+)?let\s+(?:the\s+)?git\s+hooks\s+run|"
+                   r"(?:the\s+)?git\s+hooks\s+(?:must|should)\s+(?:always\s+run|"
+                   r"never\s+be\s+(?:skipped|bypassed))(?:\s*[;,]\s*(?:and\s+)?never\s+(?:skip|"
+                   r"bypass)\s+them)?)(?:(?:(?:\s*,\s*|\s*\(\s*|\s+-+\s+|\s*[–—]\s*|"
+                   r"\s+)(?:(?:admit|allow|make|with)\s+no|without(?:\s+any)?|"
+                   r"no)\s+exceptions?\)?)?(?=[.!?]*$)|(?=\s*[,;]?\s+(?:if|when|unless|"
+                   r"except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|however|other\s+than|apart\s+from|"
+                   r"excluding|without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "verification/no-verify",
             "rule": "verification",
@@ -183,8 +228,18 @@ ENTRIES = (
     },
     {
         "shape": "Never force-push the default branch",
-        "pattern": r"^(?:never|do\s+not|don't)\s+force[- ]?push\b"
-                   r"(?:(?!\s-+\s)[^;,:–—])*?\b(?:main|master|default\s+branch)\b",
+        "pattern": r"^(?:(?:never|do\s+not|don't)\s+force[- ]?push\s+(?:(?:to|on|"
+                   r"onto)\s+)?(?:the\s+)?(?:main|master|default\s+branch)(?:\s+branch)?(?:\s+or"
+                   r"\s+(?:to\s+)?(?:the\s+)?(?:main|master|default\s+branch)(?:\s+branch)?)?|"
+                   r"force[- ]?push(?:ing|es)?\s+(?:(?:to|on)\s+)?(?:the\s+)?(?:main|master|"
+                   r"default\s+branch)(?:\s+branch)?\s+is\s+(?:forbidden|prohibited|banned|"
+                   r"not\s+permitted)|(?:the\s+)?(?:main|master|"
+                   r"default\s+branch)(?:\s+branch)?\s+(?:must|"
+                   r"should)\s+never\s+be\s+force[- ]?pushed(?:\s+to)?)(?:(?:(?:\s*,\s*|\s*\(\s*|"
+                   r"\s+-+\s+|\s*[–—]\s*|\s+)(?:(?:admit|allow|make|with)\s+no|"
+                   r"without(?:\s+any)?|no)\s+exceptions?\)?)?(?=[.!?]*$)|(?=\s*[,;]?\s+(?:if|"
+                   r"when|unless|except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|however|other\s+than|"
+                   r"apart\s+from|excluding|without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "git-safety/force-push-default",
             "rule": "git-safety",
@@ -254,9 +309,17 @@ ENTRIES = (
     },
     {
         "shape": "Use the named package manager, not another: uv, not pip",
-        "pattern": r"^(?:always\s+)?(?:use|install\s+(?:\w+\s+)?with)\s+uv\b"
-                   r"(?:(?!\s-+\s)[^;,:–—])*?(?:,\s*)?\b(?:not|never|instead\s+of|"
-                   r"rather\s+than)\s+(?:with\s+)?(?:sudo\s+)?pip\b",
+        "pattern": r"^(?:(?:always\s+)?(?:use|install\s+(?:(?:packages|dependencies|deps|"
+                   r"libraries|everything)\s+)?with)\s+uv\s*,?\s+(?:not|never|instead\s+of|"
+                   r"rather\s+than)\s+(?:with\s+)?(?:sudo\s+)?pip|"
+                   r"(?:always\s+)?prefer\s+uv\s+(?:over|to)\s+pip|(?:never|do\s+not|"
+                   r"don't)\s+(?:use\s+pip|pip\s+install)(?:\s*[;,]\s*(?:always\s+)?use\s+uv(?:\s"
+                   r"+instead)?)?)\b(?:,?\s+for\s+(?:(?:every|each|any|all)\s+)?(?:installs?|"
+                   r"packages?|dependenc(?:y|ies)))?(?:(?:(?:\s*,\s*|\s*\(\s*|\s+-+\s+|"
+                   r"\s*[–—]\s*|\s+)(?:(?:admit|allow|make|with)\s+no|without(?:\s+any)?|"
+                   r"no)\s+exceptions?\)?)?(?=[.!?]*$)|(?=\s*[,;]?\s+(?:if|when|unless|"
+                   r"except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|however|other\s+than|apart\s+from|"
+                   r"excluding|without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "package-manager/pip-install",
             "rule": "package-manager",
@@ -297,9 +360,22 @@ ENTRIES = (
     },
     {
         "shape": "Do not read a whole file into context",
-        "pattern": r"^(?:never|do\s+not|don't)\s+(?:cat\s+(?:a\s+|an\s+|the\s+|any\s+)?(?:whole|"
-                   r"entire)\s+files?\b|(?:read|load|dump)\s+(?:a\s+|an\s+|the\s+|any\s+)?"
-                   r"(?:whole|entire)\s+files?\s+into\s+(?:the\s+|your\s+)?context\b)",
+        "pattern": r"^(?:(?:never|do\s+not|don't|avoid)\s+(?:cat(?:ting)?\s+(?:a\s+|an\s+|the\s+|"
+                   r"any\s+)?(?:whole|entire)\s+files?(?:\s+into\s+(?:the\s+|your\s+)?(?:context|"
+                   r"transcript|conversation))?|(?:read(?:ing)?|load(?:ing)?|"
+                   r"dump(?:ing)?)\s+(?:a\s+|an\s+|the\s+|any\s+)?(?:whole|"
+                   r"entire)\s+files?\s+into\s+(?:the\s+|your\s+)?(?:context|transcript|"
+                   r"conversation))|(?:read\s+narrowly\s*:\s*)?(?:use|reach\s+for|"
+                   r"prefer)\s+(?:head|tail|grep(?:\s+-n)?|rg|less|sed(?:\s+-n)?|an?\s+(?:sed|"
+                   r"line)\s+range)(?:\s*,\s*(?:head|tail|grep(?:\s+-n)?|rg|less|sed(?:\s+-n)?|"
+                   r"an?\s+(?:sed|line)\s+range))*(?:,?\s+(?:or|and)\s+(?:head|tail|"
+                   r"grep(?:\s+-n)?|rg|less|sed(?:\s+-n)?|an?\s+(?:sed|"
+                   r"line)\s+range))?\s+(?:rather\s+than|instead\s+of|"
+                   r"over)\s+cat)(?:(?:(?:\s*,\s*|\s*\(\s*|\s+-+\s+|\s*[–—]\s*|\s+)(?:(?:admit|"
+                   r"allow|make|with)\s+no|without(?:\s+any)?|no)\s+exceptions?\)?)?(?=[.!?]*$)|"
+                   r"(?=\s*[,;]?\s+(?:if|when|unless|except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|"
+                   r"however|other\s+than|apart\s+from|excluding|"
+                   r"without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "transcript-hygiene/whole-file-cat",
             "rule": "transcript-hygiene",
@@ -324,9 +400,19 @@ ENTRIES = (
     },
     {
         "shape": "Conventional Commit subjects",
-        "pattern": r"^(?:(?:always\s+)?(?:use|write|follow)\s+(?:the\s+)?conventional\s+"
-                   r"commits?\b|(?:every\s+)?commit\s+(?:messages?|subjects?)\s+(?:must\s+|"
-                   r"should\s+)?(?:follow|use)\s+(?:the\s+)?conventional\s+commits?\b)",
+        "pattern": r"^(?:(?:always\s+)?(?:use|write|follow)\s+(?:the\s+)?conventional\s+commits?|"
+                   r"(?:every\s+)?commit\s+(?:messages?|subjects?)\s+(?:must\s+|"
+                   r"should\s+)?(?:follow|use)\s+(?:the\s+)?conventional\s+commits?|"
+                   r"(?:always\s+)?write\s+(?:(?:your|all|every|the)\s+)?commit\s+(?:messages?|"
+                   r"subjects?)\s+(?:in|as|using)\s+(?:the\s+|"
+                   r"a\s+)?conventional\s+commits?)(?:\s+(?:style|format|form|convention|spec|"
+                   r"specification|standard))?(?:\s*:\s*type(?:\(scope\))?:\s*(?:summary|subject|"
+                   r"description))?(?:\s+for\s+(?:every|each|all)\s+commits?(?:\s+(?:messages?|"
+                   r"subjects?))?)?(?:(?:(?:\s*,\s*|\s*\(\s*|\s+-+\s+|\s*[–—]\s*|\s+)(?:(?:admit|"
+                   r"allow|make|with)\s+no|without(?:\s+any)?|no)\s+exceptions?\)?)?(?=[.!?]*$)|"
+                   r"(?=\s*[,;]?\s+(?:if|when|unless|except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|"
+                   r"however|other\s+than|apart\s+from|excluding|"
+                   r"without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "commits/non-conventional-subject",
             "rule": "commits",
@@ -372,8 +458,29 @@ ENTRIES = (
     },
     {
         "shape": "Never commit a secret-shaped file",
-        "pattern": r"^(?:never|do\s+not|don't)\s+(?:commit|stage|git\s+add)\s+(?:a\s+|an\s+|any\s+)?"
-                   r"(?:secrets?|credentials?|\.env|private\s+keys?)\b",
+        "pattern": r"^(?:(?:never|do\s+not|don't)\s+(?:commit|check\s+in|stage|"
+                   r"git\s+add)\s+(?:(?:a|an|any|the|your)\s+)?(?:secrets?|credentials?|"
+                   r"(?:secret|credential|secret-shaped)\s+files?)(?:\s*,?\s+(?:or|"
+                   r"and)\s+(?:(?:a|an|any|the|your)\s+)?(?:secrets?|credentials?|(?:secret|"
+                   r"credential|secret-shaped)\s+files?))?(?:\s+(?:to|into|in)\s+(?:git|"
+                   r"the\s+repo(?:sitory)?|source\s+control|version\s+control))?|(?:never|"
+                   r"do\s+not|don't)\s+add\s+(?:(?:a|an|any|the|your)\s+)?(?:secrets?|"
+                   r"credentials?|(?:secret|credential|secret-shaped)\s+files?)(?:\s*,?\s+(?:or|"
+                   r"and)\s+(?:(?:a|an|any|the|your)\s+)?(?:secrets?|credentials?|(?:secret|"
+                   r"credential|secret-shaped)\s+files?))?\s+(?:to|into)\s+(?:git|"
+                   r"the\s+repo(?:sitory)?|source\s+control|version\s+control)|"
+                   r"keep\s+(?:all\s+)?(?:(?:a|an|any|the|your)\s+)?(?:secrets?|credentials?|"
+                   r"(?:secret|credential|secret-shaped)\s+files?)(?:\s*,?\s+(?:or|"
+                   r"and)\s+(?:(?:a|an|any|the|your)\s+)?(?:secrets?|credentials?|(?:secret|"
+                   r"credential|secret-shaped)\s+files?))?\s+out\s+of\s+(?:git|"
+                   r"the\s+repo(?:sitory)?|source\s+control|version\s+control)|(?:secrets?|"
+                   r"credentials?)\s+(?:must|should)\s+never\s+be\s+(?:committed|"
+                   r"checked\s+in)(?:\s+(?:to|into|in)\s+(?:git|the\s+repo(?:sitory)?|"
+                   r"source\s+control|version\s+control))?)(?:(?:(?:\s*,\s*|\s*\(\s*|\s+-+\s+|"
+                   r"\s*[–—]\s*|\s+)(?:(?:admit|allow|make|with)\s+no|without(?:\s+any)?|"
+                   r"no)\s+exceptions?\)?)?(?=[.!?]*$)|(?=\s*[,;]?\s+(?:if|when|unless|"
+                   r"except(?:ed|ing)?|exempt(?:ed|ing|s)?|but|however|other\s+than|apart\s+from|"
+                   r"excluding|without(?!\s+(?:any\s+)?exceptions?\b))\b))",
         "detector": {
             "id": "secrets/secret-file-add",
             "rule": "secrets",

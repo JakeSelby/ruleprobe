@@ -354,7 +354,9 @@ HOSTILE = ("cd a && " * 2000 + "echo done",
            "never compact the context" + " mid-task" * 3000, "never compact " + "x" * 8000,
            "stay on one model for " + "the " * 5000, "never switch models" + " -" * 7000,
            "never hardcode " + "api " * 5000, "never write a secret into " + "a " * 7000,
-           "filter " + "every " * 5000, "never run " + "a " * 7000 + "bare")
+           "filter " + "every " * 5000, "never run " + "a " * 7000 + "bare",
+           "never commit " + "secrets or " * 3000 + "x", "use " + "head, " * 3000 + "x",
+           "keep " + "secrets " * 5000, "run the tests before " + "you " * 5000)
 
 
 class HostileInputTests(unittest.TestCase):
@@ -733,12 +735,147 @@ class BindingTests(Temp):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
 
+    #: Phrasings of the seven original shapes that story RP-S025 widened them to read, among
+    #: them RP-SP004's pattern misses (`t02`, `t04`, `p03`, `p04`, `c03`, `m03`, `s03`).
+    WIDENED = {
+        "testing/test-after-change": (
+            "Before you hand back, run the tests.",
+            "Always run the full test suite before you finish a task.",
+            "Run the whole test suite after each edit.", "Test every change before pushing.",
+            "Ensure the tests pass before committing.", "Run the tests after making changes.",
+            "Run the tests before declaring the fix done.",
+            "Before finishing, run all the tests."),
+        "verification/no-verify": (
+            "Git hooks must always run; never skip them.", "Never bypass the git hooks.",
+            "Git hooks should never be bypassed.", "Let the git hooks run.",
+            "Never skip hooks, and never use --no-verify."),
+        "git-safety/force-push-default": (
+            "Force-pushing to master is prohibited.",
+            "The default branch must never be force-pushed.",
+            "Don't force-push to main or master."),
+        "package-manager/pip-install": (
+            "Prefer uv over pip.", "Do not use pip; use uv.",
+            "Never pip install; use uv instead.", "Don't use pip.",
+            "Install dependencies with uv, not pip.", "Use uv, not pip, for every install."),
+        "transcript-hygiene/whole-file-cat": (
+            "Read narrowly: reach for head, grep or a sed range rather than cat.",
+            "Use grep -n or a line range instead of cat.", "Avoid catting an entire file.",
+            "Never load a whole file into the conversation."),
+        "commits/non-conventional-subject": (
+            "Write commit messages in the Conventional Commits style: type(scope): summary.",
+            "Write every commit subject as a Conventional Commit.",
+            "Use the Conventional Commits format for every commit."),
+        "secrets/secret-file-add": (
+            "Keep credentials out of source control.", "Never check in credentials.",
+            "Don't commit secrets or credentials to the repository.",
+            "Never add secrets to git.", "Credentials must never be committed.",
+            "Never commit secret files."),
+    }
+    #: A near-miss for each alternative of the seven: a scope, a destination, a narrower
+    #: name, an aside or a second clause the rule's detector would count past, with no
+    #: exception, permission or condition word, so only the pattern's own shape refuses it.
+    WIDENED_NEAR = {
+        "testing/test-after-change": (
+            "Run the tests before finishing a refactor.",
+            "Run the full test suite before a release.",
+            "Test every change to the parser before pushing.", "Ensure the tests pass on CI.",
+            "Before a release, run the tests.", "Run the tests after every schema change.",
+            "Run the tests after making changes to the API.",
+            "Run the tests before declaring the migration done.",
+            "Run the tests before finishing (in the monorepo).",
+            "Run the tests before pushing \u2014 on the release branch."),
+        "verification/no-verify": (
+            "Never skip hooks on the release branch.", "Never skip pre-commit hooks.",
+            "Never skip the commit hooks.", "Never disable hooks.",
+            "Never use --no-verify on main.",
+            "Never skip hooks, and never use --no-verify on main.",
+            "Let the pre-commit hooks run.", "Let the git hooks run in CI.",
+            "Pre-commit hooks must never be skipped.", "Hooks must always run.",
+            "Git hooks must always run in CI.",
+            "Git hooks must always run; never skip them on main."),
+        "git-safety/force-push-default": (
+            "Never force-push on Fridays to main.", "Never force-push to main on Fridays.",
+            "Never force-push to main \u2014 during the freeze.",
+            "Never force-push to main (during the freeze).",
+            "Never force-push to main: only to tags.",
+            "Never force-push to main or a release branch.",
+            "Force-pushing to main is forbidden during a deploy.",
+            "Main must never be force-pushed by a bot."),
+        "package-manager/pip-install": (
+            "Use uv in CI, not pip.", "Use uv to run scripts, not pip.",
+            "Use uv, not pip, in production.", "Install scripts with uv, never pip.",
+            "Prefer uv over pip in CI.", "Never use pip in the Docker image.",
+            "Don't pip install globally.", "Do not use pip; use uv for scripts.",
+            "Use uv, not pip, for every install in CI."),
+        "transcript-hygiene/whole-file-cat": (
+            "Never cat a whole log file.", "Avoid catting whole files in scripts.",
+            "Never cat a whole file into the transcript twice.",
+            "Do not read a whole file into context to find one line.",
+            "Use grep instead of cat on logs.",
+            "Read narrowly: reach for head rather than cat in CI."),
+        "commits/non-conventional-subject": (
+            "Use Conventional Commits on the release branch.",
+            "Commit messages must follow Conventional Commits on main.",
+            "Write commit messages in the Conventional Commits style on main.",
+            "Follow the Conventional Commits spec for release commits.",
+            "Use Conventional Commits for every commit on main.",
+            "Use Conventional Commits (for the changelog)."),
+        "secrets/secret-file-add": (
+            "Never commit secrets to a public repository.", "Never commit private keys.",
+            "Never commit .env files.", "Never check in private keys.",
+            "Never commit .env files (in the public repo).",
+            "Never commit secrets or private keys to a fork.",
+            "Never commit credentials to a shared drive.", "Never add .env to git.",
+            "Keep secrets out of the logs.", "Private keys must never be committed.",
+            "Secrets must never be committed to a fork."),
+    }
+
+    def test_each_widened_phrasing_binds_its_original_entry_catalog_bound(self):
+        for did, texts in self.WIDENED.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    [entry] = self.rules("# Rule\n\n%s\n" % text).rules
+                    self.assertEqual((entry.state, entry.detectors, entry.source),
+                                     ("measured", [did], "catalog"))
+
+    def test_a_widened_phrasing_s_near_miss_fails_the_pattern_itself(self):
+        patterns = dict((d.id, p) for p, d in _CATALOG)
+        for did, texts in self.WIDENED_NEAR.items():
+            for text in texts:
+                with self.subTest(text=text):
+                    self.assertIsNone(rules._EXCEPTION.search(text))
+                    self.assertIsNone(rules._CONDITION.search(text))
+                    self.assertIsNone(patterns[did].match(rules._normalize(text)))
+                    self.assertEqual(matched(text), [])
+
+    def test_an_original_shape_binds_only_a_sentence_it_covers_whole(self):
+        """Anything past the rule's own words - emphasis, an aside, a second clause - leaves
+        it unmeasured; a negated exception marker ending the sentence does not, and a clause
+        opening with an exception or condition word still matches, to be unbound by it."""
+        for text in ("Never force-push to main, whatever the reason.",
+                     "Never commit secrets (ever).", "Never skip hooks - ever.",
+                     "Run the tests before finishing; always.",
+                     "Never force-push to main during a freeze unless told."):
+            with self.subTest(text=text):
+                self.assertEqual(matched(text), [])
+        for text in ("Never commit secrets, no exceptions.", "Never skip hooks (no exceptions).",
+                     "Use uv, not pip, without exception."):
+            with self.subTest(text=text):
+                self.assertEqual(len(matched(text)), 1)
+        for text in ("Use Conventional Commits except in forks.",
+                     "Never commit secrets unless they are fake.",
+                     "Use uv, not pip, if you can."):
+            with self.subTest(text=text):
+                [entry] = self.rules("# Rule\n\n%s\n" % text).rules
+                self.assertEqual(entry.state, "unmeasured")
+                self.assertIn("exception or condition", entry.reason)
+
     def test_the_two_secret_shapes_bind_apart(self):
         self.assertEqual(matched("Never commit secrets."), ["secrets/secret-file-add"])
         self.assertEqual(matched("Never hardcode secrets in a file."),
                          ["secrets/secret-in-write"])
-        [entry] = self.rules("# Secrets\n\nNever hardcode secrets in a file. Never commit a "
-                             "`.env` file.\n").rules
+        [entry] = self.rules("# Secrets\n\nNever hardcode secrets in a file. Never commit "
+                             "credentials.\n").rules
         self.assertEqual(entry.detectors, ["secrets/secret-file-add",
                                            "secrets/secret-in-write"])
 
@@ -797,7 +934,7 @@ class BindingTests(Temp):
                              Bundle().registry(whole_catalog=True))
 
     def test_a_sentence_wrapped_across_lines_binds(self):
-        bundle = self.rules("# Git\n\nNever force-push\nto main, whatever the reason.\n")
+        bundle = self.rules("# Git\n\nNever force-push\nto the main\nbranch.\n")
         self.assertEqual(bundle.rules[0].detectors, ["git-safety/force-push-default"])
 
     def test_unpunctuated_list_items_are_sentences_of_their_own(self):
@@ -833,13 +970,16 @@ class BindingTests(Temp):
                      "# Pushing\n\nNever force-push to main without approval.\n",
                      "# Pushing\n\nNever force-push to main when others share it.\n",
                      "# Pushing\n\nNever force-push to main, apart from the first push.\n",
-                     "# Pushing\n\nNever force-push to main if CI is red.\n",
-                     "# Pushing\n\nNever force-push anything excluding drafts to main.\n"):
+                     "# Pushing\n\nNever force-push to main if CI is red.\n"):
             with self.subTest(text=text):
                 [entry] = self.rules(text).rules
                 self.assertEqual((entry.state, entry.detectors, entry.source),
                                  ("unmeasured", [], None))
                 self.assertIn("exception or condition", entry.reason)
+        # An exception word inside the rule's own span leaves a sentence no pattern covers.
+        [entry] = self.rules("# Pushing\n\nNever force-push anything excluding drafts to "
+                             "main.\n").rules
+        self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
         [entry] = self.rules("# Pushing\n\nNever force-push to main. Rebase instead.\n").rules
         self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
 
@@ -909,14 +1049,15 @@ class BindingTests(Temp):
                      "  Squash first.\n- Never force-push to main.\n",
                      "# Git\n\nThese apply except on release branches.\n\n"
                      "- Keep commits small.\n- Never force-push to main.\n",
-                     "# Pushing\n\nNever force-push to main, incl. tags, e.g. v1.2. "
-                     "Release tags are fine.\n",
                      "# Git\n\nUse uv, not pip. Never force-push to main. Keep commits "
                      "small. Rebase often. Tags are fine.\n"):
             with self.subTest(text=text):
                 [entry] = self.rules(text).rules
                 self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
                 self.assertIn("exception or condition", entry.reason)
+        [entry] = self.rules("# Pushing\n\nNever force-push to main, incl. tags, e.g. v1.2. "
+                             "Release tags are fine.\n").rules
+        self.assertEqual((entry.state, entry.detectors), ("unmeasured", []))
         [entry] = self.rules("# Git\n\nKeep it tidy:\n\n- Keep commits small.\n"
                              "- Never force-push to main.\n").rules
         self.assertEqual(entry.detectors, ["git-safety/force-push-default"])
@@ -947,12 +1088,14 @@ class BindingTests(Temp):
         for text in ("Never force-push to main without exception approval from the "
                      "release lead.",
                      "Never force-push to main, with no exception ticket open.",
-                     "Never force-push to main. No exceptions granted by email."):
+                     "Never force-push to main. No exceptions granted by email.",
+                     "Never force-push to main - without exception - ever.",
+                     "Never force-push to main, no exceptions; ask first."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
-        for text in ("Never force-push to main - without exception - ever.",
+        for text in ("Never force-push to main - without exception.",
                      "Never force-push to main (no exceptions).",
-                     "Never force-push to main, no exceptions; ask first.",
+                     "Never force-push to main, no exceptions.",
                      "Never force-push to main without exception"):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), ["git-safety/force-push-default"])
@@ -1025,7 +1168,7 @@ class BindingTests(Temp):
             ("h05", "Hooks", "Never skip hooks.\nAdmit no exception.", [verify]),
             ("f04", "Git safety", "Never force-push to main, without exception.", [force]),
             ("x01", "Git", "- Never force-push to main.\n- Never skip pre-commit hooks.\n"
-                           "- Use Conventional Commits.", [verify, force, commits]),
+                           "- Use Conventional Commits.", [force, commits]),
             ("x02", "Python work", "Use uv, not pip.\nRun the tests before finishing.",
              [tests, pip]),
             ("x04", "Commits", "Use Conventional Commits.\nNever commit secrets.\n"
@@ -1069,7 +1212,7 @@ class BindingTests(Temp):
                 self.assertEqual(matched("Never force-push feature branches %s main is "
                                          "protected." % dashes), [])
                 self.assertEqual(matched("Use uv for scripts %s not pip." % dashes), [])
-        self.assertEqual(len(matched("Never force-push to main-line or main.")), 1)
+        self.assertEqual(matched("Never force-push to main-line or main."), [])
 
     def test_a_pattern_never_spans_a_clause_break(self):
         for text in ("Never force-push feature branches; main is protected.",
@@ -1077,12 +1220,12 @@ class BindingTests(Temp):
                      "Never force-push feature branches - main is protected.",
                      "Never force-push feature branches \u2014 main is protected.",
                      "Run the tests, and commit before lunch.",
-                     "Use uv for scripts, and poetry - never pip."):
+                     "Use uv for scripts, and poetry - never pip.",
+                     "Use uv for scripts, never pip."):
             with self.subTest(text=text):
                 self.assertEqual(matched(text), [])
         for text in ("Never force-push to main.", "Use uv, not pip, for installs.",
                      "Install with uv, never with sudo pip.",
-                     "Use uv for scripts, never pip.",
                      "Run the tests before you finish."):
             with self.subTest(text=text):
                 self.assertEqual(len(matched(text)), 1)

@@ -21,10 +21,13 @@ import unittest
 from unittest import mock
 
 from ruleprobe import DEFAULT, Registry, contract_data
+from ruleprobe import rules
 from ruleprobe.cli import main
 from ruleprobe.detectors.catalog import ENTRIES
 from ruleprobe.matchers import compile_detector
 from ruleprobe.registry import Detector
+from ruleprobe.validity import (HELDOUT_FILE, HELDOUT_HEADING, HELDOUT_RECALL_FLOOR,
+                                SHIPPED_HELDOUT_SHA256, load_heldout, score_heldout)
 from ruleprobe.validity import (BINDING_RECALL_FLOOR, SHIPPED_ZOO_SHA256, ZOO_FILE, CorpusError, DEFAULT_FLOOR,
                                 Score, below_floor, binding_as_dict, binding_failures,
                                 binding_table, corpus_dir, event_key, hit_key, load_corpus,
@@ -588,7 +591,8 @@ class CliTests(unittest.TestCase):
 BOUND = {"id": "b1", "heading": "Testing",
          "lines": [["Run the tests before finishing.", "testing/test-after-change"]]}
 MISSED = {"id": "b2", "heading": "Testing",
-          "lines": [["Before you hand back, run the tests.", "testing/test-after-change"]]}
+          "lines": [["Hand back no change you have not tested.",
+                     "testing/test-after-change"]]}
 FALSE_BIND = {"id": "b3", "heading": "Pushing",
               "lines": [["Never force-push to main.", None]]}
 NEAR = {"id": "b4", "heading": "Pushing",
@@ -809,7 +813,7 @@ class ShippedBindingTests(unittest.TestCase):
 
     def test_the_shipped_zoo_is_package_data_in_the_shipped_corpus(self):
         self.assertTrue(os.path.isfile(os.path.join(corpus_dir(), ZOO_FILE)))
-        self.assertEqual((self.binding.sections, self.binding.labels), (136, 172))
+        self.assertEqual((self.binding.sections, self.binding.labels), (201, 240))
 
     def test_the_shipped_binder_makes_no_false_bind_on_the_zoo(self):
         self.assertEqual(self.binding.false_binds, [])
@@ -832,7 +836,7 @@ class ShippedBindingTests(unittest.TestCase):
         self.assertIn("detectors", data)
         binding = data["binding"]
         self.assertEqual((binding["total"]["tp"], binding["total"]["fp"],
-                          binding["total"]["fn"]), (40, 0, 16))
+                          binding["total"]["fn"]), (62, 0, 28))
         self.assertEqual(binding["total"]["precision"], 1.0)
         self.assertEqual(binding["total"]["source"], "zoo")
         self.assertEqual(set(row["source"] for row in binding["entries"].values()),
@@ -845,6 +849,117 @@ class ShippedBindingTests(unittest.TestCase):
         main(["corpus", "--no-config", "--json"], out=first)
         main(["corpus", "--no-config", "--json"], out=second)
         self.assertEqual(first.getvalue(), second.getvalue())
+
+
+class HeldOutTests(unittest.TestCase):
+    """The zoo's `v` items: a held-out set written and hashed before the seven original
+    catalog patterns were widened, so the gain is measured on phrasings they were not written
+    against. The hash holds the set still; a change to it is a new set, not a new label."""
+
+    #: sha256 of the `v` items as canonical JSON (sorted keys, no spaces, UTF-8), recorded
+    #: before any pattern changed.
+    SHA256 = "79acc3d3ec1a09dc2839c8fd96f00d16402fdeed5d0b786ebea1230132bcbb2a"
+    #: The kinds whose near-miss only the pattern itself can refuse.
+    SHAPE_KINDS = ("other-tool", "narrow-scope", "narrow-command", "narrow-destination",
+                   "other-branch", "other-sense", "topic", "mention")
+    #: The binder's recall on the set as measured, rounded down; it only goes up.
+    RECALL = 0.61
+
+    @classmethod
+    def setUpClass(cls):
+        os.environ.pop("RULEPROBE_CORPUS", None)
+        cls.items = [item for item in load_zoo() if item["id"].startswith("v")]
+
+    def test_the_held_out_set_is_the_one_hashed_before_the_patterns_changed(self):
+        canonical = json.dumps(self.items, sort_keys=True, ensure_ascii=False,
+                               separators=(",", ":")).encode("utf-8")
+        self.assertEqual(hashlib.sha256(canonical).hexdigest(), self.SHA256)
+
+    def test_it_holds_forty_sentences_and_half_its_near_misses_fail_on_shape_alone(self):
+        self.assertGreaterEqual(len(self.items), 40)
+        near = [item for item in self.items if item["kind"] != "positive"]
+        shape = [item for item in near if item["kind"] in self.SHAPE_KINDS]
+        self.assertGreaterEqual(2 * len(shape), len(near))
+        for item in near:
+            self.assertEqual(set(label for _text, label in item["lines"]), set([None]))
+            self.assertIsNone(item.get("heading_label"))
+        for item in shape + [i for i in self.items if i["kind"] == "positive"]:
+            with self.subTest(item=item["id"]):
+                for text in [item["heading"]] + [line for line, _label in item["lines"]]:
+                    self.assertIsNone(rules._EXCEPTION.search(text))
+                    self.assertIsNone(rules._CONDITION.search(text))
+
+    def test_the_binder_makes_no_false_bind_on_it_and_holds_its_recall(self):
+        binding = score_binding(zoo=self.items)
+        self.assertEqual(binding.false_binds, [])
+        self.assertEqual(binding.total.positives, 34)
+        self.assertGreaterEqual(binding.total.recall, self.RECALL)
+        self.assertEqual(self.RECALL, int(binding.total.recall * 100) / 100.0)
+
+
+class IndependentHeldOutTests(Temp):
+    """`rules-heldout.json`: 80 sentences written from each detector's claim by an author who
+    never saw the patterns, shipped as written. The binder's first measurement on it, before
+    any change it prompted, was recall 0.12 (5/40) with no false bind."""
+
+    def heldout_corpus(self, raw):
+        base = self.corpus("version: 1\nsessions: []\n", {})
+        with open(os.path.join(base, HELDOUT_FILE), "w", encoding="utf-8") as handle:
+            handle.write(raw)
+        return base
+
+    def test_the_shipped_set_is_the_one_its_author_froze(self):
+        path = os.path.join(corpus_dir(), HELDOUT_FILE)
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), SHIPPED_HELDOUT_SHA256)
+        items = load_heldout()
+        self.assertEqual(len(items), 80)
+        self.assertEqual(sum(1 for item in items if item["lines"][0][1]), 40)
+        self.assertEqual(set(item["heading"] for item in items), set([HELDOUT_HEADING]))
+
+    def test_the_binder_makes_no_false_bind_on_it_and_holds_its_recall(self):
+        binding = score_heldout()
+        self.assertEqual(binding.false_binds, [])
+        self.assertEqual(binding_failures(binding), [])
+        self.assertEqual(binding.recall_floor, HELDOUT_RECALL_FLOOR)
+        self.assertEqual(HELDOUT_RECALL_FLOOR, int(binding.total.recall * 100) / 100.0,
+                         "held-out recall is now %.4f: raise HELDOUT_RECALL_FLOOR"
+                         % binding.total.recall)
+
+    def test_a_set_of_my_own_is_scored_with_no_floor_and_its_false_bind_fails(self):
+        raw = json.dumps([{"id": "a", "text": "Never force-push to main.", "label": None,
+                           "why": "a near-miss for the test"},
+                          {"id": "b", "text": "Keep it tidy.", "label":
+                           "git-safety/force-push-default", "why": "a miss"}])
+        binding = score_heldout(self.heldout_corpus(raw))
+        self.assertIsNone(binding.recall_floor)
+        self.assertEqual(binding.false_binds, [("a", "git-safety/force-push-default")])
+        self.assertEqual(binding.misses, [("b", "git-safety/force-push-default")])
+        self.assertIn("binder over the independent held-out set: 2 sections",
+                      binding_table(binding))
+
+    def test_no_set_in_a_corpus_of_my_own_is_none_and_a_malformed_one_is_an_error(self):
+        self.assertIsNone(score_heldout(self.corpus("version: 1\nsessions: []\n", {})))
+        for raw in ('{"items": []}', '[{"id": "a", "text": "x", "label": null, "extra": 1}]',
+                    '[{"id": "a", "text": "two\\nlines", "label": null}]',
+                    '[{"id": "a", "text": "x"}, {"id": "a", "text": "y"}]'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(CorpusError):
+                    load_heldout(self.heldout_corpus(raw))
+
+    def test_the_corpus_command_prints_it_and_carries_it_in_the_json(self):
+        os.environ.pop("RULEPROBE_CORPUS", None)
+        out = io.StringIO()
+        self.assertEqual(main(["corpus", "--no-config", "--json"], out=out), 0)
+        heldout = json.loads(out.getvalue())["heldout"]
+        self.assertEqual((heldout["zoo"], heldout["sections"], heldout["failures"]),
+                         (HELDOUT_FILE, 80, []))
+        self.assertEqual(heldout["recall_floor"], HELDOUT_RECALL_FLOOR)
+        out = io.StringIO()
+        self.assertEqual(main(["corpus", "--no-config"], out=out), 0)
+        self.assertIn("binder over the independent held-out set: 80 sections, 80 labels",
+                      out.getvalue())
 
 
 class FoldTests(Temp):
