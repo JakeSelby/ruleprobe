@@ -475,14 +475,15 @@ use for any detector, so a refused write of a key is no `secrets/secret-in-write
 refused edit opens no `testing/test-after-change` opportunity. A call that ran and failed
 still counts: a test run that exits non-zero is a test run. Each runtime records the
 difference its own way. Claude Code marks a refused call's result (`toolDenialKind`, or a fixed
-refusal text in older versions). Codex writes a fixed output, `exec command rejected by user`,
-`patch rejected by user` or `aborted`. Gemini CLI records a `status`, and only `success` counts.
+refusal text in older versions, a PreToolUse hook's block included). Codex writes a fixed
+output, `exec command rejected by user`, `patch rejected by user`, `aborted`, or
+`apply_patch verification failed: ...` for a patch that never applied. Gemini CLI records a `status`, and only `success` counts.
 Where a transcript cannot tell a call stopped part-way from one that never started, it is left
 out: a call the user interrupted on Claude Code or Codex, and any Gemini call `cancelled` or
 `error`. So an interrupted test run no longer counts as following a change: like a runner the
 detector does not recognise, it can only lower `testing/test-after-change`'s followed share,
-which is why that share is read as a floor. A Codex refusal worded some other way, such as an exec policy's own reason, is not
-recognised and still counts.
+which is why that share is read as a floor. A refusal worded some other way is not recognised and still counts: a Codex exec policy's own
+reason, and on Claude Code a hook's own deny reason on a line without `toolDenialKind`.
 
 **Gemini CLI records less, so it is measured less.** Its sessions are read into the same
 events, with `write_file` read as `Write`, `replace` as `Edit` and `run_shell_command` as

@@ -15,7 +15,9 @@ is the session's; `session_key(path)` reads it without reading the rest.
 
 A call that never ran makes no event, and neither does its output. Codex answers such a call
 with a fixed output: `exec command rejected by user` or `patch rejected by user` when the user
-declined it, `patch rejected: ...` when the approval settings refused a patch, and `aborted`
+declined it, `patch rejected: ...` when the approval settings refused a patch,
+`apply_patch verification failed: ...` when a patch did not match the files and was never
+applied, and `aborted`
 when the turn was interrupted before the call returned. An interrupted call may have started, but
 the rollout does not say, so it is left out: a measure that under-counts. Any other output is a
 call that ran, a command that exited non-zero included. A refusal Codex words otherwise, such as
@@ -34,9 +36,9 @@ from ..events import Session, result_text, text_of
 ROOT = os.path.join("~", ".codex", "sessions")
 
 _TOOL_NAMES = {"exec_command": "Bash", "spawn_agent": "Agent"}
-#: The outputs Codex writes for a call that never ran, whole, and the prefix of one.
+#: The outputs Codex writes for a call that never ran, whole, and the prefixes of others.
 _NOT_RUN = frozenset(("exec command rejected by user", "patch rejected by user", "aborted"))
-_NOT_RUN_PREFIX = "patch rejected:"
+_NOT_RUN_PREFIXES = ("patch rejected:", "apply_patch verification failed:")
 
 
 def transcripts(root=None):
@@ -185,7 +187,7 @@ def _never_ran(output):
     if not isinstance(output, str):
         return False
     output = output.strip()
-    return output in _NOT_RUN or output.startswith(_NOT_RUN_PREFIX)
+    return output in _NOT_RUN or output.startswith(_NOT_RUN_PREFIXES)
 
 
 def _text(payload):

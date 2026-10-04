@@ -157,6 +157,10 @@ class ClaudeCodeTests(Temporary):
             ("The user doesn't want to take this action right now. STOP what you are doing.",
              {}),
             ("[Request interrupted by user for tool use]", {}),
+            ("[Tool call not completed: an approval request was still unanswered.]", {}),
+            ("[Tool call did not complete: the turn was ended to deliver a message.]", {}),
+            ("[Tool call interrupted: the session ended.]", {}),
+            ("PreToolUse:Write hook error: [./guard.sh]: writes to deploy/ are blocked", {}),
             ("Permission to use Write has been denied.", {}),
             ("<tool_use_error>InputValidationError: content is missing</tool_use_error>", {}),
             ("<tool_use_error>File has not been read yet.</tool_use_error>", {}),
@@ -175,6 +179,26 @@ class ClaudeCodeTests(Temporary):
     def test_a_result_that_is_not_an_error_counts_whatever_it_says(self):
         self.write_secret("Permission to use this file is granted.", is_error=False)
         self.assertEqual(uses(self.read()), ["w1"])
+
+    def test_a_hook_error_after_the_tool_ran_counts(self):
+        self.write_secret("PostToolUse:Write hook error: [./lint.sh]: formatting failed")
+        self.assertEqual(uses(self.read()), ["w1"])
+
+    def test_each_result_on_a_line_of_several_is_decided_by_its_own_text(self):
+        self.line("assistant", [
+            {"type": "tool_use", "id": "w1", "name": "Write",
+             "input": {"file_path": "/workspace/demo-repo/a.ini", "content": SECRET}},
+            {"type": "tool_use", "id": "t1", "name": "Bash",
+             "input": {"command": "python3 -m pytest -q"}}])
+        self.line("user", [
+            {"type": "tool_result", "tool_use_id": "w1", "is_error": True,
+             "content": "The user doesn't want to proceed with this tool use."},
+            {"type": "tool_result", "tool_use_id": "t1", "is_error": True,
+             "content": "Exit code 1\n1 failed"}],
+            toolDenialKind="user-rejected", toolUseResult="User rejected tool use")
+        session = self.read()
+        self.assertEqual((uses(session), results(session)), (["t1"], ["t1"]))
+        self.assertNotIn(SECRET_IN_WRITE, run(session.events))
 
     def test_an_error_the_running_tool_raised_counts(self):
         self.write_secret("<tool_use_error>Error calling tool (Write): EACCES: permission "
@@ -255,6 +279,25 @@ class CodexTests(Temporary):
                 session = self.read()
                 self.assertEqual(uses(session), ["t1"])
                 self.assertEqual(tested(session.events), [])
+
+    def test_a_patch_that_failed_verification_opens_no_opportunity(self):
+        self.patch("p1", "apply_patch verification failed: Failed to find expected lines in "
+                         "src/app.py")
+        self.exec_call("t1", "pytest -q", "Process exited with code 0\nOutput:\n4 passed")
+        session = self.read()
+        self.assertEqual(uses(session), ["t1"])
+        self.assertEqual(tested(session.events), [])
+
+    def test_output_that_only_contains_a_refusal_word_ran(self):
+        for output in ("Process exited with code 1\nOutput:\naborted",
+                       "Process exited with code 0\nOutput:\nexec command rejected by user",
+                       "Output:\napply_patch verification failed: in a log line"):
+            with self.subTest(output=output):
+                self.lines = self.lines[:3]
+                self.exec_call("c1", "find /", output)
+                session = self.read()
+                self.assertEqual(uses(session), ["c1"])
+                self.assertIn(UNFILTERED_FIND, run(session.events))
 
     def test_a_command_that_ran_counts_whatever_its_exit_code(self):
         self.exec_call("c1", "find /", "Process exited with code 1\nOutput:\nfind: denied")

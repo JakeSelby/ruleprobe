@@ -23,8 +23,12 @@ A call that never ran makes no event, and neither does its result. Claude Code a
 a call with an error result: since 2.1 the line carries `toolDenialKind` (`user-rejected`,
 `cancelled`, `permission-rule`, `interrupted`), and before it the result text is one of the
 fixed refusals - the user rejecting or cancelling the call, a `Permission to use ...` denial,
-an interrupt marker - or a `<tool_use_error>` from a check made before the tool ran, such as
-input validation or a cancelled sibling call. An interrupted call may have started, but the
+a `PreToolUse:<tool> hook error: ...` block, an interrupt marker - or a `<tool_use_error>` from a
+check made before the tool ran, such as input validation or a cancelled sibling call. The
+line's own markers, `toolDenialKind` and `toolUseResult`, are read only on a line holding one
+result: on a line holding several, each result is decided by its own text, so a refusal never
+drops the sibling that ran. A hook's own deny reason, free text, is recognised only by
+`toolDenialKind`. An interrupted call may have started, but the
 line does not say, so it is left out: a measure that under-counts. An error the tool itself
 raised while running (`<tool_use_error>Error calling tool ...`) and a command that exits
 non-zero (`Exit code 1`) are calls that ran, and count.
@@ -38,6 +42,7 @@ an old one by `since` before reporting the rest.
 """
 import json
 import os
+import re
 
 from ..events import Session, result_text, text_of
 
@@ -54,6 +59,8 @@ _NOT_RUN_PREFIXES = (
     "[Tool call interrupted",
     "Permission to use ",
 )
+#: A PreToolUse hook's blocking error, as Claude Code words it: `PreToolUse:<tool> hook error: `.
+_HOOK_BLOCKED = re.compile(r"PreToolUse:\S+ hook error: ")
 _TOOL_USE_ERROR = "<tool_use_error>"
 #: How a `<tool_use_error>` raised by the running tool itself begins.
 _RAN_AND_FAILED = "Error calling tool"
@@ -115,7 +122,7 @@ def read(path, empty=False):
             for block in results:
                 tool_use_id = block.get("tool_use_id") or ""
                 if isinstance(tool_use_id, str) and tool_use_id \
-                        and _never_ran(entry, block):
+                        and _never_ran(entry if len(results) == 1 else {}, block):
                     not_run.add(tool_use_id)
                     continue
                 name = tool_names.get(tool_use_id, "")
@@ -265,7 +272,8 @@ def _identity(entries):
 
 
 def _never_ran(entry, block):
-    """Whether an error result answers a call that never ran: see the module docstring."""
+    """Whether an error result answers a call that never ran: see the module docstring.
+    `entry` is the line, for its markers, or `{}` when the line holds other results too."""
     if block.get("is_error") is not True:
         return False
     kind = entry.get("toolDenialKind")
@@ -278,7 +286,7 @@ def _never_ran(entry, block):
     text = text_of(content).lstrip()
     if text.startswith(_TOOL_USE_ERROR):
         return not text[len(_TOOL_USE_ERROR):].lstrip().startswith(_RAN_AND_FAILED)
-    return text.startswith(_NOT_RUN_PREFIXES)
+    return text.startswith(_NOT_RUN_PREFIXES) or bool(_HOOK_BLOCKED.match(text))
 
 
 def _prompt_text(content):
