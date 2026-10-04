@@ -431,6 +431,31 @@ class UndecidedTests(unittest.TestCase):
                 self.assertEqual(count(negated(matcher), [bash(UNREAD_ENV)]), 0)
                 self.assertEqual(count(negated(matcher), [bash(parsed_false)]), 1)
 
+    def test_redirect_and_sole_segment_are_undecided_in_a_group_never_closed(self):
+        open_group = [bash("{ cat a.txt; echo done")]
+        for key, value in (("redirect", False), ("redirect", True), ("sole_segment", True),
+                           ("sole_segment", False)):
+            matcher = {"command": {"starts_with": "cat", key: value}}
+            with self.subTest(key=key, value=value):
+                self.assertEqual(count(matcher, open_group), 0)
+                self.assertEqual(count(negated(matcher), open_group), 0)
+        # A key the group cannot change still decides: `cat` has one operand either way.
+        self.assertEqual(count({"command": {"starts_with": "cat", "arg_count": 2,
+                                            "redirect": False}}, open_group), 0)
+        self.assertEqual(count(negated({"command": {"starts_with": "cat", "arg_count": 2,
+                                                    "redirect": False}}), open_group), 1)
+
+    def test_a_group_decides_redirect_and_sole_segment_once_it_closes(self):
+        cat = {"starts_with": "cat"}
+        redirected = [bash("{ cat a.txt; } > out.txt")]
+        piped = [bash("{ cat a.txt; } | head")]
+        self.assertEqual(count({"command": dict(cat, redirect=True)}, redirected), 1)
+        self.assertEqual(count({"command": dict(cat, redirect=False)}, redirected), 0)
+        self.assertEqual(count({"command": dict(cat, sole_segment=False)}, piped), 1)
+        self.assertEqual(count({"command": dict(cat, sole_segment=True)}, piped), 0)
+        self.assertEqual(count({"command": dict(cat, sole_segment=True, redirect=False)},
+                               [bash("{ cat a.txt; }")]), 1)
+
     def test_regex_and_unparsed_keep_their_answer_over_a_skipped_command(self):
         skipped = [bash(SKIPPED[1])]
         self.assertEqual(count({"command": {"regex": "^pytest"}}, skipped), 1)

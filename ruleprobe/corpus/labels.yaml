@@ -19,7 +19,7 @@ version: 1
 sessions:
 
   - session: hygiene-cat.jsonl
-    note: five files read whole, and six ways of not reading one whole
+    note: seven files read whole, and eleven ways of not reading one whole
     labels:
       - at: "1:tu-c1"
         fire: [transcript-hygiene/whole-file-cat]
@@ -52,6 +52,27 @@ sessions:
       - at: "4:tu-n6"
         near: [transcript-hygiene/whole-file-cat]
         note: a filtered grep, the narrow read
+      - at: "5:tu-g1"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a cat inside a brace group whose output is redirected to a file
+      - at: "5:tu-g2"
+        near: [transcript-hygiene/whole-file-cat]
+        note: the same inside a subshell
+      - at: "5:tu-g3"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a nested group, redirected by the group around it
+      - at: "5:tu-g4"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a group piped into head, so only the first lines reach the window
+      - at: "5:tu-g5"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: the group is redirected, but the cat after it is not in it
+      - at: "5:tu-g6"
+        near: [transcript-hygiene/whole-file-cat]
+        note: a group that never closes, so where its output goes is undecided
+      - at: "5:tu-g7"
+        fire: [transcript-hygiene/whole-file-cat]
+        note: a group with nothing after it, so the file reaches the window
 
   - session: hygiene-find.jsonl
     note: a Codex rollout - five unfiltered walks and nine narrowed ones, and two unfiltered walks that never ran - one the user rejected, one an interrupt aborted - which make no event and carry no label

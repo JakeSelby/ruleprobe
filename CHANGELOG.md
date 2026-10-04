@@ -90,6 +90,14 @@ All notable changes to this project are documented here. The format follows
 - A JSON detector or bindings file nested too deeply is a finding naming the file, not a
   `RecursionError`, and one repeating a key in an object is a finding rather than read with the
   last value ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
+- `transcript-hygiene/whole-file-cat` no longer counts a `cat` inside a `{ ...; }` group or
+  `( ... )` subshell whose output is redirected or piped, such as
+  `{ cat header.txt; echo; } > out.txt`, which puts nothing in the transcript;
+  `transcript-hygiene/unfiltered-find` skips a `find` in one the same way. The shell parse reads
+  a redirect after a group as a redirect of every command in it, so the `redirect` and
+  `sole_segment` keys of a `command` matcher in your own detectors read groups the same way, and
+  are undecided, so no hit, in a group the parse cannot follow, such as one never closed
+  ([#111](https://github.com/JakeSelby/ruleprobe/issues/111)).
 
 ## 0.2.0 (2026-09-24)
 

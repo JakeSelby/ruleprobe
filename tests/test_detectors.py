@@ -24,6 +24,14 @@ CASES = {
         ([bash("cat a b")], 0),
         ([bash("cat \\\n  foo.txt | grep x")], 0),
         ([bash("cat \\\n  foo.txt")], 1),
+        # A group's redirect or pipe is the cat's; a group nothing follows is not.
+        ([bash("{ cat header.txt; echo; } > out.txt")], 0),
+        ([bash("( cat header.txt; echo ) > out.txt")], 0),
+        ([bash("{ { cat header.txt; }; echo; } > out.txt")], 0),
+        ([bash("{ cat notes.txt; echo; } | head -20")], 0),
+        ([bash("{ echo x; } > out.txt; cat notes.txt")], 1),
+        ([bash("{ cat notes.txt; }")], 1),
+        ([bash("{ cat notes.txt; echo done")], 0),
     ],
     "transcript-hygiene/unfiltered-find": [
         ([bash("find .")], 1),
@@ -33,6 +41,7 @@ CASES = {
         ([bash("find . -regex '.*py'")], 0),
         ([bash("find . -exec cat {} \\;")], 0),
         ([bash("find . > list.txt")], 0),
+        ([bash("{ find .; } > list.txt")], 0),
     ],
     "verification/no-verify": [
         ([bash("git commit --no-verify -m 'feat(x): y'")], 1),
