@@ -348,12 +348,101 @@ def no_verify(events, ctx):
     return hits
 
 
-def _secret_in(text):
-    return any(re.search(p, text) for p in SECRET_PATTERNS)
+# What `secrets/secret-in-write` counts: a live credential, never a mention of one.
+# `SECRET_PATTERNS` stays broad because `redact` prints through it; these are the detection-side
+# filter, each one narrower than a shape `redact` already removes, so anything counted here is
+# redacted when `explain` prints it. A credential counts only as an issuer's shape with a value
+# behind it: an AWS key id, a key name ending in `aws_secret_access_key` or `client_secret`
+# assigned a literal, a Bearer, GitHub, Slack, OpenAI or Anthropic token, or a private-key header
+# followed by a body. A value must not be a placeholder (`xxx`, `your`, `changeme`, `redacted`,
+# `fake`, a value naming itself a secret or token...), a run of one repeated character, a
+# variable name (`UPPER_SNAKE`, `lower_snake`, `a.dotted.path`) or an expression (`${VAR}`,
+# `os.environ[...]`, a call). A token after a prefix must also mix letters and digits, the only
+# entropy check, chosen because it is exact; an AWS key id need not, since about one in thirty
+# real ones is all letters. A line that reads as a pattern source or as redaction code -
+# `re.compile(`, a character class, a quantifier, a regex escape, a `redact(` or `mask(` call -
+# counts nothing. A pattern's left edge, and an unquoted value's stop at `=`, keep a match from
+# starting inside another one's value, so a long run is scanned once.
+_PLACEHOLDER = (r"(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|replace|insert"
+                r"|secret|passw|token)")
+_PATTERN_OR_REDACTION = (
+    r"(?:(?<![A-Za-z0-9_])re\.(?:compile|search|match|fullmatch|findall|finditer|sub|split)\("
+    r"|[Rr]eg[Ee]xp?|\\[dwsDWS]|\[\^?[A-Za-z0-9]-[A-Za-z0-9]|\{[0-9]+(?:,[0-9]*)?\}"
+    r"|(?<![A-Za-z0-9])(?i:redact|scrub|sanitiz|censor|mask)[A-Za-z_]*\()")
+# A word that marks the value on its line as fake. It counts only in a write to a test path.
+_MARKED_FAKE = r"(?i:(?<![A-Za-z0-9_])(?:fake|dummy|not[ _-]a[ _-]real)(?![A-Za-z0-9_]))"
+# Between a key name and its value: an optional closing quote, escaped or not, and bracket.
+_KEY_GAP = r"(?:\\?[\"'])?\]?[ \t]*[:=][ \t]*"
+
+
+def _value(chars, mixed=True, name=False):
+    """Lookaheads at the start of a value made of `chars`."""
+    out = "(?!%s*%s)" % (chars, _PLACEHOLDER)
+    if name:
+        out += ("(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*"
+                "|(?:[A-Za-z_][A-Za-z0-9_]*\\.)+[A-Za-z_][A-Za-z0-9_]*)(?!%s))" % chars)
+    if mixed:
+        out += "(?=%s*[0-9])(?=%s*[A-Za-z])" % (chars, chars)
+    return out
+
+
+def _on_a_plain_line(token, also=""):
+    """`token` on a line that holds no pattern source, no redaction code and no `also`."""
+    return r"(?m)^(?=[^\n]*?%s)(?![^\n]*(?:%s%s))" % (
+        token, _PATTERN_OR_REDACTION, "|" + also if also else "")
+
+
+_QUOTED = r"[^\s\"'\\<>${}%]"
+# An unquoted value stops at `=`, which only its padding may end in, so a key inside one value's
+# run starts a value of its own rather than a second scan of the same run.
+_UNQUOTED = r"[A-Za-z0-9/+_~.-]"
+_UNQUOTED_END = r"={0,2}\.?(?=[\s\"'`,;)\]}]|\\[nrt\"]|$)"
+# A key name ending in the secret's own name: `GOOGLE_CLIENT_SECRET` as much as `client_secret`.
+# `[_]` keeps the name out of a grep for it, as `SECRET_PATTERNS` splits it.
+_AWS_SECRET_KEY = r"(?<![A-Za-z0-9])(?i:aws_secret[_]access_key)"
+_CLIENT_SECRET_KEY = r"(?<![A-Za-z0-9])(?i:client_secret)"
+_LIVE_TOKENS = (
+    r"(?<![A-Za-z0-9])AKIA" + _value("[A-Z0-9]", mixed=False)
+    + r"(?!([A-Z0-9])\1{15})[A-Z0-9]{16}(?![A-Za-z0-9])",
+    _AWS_SECRET_KEY + _KEY_GAP + r"(?:\\?[\"'])?" + _value("[A-Za-z0-9/+]")
+    + r"[A-Za-z0-9/+]{20,}={0,2}(?![A-Za-z0-9/+=_.$({\[-])",
+    r"(?<![A-Za-z0-9])Bearer " + _value("[A-Za-z0-9._-]", name=True) + r"[A-Za-z0-9._-]{20,}",
+    _CLIENT_SECRET_KEY + _KEY_GAP + r"(\\?[\"'])" + _value(_QUOTED, mixed=False, name=True)
+    + r"(?!(%s)\2*\1)%s{8,}\1" % (_QUOTED, _QUOTED),
+    _CLIENT_SECRET_KEY + _KEY_GAP + _value(_UNQUOTED, name=True) + _UNQUOTED + "{20,}"
+    + _UNQUOTED_END,
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\r?\n|\\r?\\n)" + _value("[A-Za-z0-9+/=]", mixed=False)
+    + r"(?!([A-Za-z0-9+/=])\1*(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=]{16,}",
+    r"(?<![A-Za-z0-9_-])xox[bp]-" + _value("[A-Za-z0-9-]") + r"[0-9]+-[A-Za-z0-9]{4,}",
+    r"(?<![A-Za-z0-9_])gh[pousr]_" + _value("[A-Za-z0-9]") + r"[A-Za-z0-9]{20,}",
+    r"(?<![A-Za-z0-9_])github_pat_" + _value("[A-Za-z0-9_]") + r"[A-Za-z0-9_]{20,}",
+    r"(?<![A-Za-z0-9_-])sk-" + _value("[A-Za-z0-9]") + r"[A-Za-z0-9]{20,}",
+    r"(?<![A-Za-z0-9_-])sk-(?:ant|proj)-" + _value("[A-Za-z0-9_-]") + r"[A-Za-z0-9_-]{20,}",
+)
+_LIVE_SECRET_PATTERNS = [_on_a_plain_line(token) for token in _LIVE_TOKENS]
+# The same in a write to a test path, where a token on a line that calls it fake counts nothing.
+_LIVE_SECRET_PATTERNS_IN_TESTS = [_on_a_plain_line(token, _MARKED_FAKE) for token in _LIVE_TOKENS]
+_LIVE_SECRETS = [re.compile(p) for p in _LIVE_SECRET_PATTERNS]
+_LIVE_SECRETS_IN_TESTS = [re.compile(p) for p in _LIVE_SECRET_PATTERNS_IN_TESTS]
+# A test path by the common conventions: a `tests`, `__tests__`, `testdata`, `fixtures`,
+# `__fixtures__` or `__mocks__` folder, Maven's `src/test`, or a test file's own name. A bare
+# `test` or `spec` folder is not one, since `/tmp/test/` is as likely.
+_TEST_PATH_PATTERN = (
+    r"(?:^|[/\\])(?:tests|__tests__|testdata|fixtures|__fixtures__|__mocks__|src[/\\]test)[/\\]"
+    r"|(?:^|[/\\])(?:test_[^/\\]*\.py|[^/\\]*_(?:test|spec)\.[A-Za-z0-9]+"
+    r"|[^/\\]*\.(?:test|spec)\.[A-Za-z0-9]+|conftest\.py)$")
+_TEST_PATH = re.compile(_TEST_PATH_PATTERN)
+
+
+def _secret_in(text, compiled=None):
+    return any(rx.search(text) for rx in (_LIVE_SECRETS if compiled is None else compiled))
 
 
 def secret_in_write(events, ctx):
-    """A secret-shaped string written to a file or into a heredoc body."""
+    """A live credential written to a file or into a heredoc body: an issuer's shape with a
+    value behind it, never a variable name, a placeholder, a pattern source or redaction code
+    that only mentions one. In a Write or Edit to a test path, a token on a line that marks it
+    fake counts nothing."""
     hits = []
     parsed_by_id = dict((id(p.event), p) for p in ctx.bash)
     for event in events:
@@ -361,7 +450,7 @@ def secret_in_write(events, ctx):
             continue
         name = event.get("name")
         data = input_of(event)
-        texts = []
+        texts, compiled = [], _LIVE_SECRETS
         if name == "Write":
             texts.append(text_of(data.get("content")))
         elif name == "Edit":
@@ -372,7 +461,9 @@ def secret_in_write(events, ctx):
             # of it the key sat in.
             texts.extend([parsed.command] if parsed is not None and parsed.skipped
                          else (parsed.heredocs if parsed is not None else []))
-        if any(_secret_in(t) for t in texts if t):
+        if name in ("Write", "Edit") and _TEST_PATH.search(text_of(data.get("file_path"))):
+            compiled = _LIVE_SECRETS_IN_TESTS
+        if any(_secret_in(t, compiled) for t in texts if t):
             hits.append(hit(event))
     return hits
 
