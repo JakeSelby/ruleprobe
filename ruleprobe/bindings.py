@@ -68,13 +68,16 @@ class BindError(Exception):
 
 def section_digest(text):
     """The sha256 of a section's `text`, every line from its heading to the next
-    (`Bundle.sections`), with only whitespace normalized: runs of spaces and tabs are one
-    space, line endings are `\\n`, and blank lines are dropped. Any other edit, inside a quote,
-    a table, a fenced block or an HTML comment as much as in its prose, changes it."""
-    lines = (" ".join(line.split()) for line in text.replace("\r\n", "\n").replace("\r", "\n")
-             .split("\n"))
-    canonical = "\n".join(line for line in lines if line)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    (`Bundle.sections`), with only line endings and trailing whitespace normalized: line endings
+    are `\\n`, each line loses its trailing spaces and tabs, and the blank lines that end the
+    section are dropped. Any other edit changes it: one inside a quote, a table, a fenced block or
+    an HTML comment, an indent, or a blank line added or removed inside the section, which can
+    turn indented code into prose the binder reads."""
+    lines = [line.rstrip(" \t") for line in
+             text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
 def global_dir():

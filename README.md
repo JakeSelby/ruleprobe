@@ -77,7 +77,8 @@ instead, with paths relative to it; your rule files are never edited.
 
 A bound rule reads `measured  user-bound, <detector>` in the coverage block, apart from
 `catalog-bound`, because a person made that claim. Each binding keeps a sha256 of every line of
-the section, and when anything but whitespace changes, a quote, table or code block included, the
+the section, and when anything but line endings or trailing spaces changes, a blank line, a
+quote, table or code block included, the
 rule reads "binding stale, run ruleprobe bind" and is not counted as measured until you bind it
 again. `report` reads only your global bindings file and the one in the project you run it from,
 or that `--rules` is in, looking no higher than the repository root; a bindings file in a project

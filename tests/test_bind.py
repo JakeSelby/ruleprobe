@@ -183,13 +183,13 @@ class ApplyTests(BindTestCase):
     def test_apply_writes_the_global_sidecar_sorted_with_no_timestamp(self):
         out = self.bind_git()
         digest = bindings.section_digest(GIT)
-        self.assertEqual(self.read(self.global_file),
-                         "bindings:\n"
-                         "  - detector: %s\n"
-                         "    path: \"~/rules/git.md\"\n"
-                         "    section: git\n"
-                         "    sha256: \"%s\"\n"
-                         "version: 1\n" % (FORCE, digest))
+        text = self.read(self.global_file)
+        self.assertEqual(parse(text), {"bindings": [{"detector": FORCE, "path": "~/rules/git.md",
+                                                     "section": "git", "sha256": digest}],
+                                       "version": 1})
+        # Keys in sorted order, and nothing else in the file: no timestamp, no comment.
+        keys = [line.strip().lstrip("- ").split(":")[0] for line in text.splitlines()]
+        self.assertEqual(keys, ["bindings", "detector", "path", "section", "sha256", "version"])
         self.assertIn("recorded in ~/.config/ruleprobe/bindings.yaml", out)
         # The rule file itself is never edited.
         self.assertEqual(self.read(os.path.join(self.rules, "git.md")), RULES)
@@ -333,11 +333,26 @@ class ReportTests(BindTestCase):
     def test_a_whitespace_only_change_keeps_the_binding(self):
         self.bind_git()
         self.write(os.path.join(self.rules, "git.md"),
-                   RULES.replace("\n", "\r\n").replace("Never force-push",
-                                                        "Never   force-push\t")
-                   .replace("# Git\r\n", "# Git\r\n\r\n\r\n"))
+                   RULES.replace("\n", "\r\n").replace("says so.", "says so.  \t")
+                   .replace("\r\n# Style", "\r\n\r\n\r\n# Style"))
         _code, text, _err = run_cli("report", "--rules", self.rules)
         self.assertIn("user-bound", self.rule_line(text, "git.md#git"))
+
+    def test_a_blank_line_that_changes_the_binder_s_reading_goes_stale(self):
+        # Without the blank line, the indented line is no longer code but prose, and its
+        # "unless" would reach the rule; the binding must not survive that.
+        before = "# Tests\n\nKeep functions short.\n\n    unless in CI\n"
+        self.write(os.path.join(self.rules, "git.md"), before)
+        self.write(self.global_file,
+                   "bindings:\n  - detector: transcript-hygiene/whole-file-cat\n"
+                   "    path: \"~/rules/git.md\"\n    section: tests\n    sha256: \"%s\"\n"
+                   "version: 1\n" % bindings.section_digest(before))
+        _code, text, _err = run_cli("report", "--rules", self.rules)
+        self.assertIn("user-bound", self.rule_line(text, "git.md#tests"))
+        self.write(os.path.join(self.rules, "git.md"),
+                   before.replace("short.\n\n    unless", "short.\n    unless"))
+        _code, text, _err = run_cli("report", "--rules", self.rules)
+        self.assertIn("binding stale", self.rule_line(text, "git.md#tests"))
 
     def test_any_content_edit_is_stale_quotes_tables_code_and_comments_included(self):
         before = ("# Pip\n\nUse uv for installs.\n\n> Never run pip install.\n\n"
@@ -456,8 +471,13 @@ class DeterminismTests(BindTestCase):
 
     def test_the_digest_normalizes_whitespace_and_nothing_else(self):
         plain = bindings.section_digest("# Git\n\nNever force-push to main.\n")
-        self.assertEqual(bindings.section_digest("# Git\r\n\r\n\r\n  Never  force-push\tto "
-                                                 "main.  \r\n"), plain)
+        self.assertEqual(bindings.section_digest("# Git\r\n\r\nNever force-push to main. \t"
+                                                 "\r\n\r\n\r\n"), plain)
+        for changed in ("# Git\n\n\nNever force-push to main.\n",
+                        "# Git\nNever force-push to main.\n",
+                        "# Git\n\n  Never force-push to main.\n",
+                        "# Git\n\nNever  force-push to main.\n"):
+            self.assertNotEqual(bindings.section_digest(changed), plain, changed)
         self.assertNotEqual(bindings.section_digest("# Git\n\nNever force-push to `main`.\n"),
                             plain)
         self.assertNotEqual(bindings.section_digest("## Git\n\nNever force-push to main.\n"),
@@ -545,6 +565,53 @@ class GuardTests(BindTestCase):
         self.assertEqual(code, 2)
         self.assertIn("is a link or not a folder", err)
         self.assertEqual(os.listdir(target), [])
+
+    def test_a_folder_resolving_elsewhere_is_refused_even_when_the_link_check_misses(self):
+        # A link swapped in after `islink` looked (simulated by blinding it) is still caught
+        # by comparing the folder's real path with where it should be.
+        target = os.path.join(self.base, "anywhere")
+        os.makedirs(target)
+        os.makedirs(self.config)
+        os.symlink(target, os.path.join(self.config, "ruleprobe"))
+        plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+        with mock.patch("ruleprobe.bindings.os.path.islink", return_value=False):
+            code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules)
+        self.assertEqual(code, 2)
+        self.assertIn("does not resolve to itself", err)
+        self.assertEqual(os.listdir(target), [])
+
+    def test_a_folder_swapped_for_a_link_before_the_rename_is_refused(self):
+        target = os.path.join(self.base, "anywhere")
+        os.makedirs(target)
+        folder = os.path.join(self.config, "ruleprobe")
+        real_mkstemp = tempfile.mkstemp
+
+        def swap_after(*args, **kwargs):
+            made = real_mkstemp(*args, **kwargs)
+            os.rename(folder, folder + ".moved")
+            os.symlink(target, folder)
+            return made
+
+        plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+        with mock.patch("ruleprobe.bindings.tempfile.mkstemp", side_effect=swap_after):
+            code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules)
+        self.assertEqual(code, 2)
+        self.assertIn("is a link or not a folder", err)
+        self.assertEqual(os.listdir(target), [])
+
+    def test_a_json_bindings_file_with_a_repeated_key_is_refused_not_rewritten(self):
+        path = os.path.join(self.config, "ruleprobe", "bindings.json")
+        text = ('{"version": 1, "bindings": [{"detector": "%s", "detector": "made/up", '
+                '"path": "~/rules/git.md", "section": "style", "sha256": "%s"}]}\n'
+                % (FORCE, bindings.section_digest(STYLE)))
+        self.write(path, text)
+        _entries, findings = bindings.read_file(path)
+        self.assertIn("duplicate key 'detector'", findings[0].reason)
+        plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+        code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules)
+        self.assertEqual(code, 2)
+        self.assertIn("duplicate key", err)
+        self.assertEqual(self.read(path), text)
 
     def test_a_linked_parent_folder_is_still_fine(self):
         real_config = os.path.join(self.base, "dotfiles", "config")

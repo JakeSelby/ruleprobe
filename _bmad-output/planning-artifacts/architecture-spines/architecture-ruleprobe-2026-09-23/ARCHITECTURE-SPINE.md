@@ -583,6 +583,9 @@ native (#55)
     or `--rules` up to the nearest `.git`, or in that directory alone outside a repository. `--apply`
     refuses a linked `.ruleprobe` or `ruleprobe` folder and checks the folder's real path before
     the rename, and refuses to rewrite a bindings file holding a comment or an unknown key.
+  - Amended 2026-10-03 at PR #155's second review: the hash keeps blank lines and indentation and
+    normalizes only line endings and trailing whitespace, since a removed blank line can turn
+    indented code into prose the binder reads. A bindings file in JSON refuses a repeated key.
 
 ## Consistency Conventions
 

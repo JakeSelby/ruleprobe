@@ -81,7 +81,8 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - A JSON detector or bindings file nested too deeply is a finding naming the file, not a
-  `RecursionError` ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
+  `RecursionError`, and one repeating a key in an object is a finding rather than read with the
+  last value ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
 
 ## 0.2.0 (2026-09-24)
 

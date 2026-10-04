@@ -143,9 +143,20 @@ def load(path):
     return parse_with_lines(text, path)
 
 
+def _unique_pairs(pairs):
+    """A JSON object's pairs as a dict, refusing a repeated key as the subset's reader does:
+    `json.loads` would keep the last value and silently drop the earlier one."""
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("duplicate key %r" % (key,))
+        out[key] = value
+    return out
+
+
 def _load_json(text, path):
     try:
-        value = json.loads(text)
+        value = json.loads(text, object_pairs_hook=_unique_pairs)
     except ValueError as exc:
         raise DeclarativeError("invalid JSON: %s" % exc, getattr(exc, "lineno", 0), path)
     except RecursionError:
