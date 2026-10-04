@@ -965,7 +965,8 @@ history ship first, and five testers are recruited before `compare` is built. Ho
 ### Epic 8: a first run with no configuration (#128, RP-E010)
 A stranger runs `ruleprobe report` with no flags and sees their own rules found, bound per sentence and
 measured inside a minute, with the binder scored like a detector.
-**FRs covered:** FR-36, FR-37, FR-38, FR-52 (added 2026-10-03, story 8.7); AD-18, AD-12, AD-19.
+**FRs covered:** FR-36, FR-37, FR-38; AD-18, AD-12.
+Amended 2026-10-03: also FR-52 and AD-19, through story 8.7 (#154).
 
 ### Epic 9: a field floor for the default detectors (#129, RP-E011)
 Every default detector has field evidence behind it or leaves the defaults. Existing items: #110, #111,

@@ -965,12 +965,7 @@ def cmd_bind(args, out):
         if not new:
             out.write("nothing to bind: no section in the plan names a detector\n")
             return 0
-        existing = []
-        if os.path.exists(target):
-            existing, problems = _bindings.read_file(target, project=base is not None)
-            if problems:
-                raise _bindings.BindError(["%s: %s; not rewritten" % (target, p.reason)
-                                           for p in problems])
+        existing = _bindings.existing(target, project=base is not None)
         _bindings.write(target, _bindings.merged(existing, new))
     except DeclarativeError as exc:
         sys.stderr.write("bind: %s:%d: %s\n" % (exc.path, exc.line, exc.reason))

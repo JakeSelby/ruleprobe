@@ -19,15 +19,20 @@ A bindings file is the declarative subset (or JSON), sorted, with no timestamp:
 
 `path` is the rule file under the home folder (`~/...`) in the global file,
 `$XDG_CONFIG_HOME/ruleprobe/bindings.yaml`, and relative to the project in a project's
-`.ruleprobe/bindings.yaml`. `section` is the rule id's anchor, and `sha256` hashes the
-section's text as the binder reads it (`section_digest`), so a binding to a section that has
-since changed is stale and measures nothing until it is bound again.
+`.ruleprobe/bindings.yaml`. `section` is the rule id's anchor, and `sha256` hashes every line
+of the section, from its heading to the next (`section_digest`), so any edit to its content -
+a quote, a table, a code block or a comment included - makes the binding stale, and it
+measures nothing until it is bound again.
 
 Trust: `report` reads the global file and the bindings file of the project the user points at,
-the working directory or `--rules`, found by walking up from it. A bindings file in a project
-found only through the transcripts may be a clone of somebody else's repository, so it is never
-read, only counted. An entry names a detector id the run already knows (`rules.known_ids`); it
-cannot define one, and an entry with any other key is refused.
+the working directory or `--rules`, found by walking up from it to its repository root and never
+above it (`_walk`). A bindings file in a project found only through the transcripts may be a
+clone of somebody else's repository, so it is never read, only counted. An entry names a
+detector id the run already knows (`rules.known_ids`); it cannot define one, and an entry with
+any other key is refused. `bind --apply` writes only into a real `.ruleprobe` or
+`ruleprobe` folder, never through a link, and never rewrites a file holding a comment or a
+key it does not know. Two applies at once are not supported: there is no lock, and the later
+rename wins.
 """
 import hashlib
 import json
@@ -35,9 +40,9 @@ import os
 import tempfile
 from collections import namedtuple
 
-from .declarative import DeclarativeError, emit, load
+from .declarative import DeclarativeError, _strip_comment, emit, load
 from .rules import (MAX_PARENTS, REPO_DIR, Finding, RuleEntry, _CATALOG, _binding, _label,
-                    _match, _normalize)
+                    _match)
 
 __all__ = ["Binding", "Bindings", "global_path", "load_trusted", "plan", "section_digest"]
 
@@ -61,12 +66,15 @@ class BindError(Exception):
         self.reasons = list(reasons)
 
 
-def section_digest(heading, paragraphs):
-    """The sha256 of a section's text as the binder reads it: the heading and each paragraph,
-    each normalized (`rules._normalize`), one per line. Markup and spacing changes that do not
-    change what the binder reads leave it alone."""
-    text = "\n".join(_normalize(part) for part in [heading] + list(paragraphs))
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+def section_digest(text):
+    """The sha256 of a section's `text`, every line from its heading to the next
+    (`Bundle.sections`), with only whitespace normalized: runs of spaces and tabs are one
+    space, line endings are `\\n`, and blank lines are dropped. Any other edit, inside a quote,
+    a table, a fenced block or an HTML comment as much as in its prose, changes it."""
+    lines = (" ".join(line.split()) for line in text.replace("\r\n", "\n").replace("\r", "\n")
+             .split("\n"))
+    canonical = "\n".join(line for line in lines if line)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def global_dir():
@@ -88,34 +96,40 @@ def global_path():
     return _existing(directory) or os.path.join(directory, FILENAMES[0])
 
 
-def _project_file(start):
-    """`(project root, bindings file)` for the nearest `REPO_DIR` holding a bindings file at
-    or above `start`, or None."""
-    directory = os.path.abspath(start)
+def _walk(start):
+    """The directories a project bindings file is looked for in: `start`, then each parent up
+    to the repository root, the nearest directory holding `.git`; only `start` itself when no
+    repository holds it. Never above either, so a shared `/tmp/.ruleprobe` is not read for a
+    repository under `/tmp`."""
+    start = os.path.abspath(start)
+    directory, out = start, []
     for _ in range(MAX_PARENTS):
-        found = _existing(os.path.join(directory, REPO_DIR))
-        if found:
-            return directory, found
+        out.append(directory)
+        if os.path.exists(os.path.join(directory, ".git")):
+            return out
         parent = os.path.dirname(directory)
         if parent == directory:
             break
         directory = parent
+    return [start]
+
+
+def _project_file(start):
+    """`(project root, bindings file)` for the nearest `REPO_DIR` holding a bindings file in
+    `_walk(start)`, or None."""
+    for directory in _walk(start):
+        found = _existing(os.path.join(directory, REPO_DIR))
+        if found:
+            return directory, found
     return None
 
 
 def project_root(cwd=None):
-    """Where `bind --project` writes: the nearest directory at or above `cwd` holding
-    `REPO_DIR` or `.git`, else `cwd` itself."""
+    """Where `bind --project` writes: the project whose bindings file `report` would read
+    from `cwd`, else the repository root holding `cwd`, else `cwd` itself."""
     start = os.path.abspath(cwd or os.getcwd())
-    directory = start
-    for _ in range(MAX_PARENTS):
-        if any(os.path.exists(os.path.join(directory, name)) for name in (REPO_DIR, ".git")):
-            return directory
-        parent = os.path.dirname(directory)
-        if parent == directory:
-            break
-        directory = parent
-    return start
+    found = _project_file(start)
+    return found[0] if found else _walk(start)[-1]
 
 
 def project_path(root):
@@ -145,6 +159,8 @@ def read_file(path, project=False):
         doc, _lines = load(path)
     except DeclarativeError as exc:
         return [], [Finding(path, exc.line, exc.reason)]
+    except (RecursionError, ValueError, TypeError) as exc:  # pragma: no cover - a parser bug
+        return [], [Finding(path, 0, "cannot parse: %s" % type(exc).__name__)]
     if doc is None:
         return [], []
     if not isinstance(doc, dict) or not isinstance(doc.get("bindings", []), list):
@@ -217,7 +233,7 @@ class Bindings(object):
             if not found:
                 out.append(entry)
                 continue
-            digest = section_digest(*section)
+            digest = section_digest(section[2])
             unknown = sorted(set(b.detector for b in found) - set(known))
             if any(b.sha256 != digest for b in found):
                 entry = RuleEntry(entry.rule, entry.path, "unmeasured", STALE, [], None)
@@ -285,12 +301,12 @@ def plan(bundle, bindings=None):
         section = bundle.sections.get(entry.rule)
         if entry.state != "unmeasured" or section is None:
             continue
-        heading, paragraphs = section
+        heading, paragraphs, text = section
         auto = _binding(entry.rule, entry.path, heading, paragraphs)[0]
         reason = auto.reason if auto.state == "unmeasured" else entry.reason
         item = {"bind": None, "candidates": _candidates(heading, paragraphs),
                 "reason": reason or NO_MATCH, "rule": entry.rule,
-                "sha256": section_digest(heading, paragraphs)}
+                "sha256": section_digest(text)}
         if entry.reason == STALE and bindings is not None:
             item["stale"] = sorted(set(b.detector for b in bindings.lookup(
                 entry.path, entry.rule.rsplit("#", 1)[1])))
@@ -380,7 +396,7 @@ def resolve(bundle, chosen, known, base):
             reasons.append("%s: not a rule section this run read; pass the same --rules or "
                            "--root as the plan" % rule)
             continue
-        if section_digest(*section) != digest:
+        if section_digest(section[2]) != digest:
             reasons.append("%s: its text changed since the plan; print the plan again" % rule)
             continue
         if entry.state != "unmeasured" and entry.source != "user":
@@ -420,19 +436,64 @@ def file_text(path, bindings):
     return emit(doc)
 
 
+def existing(path, project=False):
+    """The bindings already in `path`, to merge into, or `[]` when there is none. Raises
+    `BindError` rather than lose anything a rewrite would drop: a finding, a comment, or a
+    key other than `bindings` and `version`."""
+    if not os.path.lexists(path):
+        return []
+    reasons = []
+    entries, problems = read_file(path, project)
+    reasons.extend("%s: %s" % (path, p.reason) for p in problems)
+    if not problems and not path.endswith(".json"):
+        with open(path, encoding="utf-8") as handle:
+            numbered = list(enumerate(handle.read().split("\n"), 1))
+        reasons.extend("%s:%d: holds a comment" % (path, no) for no, line in numbered
+                       if _strip_comment(line).rstrip() != line.rstrip())
+    if not problems:
+        doc, _lines = load(path)
+        unknown = sorted(set(doc or {}) - set(("bindings", "version")))
+        if unknown:
+            reasons.append("%s: holds %s, which bind does not write" % (path, ", ".join(unknown)))
+    if reasons:
+        raise BindError([r + "; not rewritten, so nothing in it is lost" for r in reasons])
+    return entries
+
+
+def _real_folder(directory):
+    """Refuse `directory` unless it is a real folder, or absent, exactly where its parent's
+    real path says: a linked `.ruleprobe` or `ruleprobe` folder, shipped in a clone, would
+    otherwise carry the write anywhere."""
+    if os.path.islink(directory) or (os.path.lexists(directory)
+                                     and not os.path.isdir(directory)):
+        raise BindError(["%s is a link or not a folder; not written" % directory])
+    expected = os.path.join(os.path.realpath(os.path.dirname(directory)),
+                            os.path.basename(directory))
+    if os.path.lexists(directory) and os.path.realpath(directory) != expected:
+        raise BindError(["%s does not resolve to itself; not written" % directory])
+    return expected
+
+
 def write(path, bindings):
     """Write `bindings` to `path` whole, through a temporary file in the same folder and a
-    rename, so a reader never sees half a file. A link or a non-file at `path` is refused."""
-    if os.path.islink(path) or (os.path.exists(path) and not os.path.isfile(path)):
+    rename, so a reader never sees half a file. A link or a non-file at `path`, and a linked
+    folder holding it, are refused, and the folder's real path is checked again after it is
+    made and before the rename."""
+    if os.path.islink(path) or (os.path.lexists(path) and not os.path.isfile(path)):
         raise BindError(["%s is not a regular file; not written" % path])
     directory = os.path.dirname(path)
-    os.makedirs(directory, exist_ok=True)
+    _real_folder(directory)
+    os.makedirs(os.path.dirname(directory) or ".", exist_ok=True)
+    if not os.path.lexists(directory):
+        os.mkdir(directory)
+    real = _real_folder(directory)
     data = file_text(path, bindings).encode("utf-8")
-    fd, temporary = tempfile.mkstemp(prefix=".bindings-", dir=directory)
+    fd, temporary = tempfile.mkstemp(prefix=".bindings-", dir=real)
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.replace(temporary, path)
+        _real_folder(directory)
+        os.replace(temporary, os.path.join(real, os.path.basename(path)))
     except BaseException:
         try:
             os.unlink(temporary)

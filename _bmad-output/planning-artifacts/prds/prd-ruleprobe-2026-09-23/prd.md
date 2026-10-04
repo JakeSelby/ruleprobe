@@ -1207,7 +1207,7 @@ transcript giving a different report. Any one is a failure regardless of the oth
 From the roadmap the maintainer approved on 2026-09-25. Every item is proposed.
 
 **0.3.0, a trusted first run and the launch:** FR-36 to FR-38 (per-sentence binding, the binder's
-score, rule discovery) and FR-52 (`ruleprobe bind`); NFR-10 and the fixes #110, #111, #113 and #114 (the field floor for the
+score, rule discovery); NFR-10 and the fixes #110, #111, #113 and #114 (the field floor for the
 defaults); FR-39 to FR-41 (version hashes, `audit`, validity cards); FR-42 to FR-44 (bounds, snapshot
 and saved rows, a deciding event for every hit, #112); FR-45 and NFR-11 (reader health, three operating
 systems, the determinism and fuzz tests under NFR-3). A release candidate goes to five developers outside
@@ -1218,7 +1218,7 @@ the maintainer before it goes out.
 Amended 2026-10-03 (maintainer decision; story 8.7, #154): the launch headline is no longer "rules
 measured with no configuration". The held-out set (story 8.6, #151) measured catalog binding at recall
 0.12, so the launch claims coverage as a few minutes of setup with `ruleprobe bind` (FR-52), not as a
-guess made with no configuration. The exact public wording stays the maintainer's to approve (story
+guess made with no configuration. FR-52 joins 0.3.0's scope beside FR-36 to FR-38. The exact public wording stays the maintainer's to approve (story
 13.4). Whether the beta's 60-second bar also counts a rule measured after `bind` is open for the
 maintainer before 0.3.0rc1; the criteria above stay as written until then.
 

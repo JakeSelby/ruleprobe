@@ -182,8 +182,7 @@ class ApplyTests(BindTestCase):
 
     def test_apply_writes_the_global_sidecar_sorted_with_no_timestamp(self):
         out = self.bind_git()
-        digest = bindings.section_digest(
-            "Git", ["Never force-push to main unless a release manager says so."])
+        digest = bindings.section_digest(GIT)
         self.assertEqual(self.read(self.global_file),
                          "bindings:\n"
                          "  - detector: %s\n"
@@ -249,7 +248,7 @@ class ApplyTests(BindTestCase):
         doc = parse(text)
         doc["sections"][0]["bind"] = FORCE
         doc["sections"][0]["sha256"] = bindings.section_digest(
-            "Git", ["Never force-push to main."])
+            "# Git\n\nNever force-push to main.\n")
         plan = os.path.join(self.base, "plan.json")
         with open(plan, "w", encoding="utf-8") as handle:
             json.dump(doc, handle)
@@ -331,16 +330,40 @@ class ReportTests(BindTestCase):
         self.assertEqual(doc["sections"][0]["stale"], [FORCE])
         self.assertIn("(unless)", doc["sections"][0]["reason"])
 
-    def test_a_markup_only_change_keeps_the_binding(self):
+    def test_a_whitespace_only_change_keeps_the_binding(self):
         self.bind_git()
         self.write(os.path.join(self.rules, "git.md"),
-                   RULES.replace("main", "`main`").replace("Never", "**Never**"))
+                   RULES.replace("\n", "\r\n").replace("Never force-push",
+                                                        "Never   force-push\t")
+                   .replace("# Git\r\n", "# Git\r\n\r\n\r\n"))
         _code, text, _err = run_cli("report", "--rules", self.rules)
         self.assertIn("user-bound", self.rule_line(text, "git.md#git"))
 
+    def test_any_content_edit_is_stale_quotes_tables_code_and_comments_included(self):
+        before = ("# Pip\n\nUse uv for installs.\n\n> Never run pip install.\n\n"
+                  "| tool | ok |\n| --- | --- |\n| pip | no |\n\n```\npip install x\n```\n\n"
+                  "<!-- pip is banned -->\n")
+        edits = (("> Never run", "> Always run"), ("| pip | no |", "| pip | yes |"),
+                 ("pip install x", "pip install y"), ("pip is banned", "pip is fine"),
+                 ("**", "**"))
+        for old, new in edits:
+            with self.subTest(old=old):
+                self.write(os.path.join(self.rules, "git.md"), before)
+                if os.path.exists(self.global_file):
+                    os.remove(self.global_file)
+                plan = self.choose(self.plan("--rules", self.rules), "git.md#pip",
+                                   "package-manager/pip-install")
+                self.assertEqual(run_cli("bind", "--apply", plan, "--rules", self.rules)[0], 0)
+                self.write(os.path.join(self.rules, "git.md"), before.replace(old, new))
+                _code, text, _err = run_cli("report", "--rules", self.rules)
+                line = self.rule_line(text, "git.md#pip")
+                if old == new:
+                    self.assertIn("user-bound", line)
+                else:
+                    self.assertIn("binding stale", line)
+
     def test_a_cloned_project_s_bindings_file_is_ignored_and_counted(self):
-        digest = bindings.section_digest(
-            "Git", ["Never force-push to main unless a release manager says so."])
+        digest = bindings.section_digest(GIT)
         entry = ("bindings:\n  - detector: %s\n    path: %%s\n    section: git\n"
                  "    sha256: \"%s\"\nversion: 1\n" % (FORCE, digest))
         self.write(os.path.join(self.project, ".ruleprobe", "bindings.yaml"),
@@ -355,8 +378,7 @@ class ReportTests(BindTestCase):
         self.assertIn("user-bound, %s" % FORCE, self.rule_line(text, "~/work/app/CLAUDE.md#git"))
 
     def test_the_project_the_user_is_in_is_honoured(self):
-        digest = bindings.section_digest(
-            "Git", ["Never force-push to main unless a release manager says so."])
+        digest = bindings.section_digest(GIT)
         self.write(os.path.join(self.project, ".ruleprobe", "bindings.yaml"),
                    "bindings:\n  - detector: %s\n    path: CLAUDE.md\n    section: git\n"
                    "    sha256: \"%s\"\nversion: 1\n" % (FORCE, digest))
@@ -366,8 +388,7 @@ class ReportTests(BindTestCase):
         self.assertNotIn("bindings files ignored", text)
 
     def test_a_binding_that_defines_a_detector_is_refused(self):
-        digest = bindings.section_digest(
-            "Git", ["Never force-push to main unless a release manager says so."])
+        digest = bindings.section_digest(GIT)
         self.write(self.global_file,
                    "bindings:\n  - detector: evil/one\n    path: ~/rules/git.md\n"
                    "    section: git\n    sha256: \"%s\"\n"
@@ -378,8 +399,7 @@ class ReportTests(BindTestCase):
         self.assertNotIn("evil/one", run_cli("detectors", "--rules", self.rules)[1])
 
     def test_a_binding_naming_an_unknown_id_measures_nothing(self):
-        digest = bindings.section_digest(
-            "Git", ["Never force-push to main unless a release manager says so."])
+        digest = bindings.section_digest(GIT)
         self.write(self.global_file,
                    "bindings:\n  - detector: made/up\n    path: ~/rules/git.md\n"
                    "    section: git\n    sha256: \"%s\"\nversion: 1\n" % digest)
@@ -434,12 +454,139 @@ class DeterminismTests(BindTestCase):
         self.assertEqual(run_cli("bind", "--apply", plan, "--rules", self.rules)[0], 0)
         self.assertEqual(self.read(self.global_file), written[1])
 
-    def test_the_digest_reads_the_text_the_binder_reads(self):
-        plain = bindings.section_digest("Git", ["Never force-push to main."])
-        self.assertEqual(bindings.section_digest("Git", ["**Never**  force-push to `main`."]),
-                         plain)
-        self.assertNotEqual(bindings.section_digest("Git", ["Never force-push to trunk."]),
+    def test_the_digest_normalizes_whitespace_and_nothing_else(self):
+        plain = bindings.section_digest("# Git\n\nNever force-push to main.\n")
+        self.assertEqual(bindings.section_digest("# Git\r\n\r\n\r\n  Never  force-push\tto "
+                                                 "main.  \r\n"), plain)
+        self.assertNotEqual(bindings.section_digest("# Git\n\nNever force-push to `main`.\n"),
                             plain)
+        self.assertNotEqual(bindings.section_digest("## Git\n\nNever force-push to main.\n"),
+                            plain)
+
+
+class GuardTests(BindTestCase):
+    """Each guard the review of PR #155 asked to be shown biting."""
+
+    def global_entry(self, path, section, digest, detector=FORCE):
+        return ("bindings:\n  - detector: %s\n    path: \"%s\"\n    section: %s\n"
+                "    sha256: \"%s\"\nversion: 1\n" % (detector, path, section, digest))
+
+    def test_two_sections_sharing_an_id_never_bind(self):
+        second = "# Git 2\n\nNever force-push to main unless asked.\n"
+        self.write(os.path.join(self.rules, "git.md"),
+                   GIT + "\n# Git\n\nKeep it short.\n\n" + second)
+        self.write(self.global_file,
+                   self.global_entry("~/rules/git.md", "git-2", bindings.section_digest(second)))
+        _code, text, _err = run_cli("report", "--rules", self.rules)
+        lines = [line for line in text.split("\n")
+                 if "git.md#git-2" in line and "already taken" not in line]
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(all(line.startswith("  unmeasured") for line in lines), lines)
+        self.assertNotIn("git.md#git-2", [item["rule"] for item in
+                                          parse(self.plan("--rules", self.rules))["sections"]])
+
+    def test_a_project_binding_outside_the_project_is_refused(self):
+        os.chdir(self.project)
+        for path in ("../outside.md", "/etc/rules.md"):
+            with self.subTest(path=path):
+                self.write(os.path.join(self.project, ".ruleprobe", "bindings.yaml"),
+                           self.global_entry(path, "git", bindings.section_digest(GIT)))
+                _code, text, _err = run_cli("report")
+                self.assertIn("a project binding names a file inside the project", text)
+
+    def test_project_refuses_a_rule_file_outside_the_project(self):
+        repo = os.path.join(self.base, "repo")
+        os.makedirs(os.path.join(repo, ".git"))
+        os.chdir(repo)
+        plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+        code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules, "--project")
+        self.assertEqual(code, 2)
+        self.assertIn("outside this project", err)
+        self.assertFalse(os.path.exists(os.path.join(repo, ".ruleprobe")))
+
+    def test_an_existing_file_with_problems_is_not_rewritten(self):
+        bad = self.global_entry("~/rules/git.md", "git", "not-a-hash")
+        commented = "# my notes\n" + self.global_entry("~/rules/git.md", "style",
+                                                       bindings.section_digest(STYLE))
+        extra = self.global_entry("~/rules/git.md", "style",
+                                  bindings.section_digest(STYLE)) + "owner: me\n"
+        for text, reason in ((bad, "sha256 is not"), (commented, "holds a comment"),
+                             (extra, "holds owner")):
+            with self.subTest(reason=reason):
+                self.write(self.global_file, text)
+                plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+                code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules)
+                self.assertEqual(code, 2)
+                self.assertIn(reason, err)
+                self.assertIn("not rewritten", err)
+                self.assertEqual(self.read(self.global_file), text)
+
+    def test_a_linked_ruleprobe_folder_is_never_written_through(self):
+        repo = os.path.join(self.base, "repo")
+        target = os.path.join(self.base, "anywhere")
+        os.makedirs(os.path.join(repo, ".git"))
+        os.makedirs(target)
+        self.write(os.path.join(repo, "rules", "git.md"), RULES)
+        os.symlink(target, os.path.join(repo, ".ruleprobe"))
+        os.chdir(repo)
+        plan = self.choose(self.plan("--rules", "rules"), "git.md#git", FORCE)
+        code, _out, err = run_cli("bind", "--apply", plan, "--rules", "rules", "--project")
+        self.assertEqual(code, 2)
+        self.assertIn("is a link or not a folder", err)
+        self.assertEqual(os.listdir(target), [])
+
+    def test_a_linked_global_ruleprobe_folder_is_never_written_through(self):
+        target = os.path.join(self.base, "anywhere")
+        os.makedirs(target)
+        os.makedirs(self.config)
+        os.symlink(target, os.path.join(self.config, "ruleprobe"))
+        plan = self.choose(self.plan("--rules", self.rules), "git.md#git", FORCE)
+        code, _out, err = run_cli("bind", "--apply", plan, "--rules", self.rules)
+        self.assertEqual(code, 2)
+        self.assertIn("is a link or not a folder", err)
+        self.assertEqual(os.listdir(target), [])
+
+    def test_a_linked_parent_folder_is_still_fine(self):
+        real_config = os.path.join(self.base, "dotfiles", "config")
+        os.makedirs(real_config)
+        os.symlink(real_config, self.config)
+        self.bind_git()
+        self.assertTrue(os.path.isfile(os.path.join(real_config, "ruleprobe", "bindings.yaml")))
+
+    def test_the_project_walk_stops_at_the_repository_root(self):
+        shared = self.global_entry("rules/git.md", "git", bindings.section_digest(GIT))
+        outer = os.path.join(self.base, "shared")
+        repo = os.path.join(outer, "repo")
+        os.makedirs(os.path.join(repo, ".git"))
+        self.write(os.path.join(repo, "rules", "git.md"), RULES)
+        self.write(os.path.join(outer, ".ruleprobe", "bindings.yaml"),
+                   shared.replace("rules/git.md", "repo/rules/git.md"))
+        os.chdir(repo)
+        _code, text, _err = run_cli("report", "--rules", "rules")
+        self.assertTrue(self.rule_line(text, "git.md#git").startswith("  unmeasured"))
+        # Inside the repository it is read.
+        self.write(os.path.join(repo, ".ruleprobe", "bindings.yaml"), shared)
+        _code, text, _err = run_cli("report", "--rules", "rules")
+        self.assertIn("user-bound", self.rule_line(text, "git.md#git"))
+
+    def test_with_no_repository_only_the_directory_itself_is_read(self):
+        outer = os.path.join(self.base, "shared")
+        inner = os.path.join(outer, "inner")
+        self.write(os.path.join(inner, "rules", "git.md"), RULES)
+        self.write(os.path.join(outer, ".ruleprobe", "bindings.yaml"),
+                   self.global_entry("inner/rules/git.md", "git", bindings.section_digest(GIT)))
+        os.chdir(inner)
+        _code, text, _err = run_cli("report", "--rules", "rules")
+        self.assertTrue(self.rule_line(text, "git.md#git").startswith("  unmeasured"))
+
+    def test_deeply_nested_json_is_a_file_problem(self):
+        path = os.path.join(self.config, "ruleprobe", "bindings.json")
+        self.write(path, "[" * 100000)
+        _entries, findings = bindings.read_file(path)
+        # Python 3.9's decoder recurses and 3.14's does not; either way it is a finding.
+        self.assertIn("invalid JSON", findings[0].reason)
+        code, _text, _err = run_cli("report", "--rules", self.rules)
+        self.assertEqual(code, 0)
 
 
 class OptionTests(BindTestCase):

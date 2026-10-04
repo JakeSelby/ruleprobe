@@ -148,6 +148,10 @@ def _load_json(text, path):
         value = json.loads(text)
     except ValueError as exc:
         raise DeclarativeError("invalid JSON: %s" % exc, getattr(exc, "lineno", 0), path)
+    except RecursionError:
+        # The standard library's decoder recurses per level, so deep nesting is a file
+        # problem here, not a crash.
+        raise DeclarativeError("invalid JSON: nested too deeply", 0, path)
     return value, LineMap()
 
 

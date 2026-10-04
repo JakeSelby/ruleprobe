@@ -76,11 +76,14 @@ prints the same plan as data, and `--apply` takes either form. Pass the same `--
 instead, with paths relative to it; your rule files are never edited.
 
 A bound rule reads `measured  user-bound, <detector>` in the coverage block, apart from
-`catalog-bound`, because a person made that claim. Each binding keeps a sha256 of the section's
-text, and when the text changes the rule reads "binding stale, run ruleprobe bind" and is not
-counted as measured until you bind it again. `report` reads only your global bindings file and
-the one in the project you run it from, or that `--rules` is in; a bindings file in a project
+`catalog-bound`, because a person made that claim. Each binding keeps a sha256 of every line of
+the section, and when anything but whitespace changes, a quote, table or code block included, the
+rule reads "binding stale, run ruleprobe bind" and is not counted as measured until you bind it
+again. `report` reads only your global bindings file and the one in the project you run it from,
+or that `--rules` is in, looking no higher than the repository root; a bindings file in a project
 found through the transcripts, which may be somebody else's clone, is never read, only counted.
+`--apply` never writes through a linked folder, and never rewrites a bindings file you added
+comments or other keys to; run one apply at a time.
 A binding names a shipped, catalog or detector-file id and never defines a detector; an unknown
 id is refused. `--no-config` reads no bindings.
 

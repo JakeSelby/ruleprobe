@@ -117,8 +117,10 @@ class Bundle(object):
         # many were skipped for their size or a rules folder's cap.
         self.refused = refused
         self.skipped = skipped
-        # Each section rule's text as the binder read it, `{rule id: (heading, paragraphs)}`,
-        # or None for an id two sections share; what `ruleprobe bind` hashes and ranks.
+        # Each section rule's text, `{rule id: (heading, paragraphs, text)}`: the heading and
+        # prose as the binder read them, which `ruleprobe bind` ranks candidates by, and every
+        # line from the heading to the next, which it hashes; None for an id two sections
+        # share, which never binds.
         self.sections = {}
         # How many bindings files in discovered projects were left unread (`ruleprobe.bindings`).
         self.ignored = ignored
@@ -1198,7 +1200,9 @@ def _section_rules(path, root, body, first_line, name, label=None, sections=None
     if not units:
         return [_bind(name, path, "", _file_prose(body))], []
     entries, findings, seen, taken = [], [], {}, set()
-    for heading, index, is_rule, paragraphs in units:
+    lines = body.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ends = [unit[1] for unit in units[1:]] + [len(lines)]
+    for (heading, index, is_rule, paragraphs), end in zip(units, ends):
         base = _slug(heading)
         seen[base] = seen.get(base, 0) + 1
         anchor = base if seen[base] == 1 else "%s-%d" % (base, seen[base])
@@ -1211,7 +1215,8 @@ def _section_rules(path, root, body, first_line, name, label=None, sections=None
         taken.add(rule)
         entries.append(_bind(rule, path, heading, paragraphs))
         if sections is not None:
-            sections[rule] = None if rule in sections else (heading, tuple(paragraphs))
+            sections[rule] = None if rule in sections else (
+                heading, tuple(paragraphs), "\n".join(lines[index:end]))
     if not entries:
         return [_bind(name, path, "", _file_prose(body), "no section is a rule")], findings
     return entries, findings

@@ -577,6 +577,12 @@ native (#55)
     runs first; a user binding applies only to a section the catalog left unmeasured.
   - A user-bound rule carries `source: user` and prints `user-bound, <detector>`, apart from
     `catalog-bound`; the binder's corpus score (FR-37) never counts it.
+  - Amended 2026-10-03 at PR #155's review: the hash covers every line of the section, heading to
+    next heading, normalizing whitespace and line endings only, so an edit inside a quote, table,
+    fence or comment is stale too. A project bindings file is looked for from the working directory
+    or `--rules` up to the nearest `.git`, or in that directory alone outside a repository. `--apply`
+    refuses a linked `.ruleprobe` or `ruleprobe` folder and checks the folder's real path before
+    the rename, and refuses to rewrite a bindings file holding a comment or an unknown key.
 
 ## Consistency Conventions
 

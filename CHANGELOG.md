@@ -78,6 +78,11 @@ All notable changes to this project are documented here. The format follows
   labels; 0.69 over the whole zoo, whose floor is now 0.68
   ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
 
+### Fixed
+
+- A JSON detector or bindings file nested too deeply is a finding naming the file, not a
+  `RecursionError` ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
+
 ## 0.2.0 (2026-09-24)
 
 ### Breaking
