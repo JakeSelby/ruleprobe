@@ -54,7 +54,7 @@ sessions:
         note: a filtered grep, the narrow read
 
   - session: hygiene-find.jsonl
-    note: a Codex rollout - five unfiltered walks and nine narrowed ones
+    note: a Codex rollout - five unfiltered walks and nine narrowed ones, and two unfiltered walks that never ran - one the user rejected, one an interrupt aborted - which make no event and carry no label
     labels:
       - at: "1:tu-f1"
         fire: [transcript-hygiene/unfiltered-find]
@@ -140,7 +140,7 @@ sessions:
         note: the hooks path pointed at the repository's own hooks, which turns them on
 
   - session: secrets-writes.jsonl
-    note: six credentials written to disk, then six ways of not writing one
+    note: six credentials written to disk, then six ways of not writing one, and two writes of one that never ran - one the user rejected, one a permission rule denied - which make no event and carry no label
     labels:
       - at: "1:tu-k1"
         fire: [secrets/secret-in-write]
@@ -252,7 +252,7 @@ sessions:
         note: the word compacted in a tool result
 
   - session: gemini-writes.jsonl
-    note: a Gemini CLI session - credentials written through write_file and replace, a model the router may have changed, and a shell call with no project root to place it
+    note: a Gemini CLI session - credentials written through write_file and replace, a model the router may have changed, and a shell call with no project root to place it; a cancelled write_file and an errored replace carrying keys never ran, so they make no event and carry no label
     labels:
       - at: "1:-"
         near: [cache-hygiene/model-switch]
@@ -319,7 +319,7 @@ sessions:
         note: a setting read from the environment, not a secret written in
       - at: "2:tu-a7"
         fire: [testing/test-after-change]
-        note: an edit, then the suite in the same turn
+        note: an edit, then the suite in the same turn, which exits non-zero and still ran
       - at: "3:tu-a9"
         fire: [transcript-hygiene/whole-file-cat]
         note: a prompt straight after a functionResponse record opens turn 3

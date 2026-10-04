@@ -150,6 +150,17 @@ Amended 2026-09-24: `readers.gemini` joins as the third module under `readers`, 
     Adding one is a minor change; renaming, removing or changing the meaning of one is a breaking
     change under AD-9.
 
+Amended 2026-10-03: a tool call is a `tool_use` only when it executed. A call refused, cancelled,
+denied by a permission rule or policy, or stopped by a check before its tool ran makes no
+`tool_use` and no `tool_result` on any reader; a call that executed and reported failure is one, so
+a test run that exits non-zero is a test run. A call a transcript cannot place on either side, an
+interrupted one included, is left out (AD-4). Each reader tells the cases apart from its runtime's
+record: Claude Code from `toolDenialKind` or the fixed refusal texts on an `is_error` result, with
+`<tool_use_error>Error calling tool` and `Exit code N` counted as run; Codex from the outputs
+`exec command rejected by user`, `patch rejected by user`, `patch rejected: ...` and `aborted`;
+Gemini CLI from `status`, where only `success` counts, since `error` and `cancelled` each cover
+both never-ran and part-ran calls (#114)
+
 ### AD-3: One tool vocabulary across runtimes [ADOPTED for Bash and Agent; PROPOSED for file tools]
 
 - **Binds:** FR-2, FR-3, FR-32.

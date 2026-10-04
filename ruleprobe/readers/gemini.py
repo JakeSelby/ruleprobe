@@ -29,6 +29,12 @@ What is read differently from the transcript, and why:
 - `write_file` is `Write` and `replace` is `Edit`: their keys are Claude Code's. A relative
   `file_path` is resolved against a POSIX `.project_root` unless it climbs out of it. `invoke_agent` stays native until its
   arguments are checked against `Agent`'s, and every other tool keeps its native name.
+- A call counts only when its `status` is `success`. `cancelled` is a call the user declined,
+  a queue the user cancelled, or a run the user stopped part-way; `error` is a call refused
+  before it ran (bad arguments, an unknown tool, a policy denial) or one whose tool failed to
+  run at all. The record does not say which, so neither makes an event, nor does its result:
+  that drops what never ran and under-counts the rest. A shell command that exits non-zero is
+  still `success`, with its exit code in the output, so a failing test run counts as a run.
 - A write or edit the user changed before accepting it is not measured as a write. Its args
   hold the user's version, and `ai_proposed_content` may hold an earlier edit of the user's
   rather than the model's proposal, so the call keeps its native name and loses its text.
@@ -234,7 +240,10 @@ def _events(messages, project_root):
 
 
 def _call(call, turn, posix, project_root):
-    """The `tool_use` for one recorded call, and its `tool_result` when it has one."""
+    """The `tool_use` for one recorded call, and its `tool_result` when it has one, or
+    nothing when the call did not run to completion: see the module docstring."""
+    if call.get("status") != "success":
+        return []
     native = call.get("name") if isinstance(call.get("name"), str) else ""
     use_id = call.get("id") if isinstance(call.get("id"), str) else ""
     arguments = call.get("args")
@@ -287,7 +296,7 @@ def _text(content):
 
 def _result(content):
     """A tool result's text: its text parts, and each `functionResponse`'s `output`, or its
-    `error` when the call failed."""
+    `error` when it carries one."""
     out = []
     for part in _parts(content):
         if isinstance(part, str):
