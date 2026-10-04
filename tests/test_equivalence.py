@@ -37,6 +37,17 @@ class EquivalenceTests(unittest.TestCase):
     def test_the_file_expresses_exactly_the_shipped_six(self):
         self.assertEqual(self.declarative.ids(), DEFAULT.ids())
 
+    def test_secret_in_write_is_written_with_the_python_patterns(self):
+        from ruleprobe.detectors import common
+        document, _lines = load(COMMON_YAML)
+        when = [d for d in document["detectors"] if d["id"] == "secrets/secret-in-write"][0]["when"]
+        writes, tests, shell = (branch["all"] for branch in when["any"])
+        self.assertEqual(writes[1]["not"]["arg"]["regex"], [common._TEST_PATH_PATTERN])
+        self.assertEqual(writes[2]["arg"]["regex"], common._LIVE_SECRET_PATTERNS)
+        self.assertEqual(tests[1]["arg"]["regex"], [common._TEST_PATH_PATTERN])
+        self.assertEqual(tests[2]["arg"]["regex"], common._LIVE_SECRET_PATTERNS_IN_TESTS)
+        self.assertEqual(shell[1]["text"]["regex"], common._LIVE_SECRET_PATTERNS)
+
     def test_every_corpus_case_gives_the_same_hits_both_ways(self):
         for did, cases in CASES.items():
             for i, (events, expected) in enumerate(cases):
