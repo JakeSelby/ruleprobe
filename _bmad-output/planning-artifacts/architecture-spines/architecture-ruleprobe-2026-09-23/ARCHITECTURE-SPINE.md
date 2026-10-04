@@ -7,8 +7,8 @@ paradigm: 'pipes-and-filters, batch per session: readers -> event list -> one sh
 scope: 'The ruleprobe package: readers, event schema, shell parse, registry, matchers, declarative format, rule binding, report, validity and CLI. 0.1.0 as built, the v0.2.0 PRD, and the proposed v0.3.0 and v0.4.0 roadmap.'
 status: final
 created: '2026-09-23'
-updated: '2026-09-29'
-binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, FR-39, FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48, FR-49, FR-50, FR-51, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, agent-harness AD-13, agent-harness AD-21]
+updated: '2026-10-03'
+binds: [FR-1, FR-2, FR-3, FR-4, FR-5, FR-6, FR-7, FR-8, FR-9, FR-10, FR-11, FR-12, FR-13, FR-14, FR-15, FR-16, FR-17, FR-18, FR-19, FR-20, FR-21, FR-22, FR-23, FR-24, FR-25, FR-26, FR-27, FR-28, FR-29, FR-30, FR-31, FR-32, FR-33, FR-34, FR-35, FR-36, FR-37, FR-38, FR-39, FR-40, FR-41, FR-42, FR-43, FR-44, FR-45, FR-46, FR-47, FR-48, FR-49, FR-50, FR-51, FR-52, NFR-1, NFR-2, NFR-3, NFR-4, NFR-5, NFR-6, NFR-7, NFR-8, NFR-9, NFR-10, NFR-11, agent-harness AD-13, agent-harness AD-21]
 sources:
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/prd.md
   - _bmad-output/planning-artifacts/prds/prd-ruleprobe-2026-09-23/addendum.md
@@ -270,6 +270,9 @@ native (#55)
     directory the user names. `report`, `detectors`, `corpus` and the explain path write nothing.
     Amended 2026-09-25 [PROPOSED, v0.3.0]: `audit` (verdicts and cards) and `snapshot` also write, each
     only under a directory the user names and only what AD-15 allows.
+    Amended 2026-10-03 [PROPOSED, v0.3.0; story 8.7, #154]: `bind --apply` writes one bindings file,
+    the user's global one or the current repository's, under AD-19. `bind --plan` and `report` write
+    nothing.
   - The clock is read only to resolve `--since`, in `ruleprobe/readers/__init__.py`.
   - Every ordering in output comes from an explicit sort. Path lists are sorted before reading, as the
     readers do today. No count depends on dict, set or filesystem order.
@@ -548,6 +551,33 @@ native (#55)
     text is today's. Each unmeasured section names its nearest catalog entry and the word that blocked
     it.
 
+### AD-19: User bindings live in a sidecar file the user owns, and only trusted ones count [PROPOSED, v0.3.0; story 8.7, #154]
+
+- **Binds:** FR-52, FR-36, FR-37, NFR-4, NFR-5.
+- **Prevents:** a cloned repository claiming coverage the user never chose; a binding surviving a
+  rewritten rule; a bindings file smuggling a detector in; front matter added to the file the agent
+  reads; a person's claim read as the binder's.
+- **Rule:**
+  - `ruleprobe bind` is the second opt-in writing command beside `label` (AD-8, AD-13). `--plan`
+    writes nothing; `--apply FILE` writes exactly one bindings file and nothing else: the global
+    `$XDG_CONFIG_HOME/ruleprobe/bindings.yaml` (`~/.config` by default) or, when asked, the current
+    repository's `.ruleprobe/bindings.yaml`. It never edits a rule file.
+  - The file is the AD-7 subset or JSON, parsed by `declarative.py`, with sorted entries and keys and
+    no timestamp. An entry holds the rule file's path (home-relative as `~/...` in the global file,
+    repository-relative in a project file), the section slug, one detector id and the sha256 of the
+    section's normalized text (`rules._normalize` over heading and prose).
+  - `report` honours two sources only: the global file, and the bindings file of the project the user
+    pointed at, the working directory or `--rules`. A bindings file reached only through discovery
+    (FR-38) is untrusted and ignored, and the coverage block counts it, never printing its path.
+  - A binding names an id the run's registry already holds from the shipped set, the catalog or the
+    user's own detector files; it never defines a detector. An unknown id is refused at `--apply` and
+    reported, unbound, at `report`.
+  - A binding whose stored hash differs from the section's text today is stale: the rule stays
+    unmeasured with "binding stale, run ruleprobe bind". Catalog binding (AD-18) is unchanged and
+    runs first; a user binding applies only to a section the catalog left unmeasured.
+  - A user-bound rule carries `source: user` and prints `user-bound, <detector>`, apart from
+    `catalog-bound`; the binder's corpus score (FR-37) never counts it.
+
 ## Consistency Conventions
 
 | Concern | Convention |
@@ -620,6 +650,7 @@ No service, no hosted component, no environment beyond a developer machine and C
 | NFR-1 to NFR-8 | all | AD-8, AD-4, AD-6 |
 | FR-35, FR-47 judge receipts and dark-rule slice (proposed, v0.4.0) | `validity.py`, `corpus/` | AD-6, AD-8, AD-17 |
 | FR-36 to FR-38, FR-51 per-sentence binding, binder score, discovery, binding corpus (proposed) | `rules.py`, `corpus/` | AD-18, AD-12, AD-6 |
+| FR-52 user-confirmed bindings, `ruleprobe bind` (proposed, v0.3.0) | `bindings.py`, `rules.py`, `cli.py` | AD-19, AD-8, AD-18 |
 | FR-39 to FR-41 hash, audit, validity cards (proposed, v0.3.0) | `registry.py`, `validity.py`, `cli.py` | AD-16, AD-15, AD-13 |
 | FR-42 to FR-44 bounds, snapshot and rows, deciding event (proposed, v0.3.0) | `stats.py`, `report.py`, `cli.py` | AD-17, AD-15, AD-13 |
 | FR-45 reader health counts (proposed, v0.3.0) | `readers/` | AD-10, AD-2 |

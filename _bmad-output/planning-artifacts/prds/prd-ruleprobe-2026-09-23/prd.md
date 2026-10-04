@@ -2,7 +2,7 @@
 title: "PRD: ruleprobe"
 status: final
 created: 2026-09-23
-updated: 2026-09-29
+updated: 2026-10-03
 issue: 13
 bmad_id: RP-S004
 milestone: v0.2.0
@@ -742,6 +742,12 @@ One rule section can bind several detectors, each through its own sentence. **St
   `secret-in-write` and `unfiltered-find`.
 - Binding still reads the rule text with no model (NFR-7), and an unsure sentence stays unmeasured
   (NFR-4).
+- Amended 2026-10-03 (maintainer decision; story 8.7, #154): the zero-configuration coverage goal is
+  cut on independent evidence. The held-out set of story 8.6 (#151, `rules-heldout.json`) measured
+  catalog binding at recall 0.12 (5/40) with precision 1.00 (validated on the synthetic held-out set,
+  not on real transcripts), so on real, dense rule files per-sentence binding measures almost nothing.
+  Catalog binding keeps exactly its present strictness; coverage beyond it comes from the user's own
+  confirmed bindings (FR-52), never from a looser binder.
 
 #### FR-37: The binder scored like a detector
 `ruleprobe corpus` scores rule binding against labelled rule sentences, under the same floor as the
@@ -756,6 +762,11 @@ detectors. **Status:** proposed (v0.3.0).
   together. Amended 2026-09-25 (RP-SP004's decision, #141), replacing "ships only at recall ≥ 0.70 on
   the zoo with zero false binds".
 - A false bind fails the corpus gate as a detector under the floor does.
+- Amended 2026-10-03 (maintainer decision; story 8.7, #154): the recall bar of 0.70 for Epic 8 as a
+  whole is withdrawn. The independent held-out set (story 8.6, #151) scored 0.12 at precision 1.00, and
+  the approved plan's own exit clause cut the goal. The binder keeps its zero-false-bind gate and its
+  recall ratchets on the zoo and the held-out set; the user-confirmed bindings of FR-52 are a person's
+  claim, are labelled as such in the report, and are never counted in the binder's score.
 
 #### FR-38: Rule discovery
 With no `--rules`, `ruleprobe report` finds and binds the rule files that applied to each session.
@@ -772,6 +783,29 @@ With no `--rules`, `ruleprobe report` finds and binds the rule files that applie
 - A fixture home directory with one bindable rule shows that rule measured, with no flags, inside 60
   seconds.
 - Discovery reads files and writes none (NFR-5).
+
+#### FR-52: User-confirmed bindings with `ruleprobe bind`
+An explicit, opt-in command shows each unmeasured rule section with its nearest catalog detectors and
+the reason it did not bind, and records the binding the user confirms. **Status:** proposed (v0.3.0;
+maintainer decision 2026-10-03, story 8.7, #154).
+
+**Consequences (testable):**
+- `ruleprobe bind --plan` prints every unmeasured section in sorted order with candidate detectors,
+  ranked by the binder's own deterministic evidence, and the reason the section did not bind; `--json`
+  gives the same plan as data. It writes nothing.
+- `ruleprobe bind --apply FILE` records the choices from a plan the user edited in a sidecar bindings
+  file: the user's own `~/.config/ruleprobe/bindings.yaml` by default, or the current repository's
+  `.ruleprobe/bindings.yaml` when asked. It never edits a rule file.
+- Each binding names the rule file, the section slug, one detector id and a sha256 of the section's
+  normalized text. When the text changes, `report` shows the rule as "binding stale, run ruleprobe
+  bind" and does not count it as measured.
+- `report` honours only the global bindings file and the bindings file of the project the user points
+  at (the working directory, or `--rules`). A bindings file found through discovery in a cloned
+  repository is ignored, and the report says so.
+- A binding names a shipped, catalog or user detector id and never defines a detector; an unknown id is
+  refused.
+- A user-bound rule shows as `measured  user-bound, <detector>`, apart from `catalog-bound`.
+- `report` still writes nothing (NFR-5); the bindings file holds no timestamp and sorts its entries.
 
 ### 4.13 Field evidence (proposed, v0.3.0)
 
@@ -1173,13 +1207,20 @@ transcript giving a different report. Any one is a failure regardless of the oth
 From the roadmap the maintainer approved on 2026-09-25. Every item is proposed.
 
 **0.3.0, a trusted first run and the launch:** FR-36 to FR-38 (per-sentence binding, the binder's
-score, rule discovery); NFR-10 and the fixes #110, #111, #113 and #114 (the field floor for the
+score, rule discovery) and FR-52 (`ruleprobe bind`); NFR-10 and the fixes #110, #111, #113 and #114 (the field floor for the
 defaults); FR-39 to FR-41 (version hashes, `audit`, validity cards); FR-42 to FR-44 (bounds, snapshot
 and saved rows, a deciding event for every hit, #112); FR-45 and NFR-11 (reader health, three operating
 systems, the determinism and fuzz tests under NFR-3). A release candidate goes to five developers outside
 the project; 0.3.0 is tagged when three of them see a rule measured with no flags inside 60 seconds and
 two return a validity card. Agent-harness then pins 0.3 (#27). Every public launch text is approved by
 the maintainer before it goes out.
+
+Amended 2026-10-03 (maintainer decision; story 8.7, #154): the launch headline is no longer "rules
+measured with no configuration". The held-out set (story 8.6, #151) measured catalog binding at recall
+0.12, so the launch claims coverage as a few minutes of setup with `ruleprobe bind` (FR-52), not as a
+guess made with no configuration. The exact public wording stays the maintainer's to approve (story
+13.4). Whether the beta's 60-second bar also counts a rule measured after `bind` is open for the
+maintainer before 0.3.0rc1; the criteria above stay as written until then.
 
 **0.4.0, rules you can evaluate:** FR-46 (`compare`); FR-35 amended as judge receipts and FR-47 (the
 dark-rule slice), both under #21; FR-48 to FR-51 (`merge`, JSON Schemas, mutation testing, the binding

@@ -57,9 +57,37 @@ block, never named.
 Parent directories are not searched. `--rules DIR` reads that directory instead, and `--no-config`
 reads no rule file.
 
-Nothing is sent anywhere, no model is asked anything, `report` and `explain` write nothing,
-`label` writes only under the directory you name, and the same transcript gives the same
-answer every time. Python 3.9 or newer, standard library only.
+**Bind your rules.** The catalog binds a section only when a sentence says exactly what a
+detector counts, so most sections of a real rule file start unmeasured. A few minutes with
+`ruleprobe bind` closes that gap with bindings you choose:
+
+```sh
+uvx ruleprobe bind --plan > plan.yaml     # each unmeasured section, its nearest detectors, why
+# set `bind:` to a detector id on the sections you want measured, then:
+uvx ruleprobe bind --apply plan.yaml      # records them in ~/.config/ruleprobe/bindings.yaml
+```
+
+The plan lists every unmeasured section in sorted order, with the catalog detectors its
+sentences came nearest to, ranked by how many sentences matched, and the reason it did not bind:
+an exception such as "unless", a condition, or a sentence matching two entries. Nothing stops you
+binding a section the catalog refused; the plan tells you what you are overriding. `--json`
+prints the same plan as data, and `--apply` takes either form. Pass the same `--rules` or
+`--root` to both. `--apply --project` writes the current repository's `.ruleprobe/bindings.yaml`
+instead, with paths relative to it; your rule files are never edited.
+
+A bound rule reads `measured  user-bound, <detector>` in the coverage block, apart from
+`catalog-bound`, because a person made that claim. Each binding keeps a sha256 of the section's
+text, and when the text changes the rule reads "binding stale, run ruleprobe bind" and is not
+counted as measured until you bind it again. `report` reads only your global bindings file and
+the one in the project you run it from, or that `--rules` is in; a bindings file in a project
+found through the transcripts, which may be somebody else's clone, is never read, only counted.
+A binding names a shipped, catalog or detector-file id and never defines a detector; an unknown
+id is refused. `--no-config` reads no bindings.
+
+Nothing is sent anywhere, no model is asked anything, `report`, `explain` and `bind --plan`
+write nothing, `label` writes only under the directory you name, `bind --apply` writes only its
+bindings file, and the same transcript gives the same answer every time. Python 3.9 or newer,
+standard library only.
 
 Other groupings, and a window:
 
@@ -68,6 +96,7 @@ uvx ruleprobe report --by repo --since 30      # last 30 days, one line per repo
 uvx ruleprobe report --by stance --stance commits=conventional   # grouped by configuration
 uvx ruleprobe report --root ./transcripts      # a directory of your own
 uvx ruleprobe report --rules ./docs/rules      # bind detectors to rule files, and name the gaps
+uvx ruleprobe bind --plan --rules ./docs/rules # the unmeasured sections, to bind yourself
 uvx ruleprobe detectors                        # what would run
 uvx ruleprobe corpus                           # how good each detector is, over the labelled corpus
 uvx ruleprobe report --json                    # the same numbers as data, rows included
@@ -80,8 +109,9 @@ were read through. It is complete, so a saved result folds a retired id by apply
 stands, never by merging it again with a later release's shipped map.
 The result also carries `coverage`, on every run: `measured`, `dark` and `unmeasured` count
 rules, not sessions as the top-level `measured` and `unmeasured` do, and `share` is the
-measured share of them; `catalog` counts the measured rules the shipped catalog binds. With no
-rules read, the counts are zero and `share` is `null`.
+measured share of them; `catalog` counts the measured rules the shipped catalog binds, and `user`
+the ones a binding you confirmed binds. With no rules read, the counts are zero and `share` is
+`null`.
 
 A row names each detector that raised in `rules_errors`, and that session leaves the
 detector's hit denominator only. A row also carries `compliance`, detector id to

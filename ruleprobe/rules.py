@@ -61,9 +61,9 @@ FILENAMES = ("detectors.yaml", "detectors.yml", "detectors.json")
 #: How far up the tree to look for `REPO_DIR` before giving up.
 MAX_PARENTS = 40
 STATES = ("measured", "dark", "unmeasured")
-#: Where a measured rule's detectors came from: its own front matter or detector files, or
-#: the shipped catalog.
-SOURCES = ("own", "catalog")
+#: Where a measured rule's detectors came from: its own front matter or detector files, the
+#: shipped catalog, or a binding the user confirmed with `ruleprobe bind` (`ruleprobe.bindings`).
+SOURCES = ("own", "catalog", "user")
 
 #: A detector file that could not be read in full: the file, the line, and why.
 Finding = namedtuple("Finding", "path line reason")
@@ -102,10 +102,10 @@ class Bundle(object):
     """Everything a run loaded: the detectors, the rule files, and the findings."""
 
     __slots__ = ("detectors", "rules", "findings", "sources", "found", "refused", "skipped",
-                 "_bound")
+                 "sections", "ignored", "_bound")
 
     def __init__(self, detectors=None, rules=None, findings=None, sources=None, found=None,
-                 refused=0, skipped=0):
+                 refused=0, skipped=0, ignored=0):
         self.detectors = list(detectors or [])
         self.rules = list(rules or [])
         self.findings = list(findings or [])
@@ -117,6 +117,11 @@ class Bundle(object):
         # many were skipped for their size or a rules folder's cap.
         self.refused = refused
         self.skipped = skipped
+        # Each section rule's text as the binder read it, `{rule id: (heading, paragraphs)}`,
+        # or None for an id two sections share; what `ruleprobe bind` hashes and ranks.
+        self.sections = {}
+        # How many bindings files in discovered projects were left unread (`ruleprobe.bindings`).
+        self.ignored = ignored
         # Every entry any `registry()` call labelled, by identity, with the entry it was
         # labelled from: `{id(labelled): (labelled, bound)}`. The labelled entry is held so
         # its identity is never reused by another object.
@@ -149,7 +154,7 @@ class Bundle(object):
         for entry in self.rules:
             known = self._bound.get(id(entry))
             binding.append(known[1] if known is not None and known[0] is entry else entry)
-        bound = set(did for entry in binding if entry.source == "catalog"
+        bound = set(did for entry in binding if entry.source in ("catalog", "user")
                     for did in entry.detectors)
         for detector in catalog_detectors(fold):
             if (whole_catalog or detector.id in bound) and detector.id not in registry:
@@ -174,13 +179,14 @@ class Bundle(object):
 
     def coverage(self):
         """The counts, plus `share`: measured rules over all rules, dark ones included, or
-        `None` when there are no rules, and `catalog`: the measured rules the shipped catalog
-        binds. `summary()` prints the share floored to a whole percent and `report --json`
+        `None` when there are no rules, `catalog`: the measured rules the shipped catalog
+        binds, and `user`: the measured rules a binding the user confirmed binds. `summary()` prints the share floored to a whole percent and `report --json`
         carries it exact, so the two count the same rules."""
         out = self.counts()
         total = sum(out.values())
         out["share"] = out["measured"] / float(total) if total else None
         out["catalog"] = sum(1 for entry in self.rules if entry.source == "catalog")
+        out["user"] = sum(1 for entry in self.rules if entry.source == "user")
         return out
 
     def summary(self, relative_to=None):
@@ -200,6 +206,9 @@ class Bundle(object):
             lines.append("rule files skipped: %d over %d KB, or past %d in one rules folder, "
                          "not read" % (self.skipped, MAX_RULE_FILE_BYTES // 1024,
                                        MAX_RULE_DIR_FILES))
+        if self.ignored:
+            lines.append("bindings files ignored: %d in projects found from transcripts, not "
+                         "read; only your global file and this project's are" % self.ignored)
         if self.rules:
             coverage = self.coverage()
             lines.append("rules: %d measured, %d dark, %d unmeasured%s"
@@ -211,6 +220,8 @@ class Bundle(object):
                 note = ": " + entry.reason if entry.reason else ""
                 if entry.source == "catalog":
                     note = ": catalog-bound, " + ", ".join(entry.detectors)
+                elif entry.source == "user":
+                    note = ": user-bound, " + ", ".join(entry.detectors)
                 # A found file's rule id already says where it is.
                 where = _short(entry.path, relative_to)
                 if self.found and entry.rule.split("#")[0] == _label(entry.path):
@@ -233,7 +244,13 @@ def _sourced(rules, registry, fold):
     measure the rule. `fold` is the registry's fold map, to say which ids are retired."""
     out = []
     for entry in rules:
-        if entry.source == "catalog":
+        if entry.source == "user":
+            missing = [did for did in entry.detectors if registry.get(did) is None]
+            if missing:
+                reason = ("its user binding %s is %s" % (
+                    missing[0], "retired" if missing[0] in fold else "not registered"))
+                entry = RuleEntry(entry.rule, entry.path, "unmeasured", reason, [], None)
+        elif entry.source == "catalog":
             for did in entry.detectors:
                 held = registry.get(did)
                 if held is None:
@@ -250,7 +267,7 @@ def _sourced(rules, registry, fold):
 def _percent(coverage):
     """The share as the `rules:` line prints it. Floored, so a file with one rule unmeasured
     never reads 100%; `<1%` when the floor would hide a measured rule."""
-    total = sum(v for k, v in coverage.items() if k not in ("share", "catalog"))
+    total = sum(v for k, v in coverage.items() if k not in ("share", "catalog", "user"))
     if not total:
         return ""
     percent = 100 * coverage["measured"] // total
@@ -705,7 +722,7 @@ def _compile_entries(entries, path, lines, rule=None, default_prefix=None, versi
 # --- rule files ---------------------------------------------------------------------------
 
 
-def load_rules_dir(directory):
+def load_rules_dir(directory, sections=None):
     """`(detectors, rule entries, findings)` for a directory of markdown rule files.
 
     Every `.md` under `directory` is one rule, or one per section when nothing in its front
@@ -716,7 +733,7 @@ def load_rules_dir(directory):
     if not os.path.isdir(directory):
         return detectors, rules, [Finding(directory, 0, "not a directory")]
     for path in _markdown(directory):
-        found, entries, problems = read_rule_file(path, root=directory)
+        found, entries, problems = read_rule_file(path, root=directory, sections=sections)
         detectors.extend(found)
         rules.extend(entries)
         findings.extend(problems)
@@ -733,7 +750,7 @@ def _markdown(directory):
     return out
 
 
-def read_rule_file(path, root=None, label=None, trusted=True, real=None):
+def read_rule_file(path, root=None, label=None, trusted=True, real=None, sections=None):
     """`(detectors, [RuleEntry], findings)` for one markdown rule file.
 
     Front matter keys this reads are `rule`, `detector` and `opt_out`; every other key is
@@ -758,6 +775,9 @@ def read_rule_file(path, root=None, label=None, trusted=True, real=None):
     A file with no heading, or none of whose sections is a rule, binds the catalog by its
     whole text, text above the first heading included. Known miss: in a file with a rule
     section, text above the first heading is no rule.
+
+    `sections`, when given, is a dict each section rule's text is recorded in
+    (`Bundle.sections`).
     """
     stem = os.path.splitext(os.path.basename(path))[0]
     rule = label or stem
@@ -782,10 +802,11 @@ def read_rule_file(path, root=None, label=None, trusted=True, real=None):
                                     "front matter is read only under --rules; this found file "
                                     "binds through the catalog alone"))
         body_line = text.count("\n") - body.count("\n") + 1
-        entries, problems = _section_rules(path, root, body, body_line, rule, label)
+        entries, problems = _section_rules(path, root, body, body_line, rule, label,
+                                              sections)
         return [], entries, findings + problems
     if front is None:
-        entries, findings = _section_rules(path, root, text, 1, rule, label)
+        entries, findings = _section_rules(path, root, text, 1, rule, label, sections)
         return [], entries, findings
     try:
         doc, lines = parse_with_lines(front, path, first_line)
@@ -833,7 +854,8 @@ def read_rule_file(path, root=None, label=None, trusted=True, real=None):
     if opt_out is not None:
         reason = opt_out if isinstance(opt_out, str) and opt_out else "no reason given"
         return [], [RuleEntry(rule, path, "dark", reason, [])], findings
-    entries, problems = _section_rules(path, root, body, body_line, rule, label)
+    entries, problems = _section_rules(path, root, body, body_line, rule, label,
+                                              sections)
     return [], entries, findings + problems
 
 
@@ -1156,7 +1178,7 @@ def _slug(heading):
     return kept.replace(" ", "-") or "section"
 
 
-def _section_rules(path, root, body, first_line, name, label=None):
+def _section_rules(path, root, body, first_line, name, label=None, sections=None):
     """One `RuleEntry` per section of `body` that is a rule, with its id, bound to the
     catalog entry each of its sentences binds (`_bind`) and unmeasured when none does; or,
     when `body` has no heading or none of its sections is a rule, one rule called `name`, as
@@ -1168,7 +1190,8 @@ def _section_rules(path, root, body, first_line, name, label=None):
     suffix in document order (`testing`, `testing-2`), counted over every heading so that a
     section's id does not move when a section above it stops or starts being a rule. A rule
     id that still repeats, as when a later heading's own text is `Testing 2`, is a finding
-    against that heading's line, and both rules are still listed.
+    against that heading's line, and both rules are still listed; `sections` then records
+    that id as None, since no one section is its text.
     """
     relative = label or os.path.relpath(path, root or os.path.dirname(path)).replace(os.sep, "/")
     units = _units(body)
@@ -1187,6 +1210,8 @@ def _section_rules(path, root, body, first_line, name, label=None):
                                     "the section id %s is already taken in this file" % rule))
         taken.add(rule)
         entries.append(_bind(rule, path, heading, paragraphs))
+        if sections is not None:
+            sections[rule] = None if rule in sections else (heading, tuple(paragraphs))
     if not entries:
         return [_bind(name, path, "", _file_prose(body), "no section is a rule")], findings
     return entries, findings
@@ -1196,29 +1221,34 @@ def _section_rules(path, root, body, first_line, name, label=None):
 
 
 def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True,
-                rule_files=None, refused=0, skipped=0):
+                rule_files=None, refused=0, skipped=0, bindings=None, ignored=0):
     """Every declarative detector a run should have: the files named, the ones discovered,
     the rule directory, and `rule_files`, the `RuleFile`s `find_rule_files` found, each read
     at its checked real path, named in its rule ids by where it was found (`_label`) and
     bound through the catalog alone; `refused` and `skipped` are how many files
-    `find_rule_files` refused and skipped. Findings accumulate; nothing raises."""
+    `find_rule_files` refused and skipped. Findings accumulate; nothing raises.
+
+    `bindings`, when given, is the user's confirmed bindings (`ruleprobe.bindings.Bindings`),
+    applied to the section rules the catalog left unmeasured; `ignored` is how many bindings
+    files in discovered projects were left unread."""
     sources = list(paths or [])
     if config:
         sources = discover(cwd=cwd, user=user) + sources
-    bundle = Bundle(sources=sources, found=rule_files, refused=refused, skipped=skipped)
+    bundle = Bundle(sources=sources, found=rule_files, refused=refused, skipped=skipped,
+                    ignored=ignored)
     for path in sources:
         detectors, findings = load_file(path)
         bundle.detectors.extend(detectors)
         bundle.findings.extend(findings)
     if rules_dir:
-        detectors, rules, findings = load_rules_dir(rules_dir)
+        detectors, rules, findings = load_rules_dir(rules_dir, sections=bundle.sections)
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)
     for found in rule_files or ():
         path, real = found if isinstance(found, RuleFile) else (found, None)
         detectors, rules, findings = read_rule_file(path, label=_label(path), trusted=False,
-                                                    real=real)
+                                                    real=real, sections=bundle.sections)
         bundle.detectors.extend(detectors)
         bundle.rules.extend(rules)
         bundle.findings.extend(findings)
@@ -1230,8 +1260,18 @@ def load_bundle(paths=None, rules_dir=None, cwd=None, config=True, user=True,
     bundle.rules = [entry._replace(source="own")
                     if entry.source == "catalog" and own.intersection(entry.detectors)
                     else entry for entry in bundle.rules]
-    bound = set(did for entry in bundle.rules if entry.source == "catalog"
+    if bindings is not None:
+        bindings.apply(bundle, known_ids(bundle.detectors))
+    bound = set(did for entry in bundle.rules if entry.source in ("catalog", "user")
                 for did in entry.detectors)
     bundle.detectors[:0] = [d for d in catalog_detectors()
                             if d.id in bound and d.id not in DEFAULT]
     return bundle
+
+
+def known_ids(detectors=()):
+    """The detector ids a user binding may name: the shipped ones, the live catalog's, and
+    those of `detectors`, the ones the user's own detector files and `--rules` front matter
+    compiled. A found file compiles none, so a clone can add no id here."""
+    return frozenset([d.id for d in DEFAULT] + [d.id for d in catalog_detectors()]
+                     + [d.id for d in detectors])

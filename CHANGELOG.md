@@ -35,6 +35,14 @@ All notable changes to this project are documented here. The format follows
   anywhere under the home folder), and a file over 1 MB or past 200 in one rules folder is
   skipped; refused and skipped files are counted, never read or named. `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
   that word ([#149](https://github.com/JakeSelby/ruleprobe/issues/149)).
+- `ruleprobe bind` binds the rule sections the catalog left unmeasured to detectors you choose.
+  `bind --plan` prints each one in sorted order with its nearest catalog detectors and the reason
+  it did not bind, and writes nothing; `bind --apply FILE` records the choices from the edited
+  plan in `~/.config/ruleprobe/bindings.yaml`, or with `--project` in the repository's
+  `.ruleprobe/bindings.yaml`. `report` shows such a rule as `user-bound`, counts it under
+  `coverage.user`, marks it stale when its section's text changes, and reads no bindings file
+  from a project it found through the transcripts. Catalog binding is unchanged
+  ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
 
 ### Changed
 
