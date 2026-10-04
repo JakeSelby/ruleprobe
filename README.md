@@ -233,8 +233,8 @@ anywhere stays unmeasured - in a long file, the likelier outcome.
 A catalog entry measures the shape it names and no more. "Never commit secrets" binds
 `secrets/secret-file-add`, which counts `git add` of a secret-shaped file; a secret written
 inline into a file or a command is not what it counts. "Never write API keys to a file" binds
-`secrets/secret-in-write`, which counts a secret-shaped string a Write or Edit writes, or a
-heredoc carries; a key on a command line outside a heredoc is not what it counts.
+`secrets/secret-in-write`, which counts a live credential a Write or Edit writes, or a heredoc
+carries; a key on a command line outside a heredoc is not what it counts.
 
 Any other rule takes no Python either: write a detector beside it as data. This is a real
 run over the example transcript and the example rules in this repository, so it is
@@ -412,7 +412,7 @@ Be clear-eyed about the scope, because the name promises more than version 0.1 d
 
 **Six detectors ship with the package**, and they are the generic ones: reading a whole
 file into the context window, an unfiltered `find`, a commit or push that walks past the
-repository's hooks, a secret-shaped string written to a file, a context compaction, and a
+repository's hooks, a live credential written to a file, a context compaction, and a
 model change mid-session. They are in the package because they mean the same thing in every
 repository, and none of them needs to know what your rules say.
 
@@ -585,13 +585,13 @@ commits/non-conventional-subject          5    9    5    0    0   1.00    1.00  
 git-safety/force-push-default             5    7    5    0    0   1.00    1.00   1.00
 package-manager/pip-install               5    7    5    0    0   1.00    1.00   1.00
 secrets/secret-file-add                   5    6    5    0    0   1.00    1.00   1.00
-secrets/secret-in-write                  15   13   15    0    0   1.00    1.00   1.00
+secrets/secret-in-write                  16   22   16    0    0   1.00    1.00   1.00
 testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find       10   15   10    0    0   1.00    1.00   1.00
 transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
 verification/no-verify                   11   13   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    87  111   87    0    0   1.00    1.00   1.00  floor 0.90
+total                                    88  120   88    0    0   1.00    1.00   1.00  floor 0.90
 
 binder over the rules zoo: 201 sections, 240 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note
@@ -639,6 +639,21 @@ detector, so they stay true of it.
 and CI in this repository runs exactly that. It is a gate on the repository, not on a run:
 nothing in `ruleprobe report` reads the floor, and no report of yours will ever fail because
 a detector scored badly. `--json` prints the same numbers as data.
+
+**A perfect score here is not field accuracy.** `secrets/secret-in-write` scored 1.00 on this
+corpus while a hand check of 23 of its hits on real transcripts judged one right, 20 wrong and
+two unsure, a precision of 0.05: the wrong hits wrote *about* secrets - a variable's name, a
+pattern's source, a placeholder, redaction code. It now counts a live credential and never a
+mention of one: an issuer's shape with a value behind it - an AWS access key id, a secret
+access key or client secret assigned a literal, a Bearer, GitHub, Slack, OpenAI or Anthropic
+token, or a private-key header with a body. A placeholder (`xxx`, `your-...`, `changeme`,
+`${VAR}`, a token of one repeated character, or one with no digit), a variable name, a value
+read from the environment, a line that reads as a pattern source or as redaction code
+(`re.compile(`, a character class or quantifier, `redact`, `mask`) and a write to a test path
+whose text calls its values fake count nothing, and the corpus carries a near-miss for each. A
+documented example value in an issuer's shape still counts, since nothing in it tells it from a
+live one, and a password still has no shape. Its field precision has not been retaken since the
+change; the corpus score is the only figure for it.
 
 The second table scores the rule binder, the text reading that binds a rule section to a
 catalog entry, over `ruleprobe/corpus/rules-zoo.json`: synthetic rule sections with every

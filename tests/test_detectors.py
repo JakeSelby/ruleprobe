@@ -7,13 +7,18 @@ does not, so a detector cannot ship without evidence on both sides.
 
 Run: python3 -m unittest discover -s tests
 """
+import re
+import time
 import unittest
 
 from corpus import FAKE_KEY, bash, compact, prompt, say, tool_use
 from ruleprobe import DEFAULT, Detector, analyse, counts, run
+from ruleprobe.detectors.common import SECRET_PATTERNS, _secret_in, redact
 from ruleprobe.shell import MAX_COMMAND
 
 HUGE = "echo " + "x" * (100 * 1024)
+# A synthetic value that mixes letters and digits, as a live token does.
+LIVE = "Q7mK2pX9" * 4
 
 CASES = {
     "transcript-hygiene/whole-file-cat": [
@@ -54,6 +59,28 @@ CASES = {
         ([bash("cat > .env <<EOF\nAWS_ACCESS_KEY_ID=%s\nEOF" % FAKE_KEY)], 1),
         ([tool_use("Write", {"file_path": "a.py", "content": "KEY = os.environ['AWS_KEY']\n"})], 0),
         ([bash("cat > a.txt <<EOF\nnothing secret\nEOF")], 0),
+        # A live value in each issuer's shape.
+        ([tool_use("Write", {"file_path": ".env", "content": "K=sk-" "ant-api03-" + LIVE})], 1),
+        ([tool_use("Write", {"file_path": ".env", "content": "K=github" "_pat_" + LIVE})], 1),
+        ([tool_use("Edit", {"file_path": "a.ini", "new_string": "client" "_secret: " + LIVE})], 1),
+        ([tool_use("Write", {"file_path": "tests/fixtures/a.py",
+                             "content": "KEY = '%s'\n" % FAKE_KEY})], 1),
+        ([tool_use("Write", {"file_path": "src/a.py",
+                             "content": "# fake\nKEY = '%s'\n" % FAKE_KEY})], 1),
+        # Text about a secret that writes none.
+        ([tool_use("Write", {"file_path": "a.md", "content": "Set AWS_SECRET" "_ACCESS_KEY.\n"})], 0),
+        ([tool_use("Write", {"file_path": "a.py",
+                             "content": "client" "_secret = os.environ['CLIENT_SECRET']\n"})], 0),
+        ([tool_use("Write", {"file_path": "a.env", "content": "K=AKIA" + "Q" * 16 + "\n"})], 0),
+        ([tool_use("Write", {"file_path": "a.env", "content": "K=gh" "p_" + "x" * 36 + "\n"})], 0),
+        ([tool_use("Write", {"file_path": "a.env", "content": "client" "_secret=changeme\n"})], 0),
+        ([bash("cat > a.yml <<EOF\nauth: Bearer YOUR_TOKEN_HERE_0123456789\nEOF")], 0),
+        ([tool_use("Write", {"file_path": "a.py",
+                             "content": "RX = re.compile(r'AKIA[0-9A-Z]{16}|%s')\n" % FAKE_KEY})], 0),
+        ([tool_use("Write", {"file_path": "a.py",
+                             "content": "out = redact('Bearer %s')\n" % LIVE})], 0),
+        ([tool_use("Write", {"file_path": "tests/fixtures/a.py",
+                             "content": "# fake\nKEY = '%s'\n" % FAKE_KEY})], 0),
     ],
     "cache-hygiene/compact": [
         ([compact(), prompt(turn=2)], 1),
@@ -183,6 +210,42 @@ class MalformedEventTests(unittest.TestCase):
     def test_a_malformed_event_does_not_hide_a_real_one(self):
         events = self.SHAPES + [bash("cat a.md", id="tu9")]
         self.assertIn("transcript-hygiene/whole-file-cat", run(events, strict=True))
+
+
+class SecretInWriteTests(unittest.TestCase):
+    """What `secrets/secret-in-write` counts against what `redact` removes."""
+
+    def texts(self, expected):
+        for events, n in CASES["secrets/secret-in-write"]:
+            if n == expected:
+                data = events[0]["input"]
+                yield data.get("content") or data.get("new_string") or data.get("command")
+
+    def test_every_secret_counted_is_one_redaction_removes(self):
+        for text in self.texts(1):
+            with self.subTest(text=text[:24]):
+                self.assertTrue(_secret_in(text))
+                self.assertFalse(_secret_in(redact(text)))
+
+    def test_redaction_still_removes_the_mentions_detection_no_longer_counts(self):
+        mentions = [t for t in self.texts(0) if any(re.search(p, t) for p in SECRET_PATTERNS)]
+        self.assertGreaterEqual(len(mentions), 5)
+        for text in mentions:
+            with self.subTest(text=text[:24]):
+                self.assertNotEqual(redact(text), text)
+                self.assertFalse(any(re.search(p, redact(text)) for p in SECRET_PATTERNS))
+
+    def test_a_hostile_text_is_scanned_in_linear_time(self):
+        n = 200000
+        for text in ("xox" "b-1-" * (n // 6), "Bearer " + "a" * n, "AKIA" * (n // 4),
+                     "client" "_secret=" + "a_" * (n // 2), "-" * n,
+                     "re.compile(" + "Q7" * n + "\n" + "sk-" + "Q7" * n,
+                     "sk-" "ant-" + "a-" * (n // 2), "gh" "p_" * (n // 4),
+                     "-----BEGIN " + "A " * n, "Bearer " * (n // 7)):
+            with self.subTest(text=text[:16]):
+                started = time.perf_counter()
+                _secret_in(text)
+                self.assertLess(time.perf_counter() - started, 1.0)
 
 
 class ParseBudgetTests(unittest.TestCase):

@@ -87,6 +87,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `secrets/secret-in-write` counts a live credential and stops counting text about secrets: a
+  variable's name, a placeholder (`changeme`, `your-token`, `xxx`, `${VAR}`, one repeated
+  character), a pattern source, redaction code, and a test fixture whose text calls its values
+  fake. A value in an issuer's shape must sit behind its key or prefix, mix letters and digits
+  where it is a token, and be on a line that is no pattern or redaction code, so
+  `aws_secret_access_key` or `client_secret` with no literal value is no hit. Anthropic and
+  OpenAI project keys and GitHub tokens past `ghp_` now count. `SECRET_PATTERNS` and `redact` are
+  unchanged ([#110](https://github.com/JakeSelby/ruleprobe/issues/110)).
 - A JSON detector or bindings file nested too deeply is a finding naming the file, not a
   `RecursionError`, and one repeating a key in an object is a finding rather than read with the
   last value ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).

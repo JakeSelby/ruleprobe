@@ -32,14 +32,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: One fake instance of every `SECRET_PATTERNS` shape, in the list's order.
 FAKE_SECRETS = [
     FAKE_KEY,
-    "AWS_SECRET" + "_ACCESS_KEY=" + "Z" * 12,
-    "Bearer " + "b" * 24,
-    "client_secret" + ": " + "c" * 12,
-    ("-----BEGIN RSA " + "PRIVATE KEY-----\n" + "k" * 40
+    "AWS_SECRET" + "_ACCESS_KEY=" + "Zq7" * 8,
+    "Bearer " + "b7" * 12,
+    "client_secret" + ": " + "c7" * 12,
+    ("-----BEGIN RSA " + "PRIVATE KEY-----\n" + "k7" * 20
      + "\n-----END RSA " + "PRIVATE KEY-----"),
     "xox" + "b-" + "1234-abcd",
-    "ghp" + "_" + "g" * 24,
-    "sk" + "-" + "s" * 24,
+    "ghp" + "_" + "g7" * 12,
+    "sk" + "-" + "s7" * 12,
 ]
 
 #: Secrets assigned to a key name, as a credentials file, YAML, a CLI call, a quoted
@@ -370,7 +370,7 @@ class ExplainTests(unittest.TestCase):
         self.assertIn("session   codex:s\\x1b]0;x", text)
 
     def test_a_long_value_is_cut_and_the_cut_counted(self):
-        content = "x" * (MAX_EXPLAINED * 2) + FAKE_KEY
+        content = "x" * (MAX_EXPLAINED * 2) + "\n" + FAKE_KEY
         events = [prompt(), tool_use("Write", {"file_path": "a.env", "content": content})]
         items = list(explain([Session("s", "", "codex", events, "")]))
         value = items[0]["value"]

@@ -614,37 +614,212 @@ ENTRIES = (
             "id": "secrets/secret-in-write",
             "rule": "secrets",
             "event": "tool_use",
-            "description": "The shipped detector, written as data: a secret-shaped string - an "
-                           "access key id, a bearer token, a client secret assignment, a "
-                           "private key block, a chat or code-host token, an `sk-` key - in "
-                           "the text a Write or Edit writes, or in a Bash heredoc body. A key "
-                           "given on the command line outside a heredoc is missed, and so is "
-                           "a password, which has no shape.",
+            "description": "The shipped detector, written as data: a live credential - an "
+                           "access key id, a secret access key or client secret assigned a "
+                           "literal, a bearer token, a private key block with a body, a chat, "
+                           "code-host, OpenAI or Anthropic token - in the text a Write or Edit "
+                           "writes, or in a Bash heredoc body. A placeholder, a variable name, "
+                           "a pattern source, redaction code and a test fixture marked fake "
+                           "are no hit. A key given on the command line outside a heredoc is "
+                           "missed, and so is a password, which has no shape.",
             "when": {
                 "any": [
                     {"all": [
                         {"tool": {"name": ["Write", "Edit"]}},
                         {"arg": {"field": ["content", "new_string"],
-                                 "regex": ["AKIA[0-9A-Z]{16}",
-                                           r"(?i)aws_secret[_]access_key",
-                                           r"Bearer [A-Za-z0-9._-]{20,}",
-                                           r"(?i)client_secret\s*[:=]",
-                                           "-----BEGIN [A-Z ]*PRIVATE KEY-----",
-                                           "xox[bp]-",
-                                           "ghp_[A-Za-z0-9]{20,}",
-                                           "sk-[A-Za-z0-9]{20,}"]}},
+                                 "regex": [
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9])AKIA(?![A-Z0-9]*(?i:x{3}|you"
+                                    "r|change[_-]?me|placeholder|redact|dummy|fake|replace|insert"
+                                    "))(?=[A-Z0-9]*[0-9])(?=[A-Z0-9]*[A-Za-z])[A-Z0-9]{16}(?![A-Z"
+                                    "a-z0-9]))(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch"
+                                    "|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|"
+                                    "\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:"
+                                    "redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:aws_secret[_]access_key"
+                                    ")(?:\\\\?[\\\"'])?\\]?[ \\t]*[:=][ \\t]*(?:\\\\?[\\\"'])?(?!"
+                                    "[A-Za-z0-9/+]*(?i:x{3}|your|change[_-]?me|placeholder|redact"
+                                    "|dummy|fake|replace|insert))(?=[A-Za-z0-9/+]*[0-9])(?=[A-Za-"
+                                    "z0-9/+]*[A-Za-z])[A-Za-z0-9/+]{20,}={0,2}(?![A-Za-z0-9/+=_.$"
+                                    "({\\[-]))(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch"
+                                    "|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|"
+                                    "\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:"
+                                    "redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9])Bearer (?![A-Za-z0-9._-]*(?i"
+                                    ":x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repla"
+                                    "ce|insert))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*)("
+                                    "?![A-Za-z0-9._-]))(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*"
+                                    "[A-Za-z])[A-Za-z0-9._-]{20,})(?![^\\n]*(?:re\\.(?:compile|se"
+                                    "arch|match|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[E"
+                                    "e]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+("
+                                    "?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:client_secret)(?:\\\\?["
+                                    "\\\"'])?\\]?[ \\t]*[:=][ \\t]*(\\\\?[\\\"'])(?![^\\s\\\"'\\"
+                                    "\\<>${}%]*(?i:x{3}|your|change[_-]?me|placeholder|redact|dum"
+                                    "my|fake|replace|insert))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*"
+                                    "_[a-z0-9_]*)(?![^\\s\\\"'\\\\<>${}%]))(?!([^\\s\\\"'\\\\<>${"
+                                    "}%])\\2*\\1)[^\\s\\\"'\\\\<>${}%]{8,}\\1)(?![^\\n]*(?:re\\.("
+                                    "?:compile|search|match|fullmatch|findall|finditer|sub|split)"
+                                    "\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9"
+                                    "]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|m"
+                                    "ask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:client_secret)(?:\\\\?["
+                                    "\\\"'])?\\]?[ \\t]*[:=][ \\t]*(?![A-Za-z0-9/+=_-]*(?i:x{3}|y"
+                                    "our|change[_-]?me|placeholder|redact|dummy|fake|replace|inse"
+                                    "rt))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*)(?![A-Za"
+                                    "-z0-9/+=_-]))(?=[A-Za-z0-9/+=_-]*[0-9])(?=[A-Za-z0-9/+=_-]*["
+                                    "A-Za-z])[A-Za-z0-9/+=_-]{20,}(?![A-Za-z0-9/+=_.$({\\[-]))(?!"
+                                    "[^\\n]*(?:re\\.(?:compile|search|match|fullmatch|findall|fin"
+                                    "diter|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-"
+                                    "z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|"
+                                    "sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\\r?\\n"
+                                    "|\\\\r?\\\\n)(?![A-Za-z0-9+/=]*(?i:x{3}|your|change[_-]?me|p"
+                                    "laceholder|redact|dummy|fake|replace|insert))(?!([A-Za-z0-9+"
+                                    "/=])\\1*(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=]{16,})(?![^\\n]*(?:"
+                                    "re\\.(?:compile|search|match|fullmatch|findall|finditer|sub|"
+                                    "split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Z"
+                                    "a-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|ce"
+                                    "nsor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])xox[bp]-(?![A-Za-z0-9-]*(?"
+                                    "i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repl"
+                                    "ace|insert))(?=[A-Za-z0-9-]*[0-9])(?=[A-Za-z0-9-]*[A-Za-z])["
+                                    "0-9]+-[A-Za-z0-9]{4,})(?![^\\n]*(?:re\\.(?:compile|search|ma"
+                                    "tch|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|"
+                                    "\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-"
+                                    "9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])gh[pousr]_(?![A-Za-z0-9]*(?"
+                                    "i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repl"
+                                    "ace|insert))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-"
+                                    "Za-z0-9]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match|full"
+                                    "match|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsD"
+                                    "WS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|"
+                                    "(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])github_pat_(?![A-Za-z0-9_]*"
+                                    "(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|re"
+                                    "place|insert))(?=[A-Za-z0-9_]*[0-9])(?=[A-Za-z0-9_]*[A-Za-z]"
+                                    ")[A-Za-z0-9_]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match"
+                                    "|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\"
+                                    "[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)"
+                                    "?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])sk-(?![A-Za-z0-9]*(?i:x{3}"
+                                    "|your|change[_-]?me|placeholder|redact|dummy|fake|replace|in"
+                                    "sert))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-"
+                                    "9]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch|"
+                                    "findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\"
+                                    "[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:re"
+                                    "dact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])sk-(?:ant|proj)-(?![A-Za-z"
+                                    "0-9_-]*(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|"
+                                    "fake|replace|insert))(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]"
+                                    "*[A-Za-z])[A-Za-z0-9_-]{20,})(?![^\\n]*(?:re\\.(?:compile|se"
+                                    "arch|match|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[E"
+                                    "e]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+("
+                                    "?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                 ]}},
+                        {"not": {"all": [
+                            {"arg": {"field": "file_path",
+                                     "regex": [
+                                        "(?:^|[/\\\\])(?:tests?|__tests__|specs?|testdata|fixture"
+                                        "s?|__fixtures__|__mocks__)[/\\\\]|(?:^|[/\\\\])(?:test_["
+                                        "^/\\\\]*|[^/\\\\]*_test\\.[A-Za-z0-9]+|[^/\\\\]*\\.(?:te"
+                                        "st|spec)\\.[A-Za-z0-9]+|conftest\\.py)$",
+                                     ]}},
+                            {"arg": {"field": ["content", "new_string"],
+                                     "regex": ["(?i)(?<![a-z])(?:fake|dummy|not[ _-]a[ _-]real)"]}},
+                        ]}},
                     ]},
                     {"all": [
                         {"tool": {"name": "Bash"}},
                         {"text": {"source": "payload",
-                                  "regex": ["AKIA[0-9A-Z]{16}",
-                                            r"(?i)aws_secret[_]access_key",
-                                            r"Bearer [A-Za-z0-9._-]{20,}",
-                                            r"(?i)client_secret\s*[:=]",
-                                            "-----BEGIN [A-Z ]*PRIVATE KEY-----",
-                                            "xox[bp]-",
-                                            "ghp_[A-Za-z0-9]{20,}",
-                                            "sk-[A-Za-z0-9]{20,}"]}},
+                                  "regex": [
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9])AKIA(?![A-Z0-9]*(?i:x{3}|you"
+                                    "r|change[_-]?me|placeholder|redact|dummy|fake|replace|insert"
+                                    "))(?=[A-Z0-9]*[0-9])(?=[A-Z0-9]*[A-Za-z])[A-Z0-9]{16}(?![A-Z"
+                                    "a-z0-9]))(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch"
+                                    "|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|"
+                                    "\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:"
+                                    "redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:aws_secret[_]access_key"
+                                    ")(?:\\\\?[\\\"'])?\\]?[ \\t]*[:=][ \\t]*(?:\\\\?[\\\"'])?(?!"
+                                    "[A-Za-z0-9/+]*(?i:x{3}|your|change[_-]?me|placeholder|redact"
+                                    "|dummy|fake|replace|insert))(?=[A-Za-z0-9/+]*[0-9])(?=[A-Za-"
+                                    "z0-9/+]*[A-Za-z])[A-Za-z0-9/+]{20,}={0,2}(?![A-Za-z0-9/+=_.$"
+                                    "({\\[-]))(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch"
+                                    "|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|"
+                                    "\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:"
+                                    "redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9])Bearer (?![A-Za-z0-9._-]*(?i"
+                                    ":x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repla"
+                                    "ce|insert))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*)("
+                                    "?![A-Za-z0-9._-]))(?=[A-Za-z0-9._-]*[0-9])(?=[A-Za-z0-9._-]*"
+                                    "[A-Za-z])[A-Za-z0-9._-]{20,})(?![^\\n]*(?:re\\.(?:compile|se"
+                                    "arch|match|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[E"
+                                    "e]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+("
+                                    "?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:client_secret)(?:\\\\?["
+                                    "\\\"'])?\\]?[ \\t]*[:=][ \\t]*(\\\\?[\\\"'])(?![^\\s\\\"'\\"
+                                    "\\<>${}%]*(?i:x{3}|your|change[_-]?me|placeholder|redact|dum"
+                                    "my|fake|replace|insert))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*"
+                                    "_[a-z0-9_]*)(?![^\\s\\\"'\\\\<>${}%]))(?!([^\\s\\\"'\\\\<>${"
+                                    "}%])\\2*\\1)[^\\s\\\"'\\\\<>${}%]{8,}\\1)(?![^\\n]*(?:re\\.("
+                                    "?:compile|search|match|fullmatch|findall|finditer|sub|split)"
+                                    "\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9"
+                                    "]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|m"
+                                    "ask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])(?i:client_secret)(?:\\\\?["
+                                    "\\\"'])?\\]?[ \\t]*[:=][ \\t]*(?![A-Za-z0-9/+=_-]*(?i:x{3}|y"
+                                    "our|change[_-]?me|placeholder|redact|dummy|fake|replace|inse"
+                                    "rt))(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*)(?![A-Za"
+                                    "-z0-9/+=_-]))(?=[A-Za-z0-9/+=_-]*[0-9])(?=[A-Za-z0-9/+=_-]*["
+                                    "A-Za-z])[A-Za-z0-9/+=_-]{20,}(?![A-Za-z0-9/+=_.$({\\[-]))(?!"
+                                    "[^\\n]*(?:re\\.(?:compile|search|match|fullmatch|findall|fin"
+                                    "diter|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-"
+                                    "z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|"
+                                    "sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\\r?\\n"
+                                    "|\\\\r?\\\\n)(?![A-Za-z0-9+/=]*(?i:x{3}|your|change[_-]?me|p"
+                                    "laceholder|redact|dummy|fake|replace|insert))(?!([A-Za-z0-9+"
+                                    "/=])\\1*(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=]{16,})(?![^\\n]*(?:"
+                                    "re\\.(?:compile|search|match|fullmatch|findall|finditer|sub|"
+                                    "split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Z"
+                                    "a-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|ce"
+                                    "nsor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])xox[bp]-(?![A-Za-z0-9-]*(?"
+                                    "i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repl"
+                                    "ace|insert))(?=[A-Za-z0-9-]*[0-9])(?=[A-Za-z0-9-]*[A-Za-z])["
+                                    "0-9]+-[A-Za-z0-9]{4,})(?![^\\n]*(?:re\\.(?:compile|search|ma"
+                                    "tch|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|"
+                                    "\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-"
+                                    "9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])gh[pousr]_(?![A-Za-z0-9]*(?"
+                                    "i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|repl"
+                                    "ace|insert))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-"
+                                    "Za-z0-9]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match|full"
+                                    "match|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsD"
+                                    "WS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|"
+                                    "(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_])github_pat_(?![A-Za-z0-9_]*"
+                                    "(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|re"
+                                    "place|insert))(?=[A-Za-z0-9_]*[0-9])(?=[A-Za-z0-9_]*[A-Za-z]"
+                                    ")[A-Za-z0-9_]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match"
+                                    "|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\"
+                                    "[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)"
+                                    "?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])sk-(?![A-Za-z0-9]*(?i:x{3}"
+                                    "|your|change[_-]?me|placeholder|redact|dummy|fake|replace|in"
+                                    "sert))(?=[A-Za-z0-9]*[0-9])(?=[A-Za-z0-9]*[A-Za-z])[A-Za-z0-"
+                                    "9]{20,})(?![^\\n]*(?:re\\.(?:compile|search|match|fullmatch|"
+                                    "findall|finditer|sub|split)\\(|[Rr]eg[Ee]xp?|\\\\[dwsDWS]|\\"
+                                    "[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+(?:,[0-9]*)?\\}|(?i:re"
+                                    "dact|scrub|sanitiz|censor|mask)))",
+                                    "(?m)^(?=[^\\n]*?(?<![A-Za-z0-9_-])sk-(?:ant|proj)-(?![A-Za-z"
+                                    "0-9_-]*(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|"
+                                    "fake|replace|insert))(?=[A-Za-z0-9_-]*[0-9])(?=[A-Za-z0-9_-]"
+                                    "*[A-Za-z])[A-Za-z0-9_-]{20,})(?![^\\n]*(?:re\\.(?:compile|se"
+                                    "arch|match|fullmatch|findall|finditer|sub|split)\\(|[Rr]eg[E"
+                                    "e]xp?|\\\\[dwsDWS]|\\[\\^?[A-Za-z0-9]-[A-Za-z0-9]|\\{[0-9]+("
+                                    "?:,[0-9]*)?\\}|(?i:redact|scrub|sanitiz|censor|mask)))",
+                                  ]}},
                     ]},
                 ],
             },
@@ -654,13 +829,13 @@ ENTRIES = (
                 "fire": [
                     {"event": {"name": "Write",
                                "input": {"file_path": "config/app.env",
-                                         "content": "KEY_ID=AKIA" "QQQQQQQQQQQQQQQQ\n"}},
+                                         "content": "KEY_ID=AKIA" "Q7Q7Q7Q7Q7Q7Q7Q7\n"}},
                      "note": "an access key id written to a file"},
                     {"event": {"name": "Edit",
                                "input": {"file_path": "src/auth.py", "old_string": "x",
-                                         "new_string": "client_" "secret = 'abc123'"}},
+                                         "new_string": "client_" "secret = 'abc123def456'"}},
                      "note": "a client secret assigned in an edit"},
-                    {"bash": "cat > token.txt <<'EOF'\nghp_" "abcdefghijklmnopqrstuvwx\nEOF",
+                    {"bash": "cat > token.txt <<'EOF'\nghp_" "abcd1234efgh5678ijkl9012\nEOF",
                      "note": "a code-host token in a heredoc body"},
                 ],
                 "skip": [
@@ -677,6 +852,22 @@ ENTRIES = (
                      "note": "the key name searched for, nothing written"},
                     {"bash": "cat > notes.txt <<'EOF'\nrotate the keys on Friday\nEOF",
                      "note": "a heredoc with no secret in it"},
+                    {"event": {"name": "Write",
+                               "input": {"file_path": "docs/deploy.md",
+                                         "content": "Export AWS_SECRET" "_ACCESS_KEY first.\n"}},
+                     "note": "a variable's name, not its value"},
+                    {"event": {"name": "Write",
+                               "input": {"file_path": ".env.example",
+                                         "content": "OPENAI_KEY=sk-" "xxxxxxxxxxxxxxxxxxxxxxxx\n"}},
+                     "note": "a placeholder in an issuer's shape"},
+                    {"event": {"name": "Write",
+                               "input": {"file_path": "src/scan.py",
+                                         "content": "KEY = re.compile(r'gh" "p_[A-Za-z0-9]{36}')\n"}},
+                     "note": "a pattern source"},
+                    {"event": {"name": "Write",
+                               "input": {"file_path": "tests/fixtures/creds.py",
+                                         "content": "# fake keys\nKEY = 'AKIA" "Q7Q7Q7Q7Q7Q7Q7Q7'\n"}},
+                     "note": "a test fixture that marks its value fake"},
                 ],
             },
         },

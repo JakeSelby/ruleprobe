@@ -348,12 +348,86 @@ def no_verify(events, ctx):
     return hits
 
 
+# What `secrets/secret-in-write` counts: a live credential, never a mention of one.
+# `SECRET_PATTERNS` stays broad because `redact` prints through it; these are the detection-side
+# filter, each one narrower than a shape `redact` already removes, so anything counted here is
+# redacted when `explain` prints it. A credential counts only as an issuer's shape with a value
+# behind it: an AWS key id, an `aws_secret_access_key` or `client_secret` assigned a literal, a
+# Bearer, GitHub, Slack, OpenAI or Anthropic token, or a private-key header followed by a body.
+# Each value must not be a placeholder (`xxx`, `your`, `changeme`, `redacted`, `fake`...), a
+# variable name (`UPPER_SNAKE`, `lower_snake`), an expression (`os.environ[...]`, `${VAR}`) or
+# a token of one repeated character, and a token value must mix letters and digits - the only
+# entropy check, chosen because it is exact. A line that reads as a pattern source or as
+# redaction code - `re.compile(`, a character class, a quantifier, a regex escape, `redact`,
+# `mask` - counts nothing. A pattern's left edge excludes its own body's characters, so a match
+# never starts inside another and a long run is scanned once.
+_PLACEHOLDER = r"(?i:x{3}|your|change[_-]?me|placeholder|redact|dummy|fake|replace|insert)"
+_PATTERN_OR_REDACTION = (
+    r"(?:re\.(?:compile|search|match|fullmatch|findall|finditer|sub|split)\(|[Rr]eg[Ee]xp?"
+    r"|\\[dwsDWS]|\[\^?[A-Za-z0-9]-[A-Za-z0-9]|\{[0-9]+(?:,[0-9]*)?\}"
+    r"|(?i:redact|scrub|sanitiz|censor|mask))")
+# Between a key name and its value: an optional closing quote, escaped or not, and bracket.
+_KEY_GAP = r"(?:\\?[\"'])?\]?[ \t]*[:=][ \t]*"
+
+
+def _value(chars, mixed=True, name=False):
+    """Lookaheads at the start of a value made of `chars`."""
+    out = "(?!%s*%s)" % (chars, _PLACEHOLDER)
+    if name:
+        out += "(?!(?:[A-Z0-9]*_[A-Z0-9_]*|[a-z0-9]*_[a-z0-9_]*)(?!%s))" % chars
+    if mixed:
+        out += "(?=%s*[0-9])(?=%s*[A-Za-z])" % (chars, chars)
+    return out
+
+
+def _on_a_plain_line(token):
+    """`token` on a line that holds no pattern source and no redaction code."""
+    return r"(?m)^(?=[^\n]*?%s)(?![^\n]*%s)" % (token, _PATTERN_OR_REDACTION)
+
+
+_QUOTED = r"[^\s\"'\\<>${}%]"
+_UNQUOTED = r"[A-Za-z0-9/+=_-]"
+_KEY_END = r"(?![A-Za-z0-9/+=_.$({\[-])"
+# `[_]` keeps the key name out of a grep for it, as `SECRET_PATTERNS` splits it.
+_AWS_SECRET_KEY = r"(?<![A-Za-z0-9_])(?i:aws_secret[_]access_key)"
+_CLIENT_SECRET_KEY = r"(?<![A-Za-z0-9_])(?i:client_secret)"
+_LIVE_SECRET_PATTERNS = [_on_a_plain_line(token) for token in (
+    r"(?<![A-Za-z0-9])AKIA" + _value("[A-Z0-9]") + r"[A-Z0-9]{16}(?![A-Za-z0-9])",
+    _AWS_SECRET_KEY + _KEY_GAP + r"(?:\\?[\"'])?" + _value("[A-Za-z0-9/+]")
+    + r"[A-Za-z0-9/+]{20,}={0,2}" + _KEY_END,
+    r"(?<![A-Za-z0-9])Bearer " + _value("[A-Za-z0-9._-]", name=True) + r"[A-Za-z0-9._-]{20,}",
+    _CLIENT_SECRET_KEY + _KEY_GAP + r"(\\?[\"'])" + _value(_QUOTED, mixed=False, name=True)
+    + r"(?!(%s)\2*\1)%s{8,}\1" % (_QUOTED, _QUOTED),
+    _CLIENT_SECRET_KEY + _KEY_GAP + _value(_UNQUOTED, name=True) + _UNQUOTED + "{20,}" + _KEY_END,
+    r"-----BEGIN [A-Z ]*PRIVATE KEY-----(?:\r?\n|\\r?\\n)" + _value("[A-Za-z0-9+/=]", mixed=False)
+    + r"(?!([A-Za-z0-9+/=])\1*(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=]{16,}",
+    r"(?<![A-Za-z0-9_-])xox[bp]-" + _value("[A-Za-z0-9-]") + r"[0-9]+-[A-Za-z0-9]{4,}",
+    r"(?<![A-Za-z0-9_])gh[pousr]_" + _value("[A-Za-z0-9]") + r"[A-Za-z0-9]{20,}",
+    r"(?<![A-Za-z0-9_])github_pat_" + _value("[A-Za-z0-9_]") + r"[A-Za-z0-9_]{20,}",
+    r"(?<![A-Za-z0-9_-])sk-" + _value("[A-Za-z0-9]") + r"[A-Za-z0-9]{20,}",
+    r"(?<![A-Za-z0-9_-])sk-(?:ant|proj)-" + _value("[A-Za-z0-9_-]") + r"[A-Za-z0-9_-]{20,}",
+)]
+_LIVE_SECRETS = [re.compile(p) for p in _LIVE_SECRET_PATTERNS]
+# A test or fixture path, and a file that says its values are fake: a write to one carrying
+# both counts nothing, since a fixture that marks its credentials fake is not leaking one.
+_FIXTURE_PATH_PATTERN = (
+    r"(?:^|[/\\])(?:tests?|__tests__|specs?|testdata|fixtures?|__fixtures__|__mocks__)[/\\]"
+    r"|(?:^|[/\\])(?:test_[^/\\]*|[^/\\]*_test\.[A-Za-z0-9]+|[^/\\]*\.(?:test|spec)\.[A-Za-z0-9]+"
+    r"|conftest\.py)$")
+_MARKED_FAKE_PATTERN = r"(?i)(?<![a-z])(?:fake|dummy|not[ _-]a[ _-]real)"
+_FIXTURE_PATH = re.compile(_FIXTURE_PATH_PATTERN)
+_MARKED_FAKE = re.compile(_MARKED_FAKE_PATTERN)
+
+
 def _secret_in(text):
-    return any(re.search(p, text) for p in SECRET_PATTERNS)
+    return any(rx.search(text) for rx in _LIVE_SECRETS)
 
 
 def secret_in_write(events, ctx):
-    """A secret-shaped string written to a file or into a heredoc body."""
+    """A live credential written to a file or into a heredoc body: an issuer's shape with a
+    value behind it, never a variable name, a placeholder, a pattern source or redaction code
+    that only mentions one. A Write or Edit to a test path whose text marks it fake counts
+    nothing."""
     hits = []
     parsed_by_id = dict((id(p.event), p) for p in ctx.bash)
     for event in events:
@@ -372,6 +446,10 @@ def secret_in_write(events, ctx):
             # of it the key sat in.
             texts.extend([parsed.command] if parsed is not None and parsed.skipped
                          else (parsed.heredocs if parsed is not None else []))
+        if name in ("Write", "Edit") and texts[0] \
+                and _FIXTURE_PATH.search(text_of(data.get("file_path"))) \
+                and _MARKED_FAKE.search(texts[0]):
+            continue
         if any(_secret_in(t) for t in texts if t):
             hits.append(hit(event))
     return hits

@@ -140,7 +140,7 @@ sessions:
         note: the hooks path pointed at the repository's own hooks, which turns them on
 
   - session: secrets-writes.jsonl
-    note: six credentials written to disk, then six ways of not writing one, and two writes of one that never ran - one the user rejected, one a permission rule denied - which make no event and carry no label
+    note: seven credentials written to disk, then six ways of not writing one, two writes of one that never ran - one the user rejected, one a permission rule denied - which make no event and carry no label, and nine writes about secrets that write none - variable names, placeholders, pattern sources, a fixture marked fake and redaction code
     labels:
       - at: "1:tu-k1"
         fire: [secrets/secret-in-write]
@@ -178,6 +178,36 @@ sessions:
       - at: "3:tu-y6"
         near: [secrets/secret-in-write]
         note: an edit to the same file that carries no secret
+      - at: "4:tu-k7"
+        fire: [secrets/secret-in-write]
+        note: an Anthropic key written to an env file
+      - at: "4:tu-m1"
+        near: [secrets/secret-in-write]
+        note: variable names in prose - the key's and the secret's names, with no value
+      - at: "4:tu-m2"
+        near: [secrets/secret-in-write]
+        note: variable names in code - each value read from the environment
+      - at: "4:tu-m3"
+        near: [secrets/secret-in-write]
+        note: placeholders in each issuer's shape - changeme, your-token, a run of x, one repeated character, a ${VAR}
+      - at: "4:tu-m4"
+        near: [secrets/secret-in-write]
+        note: placeholders through a heredoc - a <your-...> value and a YOUR_... token
+      - at: "4:tu-m5"
+        near: [secrets/secret-in-write]
+        note: pattern sources - each shape inside re.compile
+      - at: "4:tu-m6"
+        near: [secrets/secret-in-write]
+        note: a pattern source with no re.compile, read by its character classes and quantifiers
+      - at: "4:tu-m7"
+        near: [secrets/secret-in-write]
+        note: a test fixture that marks its credential fake
+      - at: "4:tu-m8"
+        near: [secrets/secret-in-write]
+        note: redaction code that names each shape's prefix
+      - at: "4:tu-m9"
+        near: [secrets/secret-in-write]
+        note: a redaction test whose sample token sits on the line that calls redact
 
   - session: cache-compaction.jsonl
     note: five compactions and three model switches, with their look-alikes
