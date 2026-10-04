@@ -19,6 +19,9 @@ from ruleprobe.shell import MAX_COMMAND
 HUGE = "echo " + "x" * (100 * 1024)
 # A synthetic value that mixes letters and digits, as a live token does.
 LIVE = "Q7mK2pX9" * 4
+# Real-format client secrets, assembled so a scanner reading this file finds no whole one.
+GOOGLE = "GOCSPX" "-q7Lm2Xk9Rt4Vb8Nc1Hd6Ws3Pz0Y"
+AZURE = "Gg48Q" "~Lw3H0zVXo2Xc_YsfPS3oPWsr.ab12"
 
 CASES = {
     "transcript-hygiene/whole-file-cat": [
@@ -80,7 +83,26 @@ CASES = {
         ([tool_use("Write", {"file_path": "a.py",
                              "content": "out = redact('Bearer %s')\n" % LIVE})], 0),
         ([tool_use("Write", {"file_path": "tests/fixtures/a.py",
-                             "content": "# fake\nKEY = '%s'\n" % FAKE_KEY})], 0),
+                             "content": "KEY = '%s'  # fake\n" % FAKE_KEY})], 0),
+        ([tool_use("Write", {"file_path": "a.env",
+                             "content": "client" "_secret: \"my-client-secret\"\n"})], 0),
+        # Review gaps: each of these writes a live value.
+        ([tool_use("Write", {"file_path": ".env", "content": "GOOGLE_CLIENT" "_SECRET=" + GOOGLE})], 1),
+        ([tool_use("Write", {"file_path": ".env",
+                             "content": "AZURE_CLIENT" "_SECRET=\"%s\"\n" % AZURE})], 1),
+        ([tool_use("Write", {"file_path": ".env", "content": "client" "_secret=" + AZURE})], 1),
+        ([tool_use("Write", {"file_path": "a.ini", "content": "id = AKIA" "JQHTWBPLMNRSKEGF\n"})], 1),
+        ([bash("cat > a.sh <<EOF\necho \"::add-mask::gh" "p_%s\"\nEOF" % LIVE)], 1),
+        ([tool_use("Write", {"file_path": "a.py",
+                             "content": "r = store.search(q, key='gh" "p_%s')\n" % LIVE})], 1),
+        ([tool_use("Write", {"file_path": "tests/test_a.py",
+                             "content": "# fake\nKEY = '%s'\n" % FAKE_KEY})], 1),
+        ([tool_use("Write", {"file_path": "tests/test_a.py",
+                             "content": "from faker import Faker\nimport fakeredis\n"
+                                        "r = FakeResponse(dummy_request())\nKEY = '%s'\n"
+                                        % FAKE_KEY})], 1),
+        ([tool_use("Write", {"file_path": "/tmp/test/a.py",
+                             "content": "KEY = '%s'  # fake\n" % FAKE_KEY})], 1),
     ],
     "cache-hygiene/compact": [
         ([compact(), prompt(turn=2)], 1),
@@ -241,7 +263,8 @@ class SecretInWriteTests(unittest.TestCase):
                      "client" "_secret=" + "a_" * (n // 2), "-" * n,
                      "re.compile(" + "Q7" * n + "\n" + "sk-" + "Q7" * n,
                      "sk-" "ant-" + "a-" * (n // 2), "gh" "p_" * (n // 4),
-                     "-----BEGIN " + "A " * n, "Bearer " * (n // 7)):
+                     "-----BEGIN " + "A " * n, "Bearer " * (n // 7),
+                     "client" "_secret=" * 14286, "x_client" "_secret=" * 12500):
             with self.subTest(text=text[:16]):
                 started = time.perf_counter()
                 _secret_in(text)

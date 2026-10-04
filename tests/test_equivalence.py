@@ -41,12 +41,12 @@ class EquivalenceTests(unittest.TestCase):
         from ruleprobe.detectors import common
         document, _lines = load(COMMON_YAML)
         when = [d for d in document["detectors"] if d["id"] == "secrets/secret-in-write"][0]["when"]
-        writes, shell = when["any"][0]["all"], when["any"][1]["all"]
-        self.assertEqual(writes[1]["arg"]["regex"], common._LIVE_SECRET_PATTERNS)
+        writes, tests, shell = (branch["all"] for branch in when["any"])
+        self.assertEqual(writes[1]["not"]["arg"]["regex"], [common._TEST_PATH_PATTERN])
+        self.assertEqual(writes[2]["arg"]["regex"], common._LIVE_SECRET_PATTERNS)
+        self.assertEqual(tests[1]["arg"]["regex"], [common._TEST_PATH_PATTERN])
+        self.assertEqual(tests[2]["arg"]["regex"], common._LIVE_SECRET_PATTERNS_IN_TESTS)
         self.assertEqual(shell[1]["text"]["regex"], common._LIVE_SECRET_PATTERNS)
-        fixture = writes[2]["not"]["all"]
-        self.assertEqual(fixture[0]["arg"]["regex"], [common._FIXTURE_PATH_PATTERN])
-        self.assertEqual(fixture[1]["arg"]["regex"], [common._MARKED_FAKE_PATTERN])
 
     def test_every_corpus_case_gives_the_same_hits_both_ways(self):
         for did, cases in CASES.items():

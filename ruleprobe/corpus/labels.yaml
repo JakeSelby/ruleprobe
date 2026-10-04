@@ -140,7 +140,7 @@ sessions:
         note: the hooks path pointed at the repository's own hooks, which turns them on
 
   - session: secrets-writes.jsonl
-    note: seven credentials written to disk, then six ways of not writing one, two writes of one that never ran - one the user rejected, one a permission rule denied - which make no event and carry no label, and nine writes about secrets that write none - variable names, placeholders, pattern sources, a fixture marked fake and redaction code
+    note: seven credentials written to disk, then six ways of not writing one, two writes of one that never ran - one the user rejected, one a permission rule denied - which make no event and carry no label, and nine writes about secrets that write none - variable names, placeholders, pattern sources, a fixture value marked fake and redaction code
     labels:
       - at: "1:tu-k1"
         fire: [secrets/secret-in-write]
@@ -201,7 +201,7 @@ sessions:
         note: a pattern source with no re.compile, read by its character classes and quantifiers
       - at: "4:tu-m7"
         near: [secrets/secret-in-write]
-        note: a test fixture that marks its credential fake
+        note: a test fixture that marks its credential fake on the credential's own line
       - at: "4:tu-m8"
         near: [secrets/secret-in-write]
         note: redaction code that names each shape's prefix

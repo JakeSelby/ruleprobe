@@ -644,13 +644,15 @@ a detector scored badly. `--json` prints the same numbers as data.
 corpus while a hand check of 23 of its hits on real transcripts judged one right, 20 wrong and
 two unsure, a precision of 0.05: the wrong hits wrote *about* secrets - a variable's name, a
 pattern's source, a placeholder, redaction code. It now counts a live credential and never a
-mention of one: an issuer's shape with a value behind it - an AWS access key id, a secret
-access key or client secret assigned a literal, a Bearer, GitHub, Slack, OpenAI or Anthropic
-token, or a private-key header with a body. A placeholder (`xxx`, `your-...`, `changeme`,
-`${VAR}`, a token of one repeated character, or one with no digit), a variable name, a value
+mention of one: an issuer's shape with a value behind it - an AWS access key id, a key whose
+name ends in `aws_secret_access_key` or `client_secret` (`GOOGLE_CLIENT_SECRET` too) assigned a
+literal, a Bearer, GitHub, Slack, OpenAI or Anthropic token, or a private-key header with a
+body. A placeholder (`xxx`, `your-...`, `changeme`, `${VAR}`, a value naming itself a secret,
+one repeated character, a prefixed token with no digit), a variable name or dotted path, a value
 read from the environment, a line that reads as a pattern source or as redaction code
-(`re.compile(`, a character class or quantifier, `redact`, `mask`) and a write to a test path
-whose text calls its values fake count nothing, and the corpus carries a near-miss for each. A
+(`re.compile(`, a character class or quantifier, a `redact(` or `mask(` call), and, in a test
+file, a token whose own line calls it fake count nothing; the corpus carries a near-miss for
+each. A
 documented example value in an issuer's shape still counts, since nothing in it tells it from a
 live one, and a password still has no shape. Its field precision has not been retaken since the
 change; the corpus score is the only figure for it.
