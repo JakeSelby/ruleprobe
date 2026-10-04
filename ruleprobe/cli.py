@@ -14,6 +14,9 @@
                     --corpus DIR --name NAME
                     [--since DATE] [--root DIR] [--runtime NAME]
                     [--rules DIR] [--detectors FILE] [--no-config]
+    ruleprobe bind (--plan [--json] | --apply FILE [--project])
+                   [--since DATE] [--root DIR] [--runtime NAME]
+                   [--rules DIR] [--detectors FILE] [--no-config]
 
 Declarative detectors are read from `.ruleprobe/detectors.yaml` in the repository you are
 in and from `~/.config/ruleprobe/detectors.yaml`, unless `--no-config` says otherwise;
@@ -22,10 +25,15 @@ nothing measures. With neither `--rules` nor `--no-config`, `report` finds the r
 itself (`ruleprobe.rules.find_rule_files`): the global ones in the home directory, and the
 project ones at each working directory the transcripts recorded.
 
-Nothing leaves the machine, and every command but `label` writes nothing: the transcripts are
-read, the detectors are run over them in memory, and a table is printed. `label` writes one
-event-schema session and one `near` label, redacted, under the corpus directory it is given,
-and nowhere else; `cmd_label` says what it refuses.
+Bindings the user confirmed with `bind` are read from `~/.config/ruleprobe/bindings.yaml` and
+from the `.ruleprobe/bindings.yaml` of the project the working directory or `--rules` is in,
+unless `--no-config` says otherwise (`ruleprobe.bindings`).
+
+Nothing leaves the machine, and every command but `label` and `bind --apply` writes nothing:
+the transcripts are read, the detectors are run over them in memory, and a table is printed.
+`label` writes one event-schema session and one `near` label, redacted, under the corpus
+directory it is given, and nowhere else; `cmd_label` says what it refuses. `bind --apply`
+writes one bindings file, the global one or, with `--project`, this project's.
 """
 import argparse
 import json
@@ -45,7 +53,8 @@ from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
                      session_address)
-from .rules import catalog_detectors, find_rule_files, load_bundle
+from . import bindings as _bindings
+from .rules import catalog_detectors, find_rule_files, known_ids, load_bundle
 from .validity import (EVENTS_SUFFIX, LABELS_FILE, SESSIONS_DIRNAME, CorpusError,
                        DEFAULT_FLOOR, below_floor, binding_as_dict, binding_failures,
                        binding_table, event_key, hit_key, load_corpus, read_events,
@@ -157,6 +166,28 @@ def build_parser():
     # No --stance: a detector gated on one is refused, because the corpus runs with none.
     # No --plugins: `ruleprobe corpus` loads no plugin, so its negative could never score.
     _declarative_options(label_cmd)
+
+    bind_cmd = sub.add_parser(
+        "bind", help="bind the rule sections the catalog left unmeasured to detectors you "
+                     "choose")
+    action = bind_cmd.add_mutually_exclusive_group(required=True)
+    action.add_argument("--plan", action="store_true",
+                        help="print each unmeasured section, its candidates and why it did "
+                             "not bind, as a plan to edit; writes nothing")
+    action.add_argument("--apply", default=None, metavar="FILE",
+                        help="record the bindings chosen in an edited plan")
+    bind_cmd.add_argument("--json", action="store_true",
+                          help="print the plan as JSON")
+    bind_cmd.add_argument("--project", action="store_true",
+                          help="write this project's .ruleprobe/bindings.yaml instead of "
+                               "your global file")
+    bind_cmd.add_argument("--since", default=None, metavar="DATE", type=_since,
+                          help="a YYYY-MM-DD date, or a number of days back")
+    bind_cmd.add_argument("--root", default=None, metavar="DIR",
+                          help="a directory of transcripts to find rule files from")
+    bind_cmd.add_argument("--runtime", choices=["auto"] + sorted(RUNTIMES), default="auto",
+                          help="which runtime wrote them (default: decide per file)")
+    _declarative_options(bind_cmd)
     return parser
 
 
@@ -253,13 +284,19 @@ def _score_restated(scores, registry):
 
 
 def _bundle_and_registry(args, plugins=None, whole_catalog=False, rule_files=None,
-                         refused=0, skipped=0):
+                         refused=0, skipped=0, workdirs=()):
     """The declarative bundle for this invocation, and the registry to run: the shipped
     detectors, plus plugins when asked, plus the catalog detectors a rule bound, or all of
-    them with `whole_catalog`, plus everything the bundle loaded."""
+    them with `whole_catalog`, plus everything the bundle loaded. The user's bindings are
+    applied unless `--no-config`; a bindings file at one of `workdirs`, the discovered working
+    directories, is counted and never read."""
+    bindings, ignored = None, 0
+    if not args.no_config:
+        bindings = _bindings.load_trusted(rules_dir=args.rules)
+        ignored = _bindings.ignored_files(workdirs, bindings.files)
     bundle = load_bundle(paths=args.detectors, rules_dir=args.rules,
                          config=not args.no_config, rule_files=rule_files, refused=refused,
-                         skipped=skipped)
+                         skipped=skipped, bindings=bindings, ignored=ignored)
     if plugins is None:
         plugins = getattr(args, "plugins", False)
     base = Registry.from_entry_points() if plugins else DEFAULT
@@ -300,22 +337,29 @@ def _found_rule_files(args):
     transcripts collects each session's runtime and recorded working directory, and
     `find_rule_files` reads the places they name. The pass keeps no events, so memory stays
     one session deep; it costs a second parse of every transcript. Its read errors are left
-    to the pass that measures. `(files, how many were refused, how many skipped)`."""
+    to the pass that measures. `(files, how many were refused, how many skipped, the working
+    directories)`."""
     workdirs = set()
     for session in iter_sessions(root=args.root, runtime=args.runtime, since=args.since):
         if session.cwd:
             workdirs.add((session.runtime, session.cwd))
     refused, skipped = [], []
     found = find_rule_files(workdirs, refused=refused, skipped=skipped)
-    return found, len(refused), len(skipped)
+    return found, len(refused), len(skipped), sorted(cwd for _runtime, cwd in workdirs)
+
+
+def _bundle_for_rules(args):
+    """`(bundle, registry)` as `report` builds them: with no `--rules` and no `--no-config`,
+    from the rule files found through the transcripts."""
+    found, refused, skipped, workdirs = None, 0, 0, ()
+    if args.rules is None and not args.no_config:
+        found, refused, skipped, workdirs = _found_rule_files(args)
+    return _bundle_and_registry(args, rule_files=found, refused=refused, skipped=skipped,
+                                workdirs=workdirs)
 
 
 def cmd_report(args, out):
-    found, refused, skipped = None, 0, 0
-    if args.rules is None and not args.no_config:
-        found, refused, skipped = _found_rule_files(args)
-    bundle, registry = _bundle_and_registry(args, rule_files=found, refused=refused,
-                                            skipped=skipped)
+    bundle, registry = _bundle_for_rules(args)
     stances = dict(args.stance or [])
     read_errors = []
     rows = [measure(session, stances=stances, registry=registry)
@@ -881,6 +925,74 @@ def _roll_back(state, sessions_dir, events_path, labels_path, original, addition
     return left
 
 
+def cmd_bind(args, out):
+    """`--plan` prints the plan and writes nothing; `--apply FILE` records the bindings an
+    edited plan chose in one bindings file, or writes nothing and exits 2 naming every choice
+    it refused. The plan reads the rules as `report` does, so pass it the same `--rules` or
+    `--root`; there is no interactive mode, and the plan file is the whole flow."""
+    if args.json and not args.plan:
+        sys.stderr.write("bind: --json goes with --plan\n")
+        return 2
+    if args.project and not args.apply:
+        sys.stderr.write("bind: --project goes with --apply\n")
+        return 2
+    bundle, registry = _bundle_for_rules(args)
+    if args.plan:
+        trusted = None if args.no_config else _bindings.load_trusted(rules_dir=args.rules)
+        doc = _bindings.plan(bundle, trusted)
+        if args.json:
+            out.write(json.dumps(doc, indent=2, sort_keys=True) + "\n")
+        else:
+            try:
+                text = _bindings.plan_text(doc)
+            except DeclarativeError as exc:
+                # A rule file's name holding a control character has no spelling there.
+                sys.stderr.write("bind: %s; print the plan with --json\n" % exc.reason)
+                return 2
+            out.write(text)
+        if not doc["sections"]:
+            sys.stderr.write("bind: no unmeasured rule section to bind\n")
+        return 0
+    try:
+        doc, _lines = load(args.apply)
+        chosen = _bindings.choices(doc)
+        if args.project:
+            base = _bindings.project_root()
+            target = _bindings.project_path(base)
+        else:
+            base, target = None, _bindings.global_path()
+        new = _bindings.resolve(bundle, chosen, known_ids(bundle.detectors), base)
+        if not new:
+            out.write("nothing to bind: no section in the plan names a detector\n")
+            return 0
+        existing = _bindings.existing(target, project=base is not None)
+        _bindings.write(target, _bindings.merged(existing, new))
+    except DeclarativeError as exc:
+        sys.stderr.write("bind: %s:%d: %s\n" % (exc.path, exc.line, exc.reason))
+        return 2
+    except _bindings.BindError as exc:
+        for reason in exc.reasons:
+            sys.stderr.write("bind: %s\n" % reason)
+        sys.stderr.write("bind: nothing written\n")
+        return 2
+    except OSError as exc:
+        sys.stderr.write("bind: cannot write: %s\n" % (exc.strerror or type(exc).__name__))
+        return 2
+    for binding in new:
+        out.write("bound %s#%s to %s\n" % (binding.path, binding.section, binding.detector))
+    out.write("recorded in %s\n" % _short_path(target))
+    return 0
+
+
+def _short_path(path):
+    """`path` as `~/...` under the home folder, else as given."""
+    try:
+        relative = os.path.relpath(path, os.path.expanduser("~"))
+    except ValueError:  # pragma: no cover - a different drive on Windows
+        return path
+    return path if relative.startswith(os.pardir) else "~/" + relative.replace(os.sep, "/")
+
+
 class _LeftAsIs(Exception):
     """A file label will not roll back, because it holds more than label wrote."""
 
@@ -908,6 +1020,8 @@ def main(argv=None, out=None):
         return cmd_explain(args, out)
     if args.command == "label":
         return cmd_label(args, out)
+    if args.command == "bind":
+        return cmd_bind(args, out)
     parser.print_help(out)
     return 1
 

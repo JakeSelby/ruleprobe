@@ -5,7 +5,7 @@
   "generated_at": "2026-09-23",
   "next_ids": {
     "epic": 18,
-    "story": 26,
+    "story": 27,
     "task": 11,
     "bug": 13,
     "chore": 10,
@@ -1178,6 +1178,19 @@
       "type": "story",
       "native_type": "Feature",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S025.md",
+      "parent_bmad_id": "RP-E010",
+      "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-S026",
+      "github_number": 154,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/154",
+      "title": "feat(rules): bind rules to detectors with ruleprobe bind",
+      "type": "story",
+      "native_type": "Feature",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-S026.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
       "lifecycle": "active",

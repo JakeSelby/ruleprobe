@@ -966,6 +966,7 @@ history ship first, and five testers are recruited before `compare` is built. Ho
 A stranger runs `ruleprobe report` with no flags and sees their own rules found, bound per sentence and
 measured inside a minute, with the binder scored like a detector.
 **FRs covered:** FR-36, FR-37, FR-38; AD-18, AD-12.
+Amended 2026-10-03: also FR-52 and AD-19, through story 8.7 (#154).
 
 ### Epic 9: a field floor for the default detectors (#129, RP-E011)
 Every default detector has field evidence behind it or leaves the defaults. Existing items: #110, #111,
@@ -1007,6 +1008,14 @@ judge's package boundary.
 
 A developer with an unedited rule file sees rules measured with no flags. Binding is per sentence and
 under-counts (AD-18). Runs after housekeeping #121 and #124.
+
+**Amended 2026-10-03 (maintainer decision):** the goal "rules measured with no configuration" is cut on
+independent evidence. Story 8.6 (#151, RP-S025) built a held-out set the binder had never been tuned on,
+and catalog binding measured recall 0.12 (5/40) at precision 1.00 there; on real, dense rule files it
+measures almost nothing. The approved plan's exit clause cut the goal, and the 0.70 recall bar for the
+epic is withdrawn (FR-37, amended). The epic now ends with story 8.7: an explicit, opt-in `ruleprobe
+bind` that turns coverage into a few minutes of setup the user confirms (FR-52, AD-19). Catalog binding
+stays exactly as strict as it is.
 
 ### Story 8.1: `spike(rules): score the section binder and a per-sentence binder on a rules zoo`
 
@@ -1091,6 +1100,29 @@ So that my first run needs no flags.
 5. **Given** a discovered run, **When** it finishes, **Then** no file was written.
 
 **Files:** `ruleprobe/rules.py`, `ruleprobe/cli.py`, `ruleprobe/report.py`. **Tests:** `tests/test_rules.py`, `tests/test_cli.py`.
+
+Story 8.6 (#151, RP-S025, `feat(detectors): widen the phrasings the catalog reads`) was filed after this
+list was written; its design is in its story file.
+
+### Story 8.7: `feat(rules): bind rules to detectors with ruleprobe bind`
+
+**Kind:** story · **Binds:** FR-52, FR-36, FR-37, NFR-4, NFR-5; AD-19, AD-8, AD-18 · **Depends on:** 8.5, 8.6 · **Issue:** #154 (RP-S026)
+
+As a developer whose rules the catalog leaves unmeasured,
+I want to see each unmeasured section with its nearest detectors and the reason it did not bind, and
+record the binding I confirm,
+So that my rules are measured after a few minutes of setup, by a claim I made and can see.
+
+**Acceptance Criteria:**
+
+1. **Given** unmeasured sections, **When** `ruleprobe bind --plan` runs, **Then** it prints them in sorted order with ranked candidate detectors and the blocking reason, `--json` gives the same plan as data, and nothing is written.
+2. **Given** an edited plan, **When** `bind --apply FILE` runs, **Then** it writes the global bindings file, or the repository's with `--project`, with sorted entries, a sha256 per section and no timestamp.
+3. **Given** a binding whose hash matches, **When** `report` runs, **Then** the rule reads `measured  user-bound, <detector>`; **given** a changed section, **then** it reads "binding stale, run ruleprobe bind" and is not counted.
+4. **Given** a bindings file in a discovered clone, **When** `report` runs, **Then** it is ignored and the report says so.
+5. **Given** an unknown detector id, **When** `--apply` runs, **Then** it is refused.
+6. **Given** any `report` run, **When** it finishes, **Then** no file was written.
+
+**Files:** `ruleprobe/bindings.py`, `ruleprobe/rules.py`, `ruleprobe/cli.py`. **Tests:** `tests/test_bind.py`.
 
 ## Epic 9: a field floor for the default detectors
 
@@ -1337,6 +1369,11 @@ So that a quiet number is not mistaken for a clean one.
 
 #27 (RP-E008) sits alongside this epic: agent-harness bumps to 0.3, including its detector-count test,
 and checks what it measures after the default set changes.
+
+**Amended 2026-10-03:** the launch headline changes. With Epic 8's zero-configuration goal cut (held-out
+recall 0.12, #151), the launch claims coverage as a few minutes of setup with `ruleprobe bind` (story
+8.7, #154), not as rules measured with no configuration. Stories 13.2 and 13.4 stay as written; whether
+13.2's 60-second bar also counts a rule measured after `bind` is the maintainer's call before 0.3.0rc1.
 
 ### Story 13.1: `chore(release): publish 0.3.0rc1`
 

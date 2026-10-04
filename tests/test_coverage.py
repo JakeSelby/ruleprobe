@@ -28,7 +28,7 @@ class ShareTests(unittest.TestCase):
                                entry("c", "dark"), entry("d", "unmeasured")])
         self.assertEqual(bundle.coverage(),
                          {"measured": 2, "dark": 1, "unmeasured": 1, "share": 0.5,
-                          "catalog": 0})
+                          "catalog": 0, "user": 0})
 
     def test_the_coverage_line_prints_the_counts_and_the_share(self):
         bundle = Bundle(rules=[entry("a", "measured"), entry("b", "measured"),
@@ -59,7 +59,7 @@ class ShareTests(unittest.TestCase):
         bundle = Bundle()
         self.assertEqual(bundle.coverage(),
                          {"measured": 0, "dark": 0, "unmeasured": 0, "share": None,
-                          "catalog": 0})
+                          "catalog": 0, "user": 0})
         self.assertEqual(bundle.summary(), "")
 
     def test_all_dark_is_a_share_of_zero_not_no_share(self):
@@ -123,7 +123,7 @@ class CliCoverageTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(json.loads(text)["coverage"],
                          {"measured": 0, "dark": 0, "unmeasured": 0, "share": None,
-                          "catalog": 0})
+                          "catalog": 0, "user": 0})
         self.assertNotIn("measured)", err)
 
     def test_an_empty_rules_directory_prints_no_share_and_json_carries_none(self):

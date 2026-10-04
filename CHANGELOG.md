@@ -35,6 +35,14 @@ All notable changes to this project are documented here. The format follows
   anywhere under the home folder), and a file over 1 MB or past 200 in one rules folder is
   skipped; refused and skipped files are counted, never read or named. `--no-config` turns it off. A section a word unbound now names its nearest catalog entry beside
   that word ([#149](https://github.com/JakeSelby/ruleprobe/issues/149)).
+- `ruleprobe bind` binds the rule sections the catalog left unmeasured to detectors you choose.
+  `bind --plan` prints each one in sorted order with its nearest catalog detectors and the reason
+  it did not bind, and writes nothing; `bind --apply FILE` records the choices from the edited
+  plan in `~/.config/ruleprobe/bindings.yaml`, or with `--project` in the repository's
+  `.ruleprobe/bindings.yaml`. `report` shows such a rule as `user-bound`, counts it under
+  `coverage.user`, marks it stale when its section's text changes, and reads no bindings file
+  from a project it found through the transcripts. Catalog binding is unchanged
+  ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
 
 ### Changed
 
@@ -69,6 +77,12 @@ All notable changes to this project are documented here. The format follows
   0.61 on a 65-item set added to the zoo, tuned against; 0.67 on the zoo's older held-out
   labels; 0.69 over the whole zoo, whose floor is now 0.68
   ([#151](https://github.com/JakeSelby/ruleprobe/issues/151)).
+
+### Fixed
+
+- A JSON detector or bindings file nested too deeply is a finding naming the file, not a
+  `RecursionError`, and one repeating a key in an object is a finding rather than read with the
+  last value ([#154](https://github.com/JakeSelby/ruleprobe/issues/154)).
 
 ## 0.2.0 (2026-09-24)
 
