@@ -32,6 +32,14 @@ CASES = {
         ([bash("{ echo x; } > out.txt; cat notes.txt")], 1),
         ([bash("{ cat notes.txt; }")], 1),
         ([bash("{ cat notes.txt; echo done")], 0),
+        # A `)` fused to the operator after it closes there, and a reserved word after a close
+        # ends the construct: the cat after or inside each still reads the whole file.
+        ([bash("(cd docs && make html)>/dev/null; cat README.md")], 1),
+        ([bash("(cd x && make)&& echo ok; cat README.md")], 1),
+        ([bash("( cat a )>out; cat b.txt")], 1),
+        ([bash("(cat a)>out")], 0),
+        ([bash("if [ -f notes.txt ]; then (cat notes.txt) fi")], 1),
+        ([bash("for f in a; do { cat notes.txt; } done")], 1),
     ],
     "transcript-hygiene/unfiltered-find": [
         ([bash("find .")], 1),

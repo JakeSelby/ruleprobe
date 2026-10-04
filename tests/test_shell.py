@@ -153,10 +153,34 @@ class GroupTests(unittest.TestCase):
         self.assertEqual(outputs("{ cat a.txt; } && echo done")[0], ("cat", ()))
 
     def test_a_group_the_parse_cannot_follow_is_unknown(self):
-        # Never closed, a word after the close, and a `)` the tokenizer joined to `>`.
+        # Never closed, and a word after the close.
         self.assertEqual(outputs("{ cat a.txt; echo done")[0], ("cat", ("unknown",)))
         self.assertEqual(outputs("{ cat a.txt; } extra")[0], ("cat", ("unknown",)))
-        self.assertEqual(outputs("( cat a.txt )>out.txt")[0], ("cat", ("unknown",)))
+
+    def test_a_command_after_a_group_the_parse_cannot_follow_is_untagged(self):
+        self.assertEqual(outputs("{ cat a.txt; } extra; cat b.txt")[-1], ("cat", ()))
+        self.assertEqual(outputs("( cat a.txt ) extra && cat b.txt")[-1], ("cat", ()))
+
+    def test_a_close_fused_to_the_operator_after_it_still_closes(self):
+        # `shlex` reads `)>`, `)&&`, `;)>` as one token; the group must close at the `)`.
+        self.assertEqual(outputs("( cat a.txt )>out; cat b.txt"),
+                         [("cat", ("redirect",)), (">", ()), ("cat", ())])
+        self.assertEqual(outputs("(cat a.txt;)>out; cat b.txt")[0], ("cat", ("redirect",)))
+        self.assertEqual(outputs("(cat a.txt)|head")[0], ("cat", ("pipe",)))
+        self.assertEqual(outputs("(cd docs && make html)>/dev/null; cat README.md"),
+                         [("cd", ("redirect",)), ("make", ("redirect",)), (">", ()),
+                          ("cat", ())])
+        self.assertEqual(outputs("(cd x && make)&& echo ok; cat README.md"),
+                         [("cd", ()), ("make", ()), ("echo", ()), ("cat", ())])
+
+    def test_an_arithmetic_close_inside_a_subshell_does_not_close_it(self):
+        self.assertEqual(outputs("( ((x)) ; cat a.txt ) > out")[1], ("cat", ("redirect",)))
+
+    def test_a_reserved_word_after_a_close_ends_the_construct_not_the_parse(self):
+        self.assertEqual(outputs("if [ -f notes.txt ]; then (cat notes.txt) fi")[-1],
+                         ("cat", ()))
+        self.assertEqual(outputs("for f in a; do { cat notes.txt; } done")[-1], ("cat", ()))
+        self.assertEqual(outputs("if { cat a.txt; } then echo; fi")[0], ("cat", ()))
 
     def test_a_brace_is_a_group_only_where_a_command_starts_and_unquoted(self):
         self.assertEqual(outputs("echo { cat a.txt; } > out.txt")[0], ("echo", ()))

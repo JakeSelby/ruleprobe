@@ -15,8 +15,10 @@ hit is a wrong one.
   substitution is replaced wholesale before the segments are split.
 - Literal text equal to a heredoc marker in an argument is resolved as if it were that
   heredoc's body.
-- A `)` written against the next operator (`(cat a)>out`, `(cat a)|head`) is one word to the
-  tokenizer, so that subshell never closes and its segments' output is unknown.
+- `shlex` returns a run of operator characters as one token. A `)` in such a run (`)>`, `);`,
+  `)&&`, `;)`) is split back out so its subshell closes where bash closes it, but a `(` in one
+  (`&&(`) is not, so that subshell is never opened and its segments are read as if outside it.
+  A `))` while a `((` is open is left whole as the end of an arithmetic command.
 - What a `{ ...; }` group or `( ... )` subshell does with its output is read from what follows
   its close, and only there: a group whose output a later `exec >file` moves is not read as
   redirected.
@@ -453,8 +455,9 @@ class Segment(list):
     `groups` is a sorted tuple holding, for the `{ ...; }` groups and `( ... )` subshells the
     segment sits in, nested ones included, what follows each one's close: `"redirect"` for a
     redirect, `"pipe"` for a pipe, and `"unknown"` when the parse cannot tell, because the
-    group never closes or a word follows the close. A group followed by nothing, or by a
-    separator, adds nothing, so a segment in no redirected or piped group holds `()`. A
+    group never closes or a word follows the close. A group followed by nothing, by a
+    separator, or by a reserved word that ends the construct around it (`fi`, `done`) adds
+    nothing, so a segment in no redirected or piped group holds `()`. A
     segment compares equal to the plain list of its tokens.
     """
 
@@ -471,6 +474,50 @@ class _Group(object):
         self.close, self.parent, self.tags = close, parent, (UNKNOWN,)
 
 
+#: The reserved words that end the construct around a group, which bash accepts right after a
+#: group's close: `then (cat a) fi`, `do { cat a; } done`.
+_ENDS = frozenset(("then", "else", "elif", "fi", "do", "done", "esac"))
+_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _split_closes(tokens):
+    """`tokens` with every `)` in a run of operator characters made a token of its own.
+
+    `shlex` returns `)>`, `);` and `)&&` as one token, which closes nothing; split, the `)`
+    closes its subshell and the operator after it is read as itself. A `))` while a `((` is
+    open ends an arithmetic command and is left whole.
+    """
+    out = []
+    arithmetic = 0
+    for token in tokens:
+        if isinstance(token, Literal) or not set(token) <= _OPERATOR_CHARS \
+                or (")" not in token and "((" not in token):
+            out.append(token)
+            continue
+        piece, i = "", 0
+        while i < len(token):
+            if token.startswith("((", i):
+                arithmetic += 1
+                piece += "(("
+                i += 2
+            elif token.startswith("))", i) and arithmetic:
+                arithmetic -= 1
+                piece += "))"
+                i += 2
+            elif token[i] == ")":
+                if piece:
+                    out.append(piece)
+                piece = ""
+                out.append(")")
+                i += 1
+            else:
+                piece += token[i]
+                i += 1
+        if piece:
+            out.append(piece)
+    return out
+
+
 def _after(tokens, i):
     """The tags for what follows a group's close at `tokens[i]`, up to the next separator."""
     tags = set()
@@ -484,7 +531,8 @@ def _after(tokens, i):
         elif _is_operator(token, _PIPE):
             tags.add(PIPED)
             break
-        elif _is_operator(token, _BREAK) or _is_operator(token, ("}",)):
+        elif _is_operator(token, _BREAK) or _is_operator(token, ("}",)) \
+                or _is_operator(token, _ENDS):
             break
         elif target:
             target = False
@@ -500,6 +548,7 @@ def _pipelines(tokens):
     A `{` or `}` is a group's open or close only where a command would start, and a quoted
     one never is. A close that matches no open, such as a `case` arm's `)`, closes nothing.
     """
+    tokens = _split_closes(tokens)
     out, pipe, seg = [], [], Segment()
     opened, stack, placed = [], [], []
     for i, token in enumerate(tokens):
