@@ -4,7 +4,7 @@ keys, and a synthetic one is easier to read than a redacted transcript."""
 
 # Assembled at run time so a secret scanner reading this file finds a concatenation rather
 # than a key shape.
-FAKE_KEY = "AKIA" + "Q" * 16
+FAKE_KEY = "AKIA" + "Q7" * 8
 
 
 def bash(command, turn=1, id="tu1"):
