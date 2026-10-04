@@ -46,6 +46,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A tool call counts only when it ran, on all three readers. A call the user refused or
+  cancelled, a permission denial, and a call stopped before its tool ran make no event, so
+  detectors stop counting them: a cancelled Gemini `write_file` of a key is no longer a
+  `secrets/secret-in-write` hit. A call that ran and failed still counts, so a test run that
+  exits non-zero still follows a change for `testing/test-after-change`. A call interrupted
+  part-way, and any Gemini call whose `status` is `cancelled` or `error`, is left out too
+  ([#114](https://github.com/JakeSelby/ruleprobe/issues/114)).
 - The origins section names Model Citizen (formerly agent-harness) and links to the current
   repository while preserving Ruleprobe's extraction history
   ([#146](https://github.com/JakeSelby/ruleprobe/issues/146)).

@@ -13,6 +13,14 @@ A thread spawned as a subagent inherits its parent's history and carries the par
 `session_meta` further down the file. Only the first one is this rollout's own, and its id
 is the session's; `session_key(path)` reads it without reading the rest.
 
+A call that never ran makes no event, and neither does its output. Codex answers such a call
+with a fixed output: `exec command rejected by user` or `patch rejected by user` when the user
+declined it, `patch rejected: ...` when the approval settings refused a patch, and `aborted`
+when the turn was interrupted before the call returned. An interrupted call may have started, but
+the rollout does not say, so it is left out: a measure that under-counts. Any other output is a
+call that ran, a command that exited non-zero included. A refusal Codex words otherwise, such as
+an exec policy's own reason, is not recognised and still counts.
+
 A user message is a `user_prompt`, and the last assistant message before one - or before the
 end - is the final one. Both are derived the way the Claude Code reader derives them, rather
 than read from `payload.phase`, so a detector means the same thing on either runtime.
@@ -26,6 +34,9 @@ from ..events import Session, result_text, text_of
 ROOT = os.path.join("~", ".codex", "sessions")
 
 _TOOL_NAMES = {"exec_command": "Bash", "spawn_agent": "Agent"}
+#: The outputs Codex writes for a call that never ran, whole, and the prefix of one.
+_NOT_RUN = frozenset(("exec command rejected by user", "patch rejected by user", "aborted"))
+_NOT_RUN_PREFIX = "patch rejected:"
 
 
 def transcripts(root=None):
@@ -49,6 +60,7 @@ def read(path, empty=False):
     cwd = model_now = ""
     started = ended = ""
     tool_names = {}
+    not_run = set()
     turn = 0
     pending_final = None
     try:
@@ -90,6 +102,10 @@ def read(path, empty=False):
                     events.append({"kind": "tool_use", "turn": turn, "id": call_id,
                                    "name": name, "input": arguments})
                 elif what in ("function_call_output", "custom_tool_call_output"):
+                    if isinstance(call_id, str) and call_id \
+                            and _never_ran(payload.get("output")):
+                        not_run.add(call_id)
+                        continue
                     name = tool_names.get(call_id, "")
                     events.append({"kind": "tool_result", "turn": turn,
                                    "tool_use_id": call_id, "tool_name": name,
@@ -111,6 +127,10 @@ def read(path, empty=False):
                                    "text": _text(payload)})
     if pending_final is not None:
         pending_final["final"] = True
+    if not_run:
+        events = [e for e in events
+                  if not (e["kind"] == "tool_use" and isinstance(e["id"], str)
+                          and e["id"] in not_run)]
     session_id = meta.get("id", "")
     if not events and not (empty and session_id):
         return None
@@ -156,6 +176,16 @@ def _items(lines):
         except (ValueError, AttributeError):
             continue
         yield item, payload
+
+
+def _never_ran(output):
+    """Whether a call's output is one Codex writes for a call that never ran."""
+    if isinstance(output, list):
+        output = "".join(text_of(x.get("text")) for x in output if isinstance(x, dict))
+    if not isinstance(output, str):
+        return False
+    output = output.strip()
+    return output in _NOT_RUN or output.startswith(_NOT_RUN_PREFIX)
 
 
 def _text(payload):

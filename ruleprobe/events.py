@@ -6,7 +6,10 @@ A session is a list of dicts in transcript order. Every event carries `kind` and
 
 - `assistant_text` - `text` (str), `final` (bool: the last assistant text before the next
   user prompt or the end of the transcript), `model` (str).
-- `tool_use` - `id` (str), `name` (str), `input` (dict).
+- `tool_use` - `id` (str), `name` (str), `input` (dict). Only a call that ran is one: a call
+  the user refused or cancelled, a permission denied, or a check stopped before the tool ran
+  makes no `tool_use` and no `tool_result`. A call that ran and failed is one. Each reader's
+  docstring says how its runtime records the difference.
 - `tool_result` - `tool_use_id` (str), `tool_name` (str, the name of the `tool_use` it
   answers, resolved by the reader), `text` (str).
 - `user_prompt` - `text` (str, the prompt as written; empty when the transcript

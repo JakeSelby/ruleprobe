@@ -206,11 +206,16 @@ class ToolMappingTests(TreeTest):
         session = self.calls(call("c1", "invoke_agent", {"prompt": "look around"}))
         self.assertEqual(counts(session.events)["agent"], 0)
 
-    def test_an_errored_call_carries_its_error_as_the_result_text(self):
+    def test_an_errored_call_makes_no_event(self):
         session = self.calls(call("c1", "run_shell_command", {"command": "false"},
-                                  error="exit 1"))
+                                  error="spawn failed"))
+        self.assertEqual(self.kinds(session), ["user_prompt"])
+
+    def test_a_command_that_exits_non_zero_is_a_success_with_its_exit_code(self):
+        session = self.calls(call("c1", "run_shell_command", {"command": "false"},
+                                  output="Exit Code: 1"))
         result = [e for e in session.events if e["kind"] == "tool_result"][0]
-        self.assertEqual(result["text"], "exit 1")
+        self.assertEqual(result["text"], "Exit Code: 1")
 
 
 class WindowsShellTests(TreeTest):
