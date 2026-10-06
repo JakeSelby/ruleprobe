@@ -5,12 +5,13 @@ These are the cases that decide whether a detector reads the right words. They a
 from the engine's original home and are the reason the parser is worth having at all: a
 regular expression over the command text gets every one of them wrong.
 """
+import time
 import unittest
 
 from corpus import bash
 from ruleprobe import pipelines, run
-from ruleprobe.shell import (SUB_PLACEHOLDER, has_redirect, normalise, operands, strip_comment,
-                             strip_heredocs, strip_subs, tokenize)
+from ruleprobe.shell import (SUB_PLACEHOLDER, group_output, has_redirect, normalise, operands,
+                             strip_comment, strip_heredocs, strip_subs, tokenize)
 
 TRAILER = "Co-Authored-By: A Model"
 # The form a coding agent writes for nearly every commit: the message is a heredoc inside a
@@ -114,6 +115,94 @@ class HeredocTests(unittest.TestCase):
     def test_a_heredoc_leaves_its_command_visibly_redirected(self):
         segment = pipelines("cat > out.txt <<EOF\nbody\nEOF")[0][0]
         self.assertTrue(has_redirect(segment))
+
+
+def outputs(command):
+    """`(first word, group_output)` for every segment of `command`."""
+    return [(seg[0], group_output(seg)) for pipe in pipelines(command) for seg in pipe]
+
+
+class GroupTests(unittest.TestCase):
+    def test_a_redirect_after_a_brace_group_reaches_every_command_in_it(self):
+        self.assertEqual(outputs("{ cat a.txt; echo; } > out.txt"),
+                         [("cat", ("redirect",)), ("echo", ("redirect",)), (">", ())])
+        segment = pipelines("{ cat a.txt; } > out.txt")[0][0]
+        self.assertTrue(has_redirect(segment))
+        self.assertEqual(operands(segment), ["a.txt"])
+
+    def test_a_redirect_after_a_subshell_reaches_every_command_in_it(self):
+        self.assertEqual(outputs("( cat a.txt; echo ) >> out.txt")[:2],
+                         [("cat", ("redirect",)), ("echo", ("redirect",))])
+
+    def test_a_nested_group_takes_on_the_redirect_of_the_group_around_it(self):
+        self.assertEqual(outputs("{ { cat a.txt; }; echo; } > out.txt")[0],
+                         ("cat", ("redirect",)))
+        self.assertEqual(outputs("( { cat a.txt; } | head ) > out.txt")[0],
+                         ("cat", ("pipe", "redirect")))
+
+    def test_a_pipe_after_a_group_is_recorded_and_is_not_a_redirect(self):
+        segment = pipelines("{ cat a.txt; echo; } | head -20")[0][0]
+        self.assertEqual(group_output(segment), ("pipe",))
+        self.assertFalse(has_redirect(segment))
+        self.assertEqual(outputs("{ cat a.txt; } 2>&1 | head")[0], ("cat", ("pipe", "redirect")))
+
+    def test_a_command_outside_the_group_keeps_its_own_output(self):
+        self.assertEqual(outputs("{ echo x; } > out.txt; cat a.txt")[-1], ("cat", ()))
+        self.assertEqual(outputs("cat a.txt; ( echo x ) > out.txt")[0], ("cat", ()))
+        self.assertEqual(outputs("{ cat a.txt; }"), [("cat", ())])
+        self.assertEqual(outputs("{ cat a.txt; } && echo done")[0], ("cat", ()))
+
+    def test_a_group_the_parse_cannot_follow_is_unknown(self):
+        # Never closed, and a word after the close.
+        self.assertEqual(outputs("{ cat a.txt; echo done")[0], ("cat", ("unknown",)))
+        self.assertEqual(outputs("{ cat a.txt; } extra")[0], ("cat", ("unknown",)))
+
+    def test_a_command_after_a_group_the_parse_cannot_follow_is_untagged(self):
+        self.assertEqual(outputs("{ cat a.txt; } extra; cat b.txt")[-1], ("cat", ()))
+        self.assertEqual(outputs("( cat a.txt ) extra && cat b.txt")[-1], ("cat", ()))
+
+    def test_a_close_fused_to_the_operator_after_it_still_closes(self):
+        # `shlex` reads `)>`, `)&&`, `;)>` as one token; the group must close at the `)`.
+        self.assertEqual(outputs("( cat a.txt )>out; cat b.txt"),
+                         [("cat", ("redirect",)), (">", ()), ("cat", ())])
+        self.assertEqual(outputs("(cat a.txt;)>out; cat b.txt")[0], ("cat", ("redirect",)))
+        self.assertEqual(outputs("(cat a.txt)|head")[0], ("cat", ("pipe",)))
+        self.assertEqual(outputs("(cd docs && make html)>/dev/null; cat README.md"),
+                         [("cd", ("redirect",)), ("make", ("redirect",)), (">", ()),
+                          ("cat", ())])
+        self.assertEqual(outputs("(cd x && make)&& echo ok; cat README.md"),
+                         [("cd", ()), ("make", ()), ("echo", ()), ("cat", ())])
+
+    def test_an_arithmetic_close_inside_a_subshell_does_not_close_it(self):
+        self.assertEqual(outputs("( ((x)) ; cat a.txt ) > out")[1], ("cat", ("redirect",)))
+
+    def test_a_reserved_word_after_a_close_ends_the_construct_not_the_parse(self):
+        self.assertEqual(outputs("if [ -f notes.txt ]; then (cat notes.txt) fi")[-1],
+                         ("cat", ()))
+        self.assertEqual(outputs("for f in a; do { cat notes.txt; } done")[-1], ("cat", ()))
+        self.assertEqual(outputs("if { cat a.txt; } then echo; fi")[0], ("cat", ()))
+
+    def test_a_brace_is_a_group_only_where_a_command_starts_and_unquoted(self):
+        self.assertEqual(outputs("echo { cat a.txt; } > out.txt")[0], ("echo", ()))
+        self.assertEqual(outputs("'{' cat a.txt; } > out.txt")[0], ("{", ()))
+
+    def test_a_close_with_no_open_closes_nothing(self):
+        self.assertEqual(outputs("case x in a) cat a.txt;; esac > out.txt")[1], ("cat", ()))
+
+    def test_a_plain_list_has_no_group_output(self):
+        self.assertEqual(group_output(["cat", "a.txt"]), ())
+        self.assertFalse(has_redirect(["cat", "a.txt"]))
+
+    def test_hostile_groups_parse_in_linear_time(self):
+        # Deep nesting with a segment at every level, and closes each followed by words: a
+        # walk per close over the segments inside, or over the rest of the command, is
+        # quadratic here.
+        deep = "{ cat a; " * 20000 + "} " * 20000 + "> out"
+        words = "( cat a ) x x x x " * 20000
+        for command in (deep, words):
+            started = time.perf_counter()
+            pipelines(command)
+            self.assertLess(time.perf_counter() - started, 2.0)
 
 
 class WordTests(unittest.TestCase):

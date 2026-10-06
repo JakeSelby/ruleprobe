@@ -588,10 +588,10 @@ secrets/secret-file-add                   5    6    5    0    0   1.00    1.00  
 secrets/secret-in-write                  16   22   16    0    0   1.00    1.00   1.00
 testing/test-after-change                11    6   11    0    0   1.00    1.00   1.00
 transcript-hygiene/unfiltered-find       10   15   10    0    0   1.00    1.00   1.00
-transcript-hygiene/whole-file-cat        10   14   10    0    0   1.00    1.00   1.00
+transcript-hygiene/whole-file-cat        12   19   12    0    0   1.00    1.00   1.00
 verification/no-verify                   11   13   11    0    0   1.00    1.00   1.00
 -------------------------------------------------------------------------------------------
-total                                    88  120   88    0    0   1.00    1.00   1.00  floor 0.90
+total                                    90  125   90    0    0   1.00    1.00   1.00  floor 0.90
 
 binder over the rules zoo: 201 sections, 240 labels
 catalog entry                           pos   tp   fp   fn   prec  recall  note

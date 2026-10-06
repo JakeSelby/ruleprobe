@@ -13,7 +13,8 @@ import re
 
 from ..events import hit, input_of, text_of
 from ..registry import Detector
-from ..shell import git_calls, git_config, has_redirect, operands, split_assignments
+from ..shell import (git_calls, git_config, group_output, has_redirect, operands,
+                     split_assignments)
 
 # The `aws_secret` literal is split so a repository that greps its own tracked files for
 # secret shapes does not trip over this line.
@@ -280,7 +281,11 @@ _HOOKS_OFF = re.compile(r"^(?i:core\.hookspath)=(?:/dev/null)?$")
 
 
 def whole_file_cat(events, ctx):
-    """A lone `cat <one path>`: no pipe, no filter, no heredoc, no redirect."""
+    """A lone `cat <one path>`: no pipe, no filter, no heredoc, no redirect.
+
+    A `cat` inside a `{ ...; }` group or `( ... )` subshell whose output is redirected or
+    piped is not one, and nor is one in a group the parse cannot follow (`group_output`).
+    """
     hits = []
     for parsed in ctx.bash:
         for pipe in parsed.pipelines:
@@ -289,7 +294,7 @@ def whole_file_cat(events, ctx):
             segment = pipe[0]
             if not segment or segment[0] != "cat":
                 continue
-            if has_redirect(segment) or len(operands(segment)) != 1:
+            if group_output(segment) or has_redirect(segment) or len(operands(segment)) != 1:
                 continue
             hits.append(hit(parsed.event))
             break
@@ -306,7 +311,8 @@ def unfiltered_find(events, ctx):
             segment = pipe[0]
             if not segment or segment[0] != "find":
                 continue
-            if has_redirect(segment) or any(t in FIND_FILTERS for t in segment[1:]):
+            if group_output(segment) or has_redirect(segment) \
+                    or any(t in FIND_FILTERS for t in segment[1:]):
                 continue
             hits.append(hit(parsed.event))
             break

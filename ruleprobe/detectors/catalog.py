@@ -394,6 +394,8 @@ ENTRIES = (
                     {"bash": "cat README.md | head -40", "note": "piped to a filter"},
                     {"bash": "cat a.md b.md", "note": "two operands"},
                     {"bash": "cat README.md > copy.md", "note": "redirected"},
+                    {"bash": "{ cat README.md; echo; } > copy.md",
+                     "note": "redirected by the group around it"},
                 ],
             },
         },

@@ -15,6 +15,13 @@ hit is a wrong one.
   substitution is replaced wholesale before the segments are split.
 - Literal text equal to a heredoc marker in an argument is resolved as if it were that
   heredoc's body.
+- `shlex` returns a run of operator characters as one token. A `)` in such a run (`)>`, `);`,
+  `)&&`, `;)`) is split back out so its subshell closes where bash closes it, but a `(` in one
+  (`&&(`) is not, so that subshell is never opened and its segments are read as if outside it.
+  A `))` while a `((` is open is left whole as the end of an arithmetic command.
+- What a `{ ...; }` group or `( ... )` subshell does with its output is read from what follows
+  its close, and only there: a group whose output a later `exec >file` moves is not read as
+  redirected.
 """
 import re
 import shlex
@@ -38,7 +45,7 @@ _CAT_SUB_RE = re.compile(r"\$\(\s*cat\s+<<\s*(__RULEPROBE_HEREDOC_\d+__)\s*\)")
 
 _PIPE = frozenset(("|", "|&"))
 _BREAK = frozenset((";", "&&", "||", "&", ";;", "(", ")"))
-_DROP = frozenset(("do", "done", "then", "fi", "else", "esac", "{", "}", "!",
+_DROP = frozenset(("do", "done", "then", "fi", "else", "esac", "!",
                    "while", "until", "if", "elif", "for", "select", "case", "in"))
 _REDIRECTS = re.compile(r"^\d*(<|<<|<<<|<&|>|>>|&>|>&)$")
 _ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=")
@@ -438,30 +445,155 @@ def tokenize(text, strict=False):
         return None if strict else []
 
 
-def _pipelines(tokens):
-    """Tokens as a list of pipelines, each a list of segments, each a token list."""
-    out, pipe, seg = [], [], []
+# What follows a group's close, as `Segment.groups` records it.
+REDIRECTED, PIPED, UNKNOWN = "redirect", "pipe", "unknown"
+
+
+class Segment(list):
+    """One pipeline segment's tokens, and what the groups around it do with its output.
+
+    `groups` is a sorted tuple holding, for the `{ ...; }` groups and `( ... )` subshells the
+    segment sits in, nested ones included, what follows each one's close: `"redirect"` for a
+    redirect, `"pipe"` for a pipe, and `"unknown"` when the parse cannot tell, because the
+    group never closes or a word follows the close. A group followed by nothing, by a
+    separator, or by a reserved word that ends the construct around it (`fi`, `done`) adds
+    nothing, so a segment in no redirected or piped group holds `()`. A
+    segment compares equal to the plain list of its tokens.
+    """
+
+    groups = ()
+
+
+class _Group(object):
+    """An open `{` or `(`: the word that closes it, the group around it, and its tags."""
+
+    __slots__ = ("close", "parent", "tags")
+
+    def __init__(self, close, parent):
+        # A group the command never closes keeps this: nobody can say where its output went.
+        self.close, self.parent, self.tags = close, parent, (UNKNOWN,)
+
+
+#: The reserved words that end the construct around a group, which bash accepts right after a
+#: group's close: `then (cat a) fi`, `do { cat a; } done`.
+_ENDS = frozenset(("then", "else", "elif", "fi", "do", "done", "esac"))
+_OPERATOR_CHARS = frozenset("();<>|&")
+
+
+def _split_closes(tokens):
+    """`tokens` with every `)` in a run of operator characters made a token of its own.
+
+    `shlex` returns `)>`, `);` and `)&&` as one token, which closes nothing; split, the `)`
+    closes its subshell and the operator after it is read as itself. A `))` while a `((` is
+    open ends an arithmetic command and is left whole.
+    """
+    out = []
+    arithmetic = 0
     for token in tokens:
-        if _is_operator(token, _BREAK):
+        if isinstance(token, Literal) or not set(token) <= _OPERATOR_CHARS \
+                or (")" not in token and "((" not in token):
+            out.append(token)
+            continue
+        piece, i = "", 0
+        while i < len(token):
+            if token.startswith("((", i):
+                arithmetic += 1
+                piece += "(("
+                i += 2
+            elif token.startswith("))", i) and arithmetic:
+                arithmetic -= 1
+                piece += "))"
+                i += 2
+            elif token[i] == ")":
+                if piece:
+                    out.append(piece)
+                piece = ""
+                out.append(")")
+                i += 1
+            else:
+                piece += token[i]
+                i += 1
+        if piece:
+            out.append(piece)
+    return out
+
+
+def _after(tokens, i):
+    """The tags for what follows a group's close at `tokens[i]`, up to the next separator."""
+    tags = set()
+    target = False
+    n = len(tokens)
+    while i < n:
+        token = tokens[i]
+        if _is_redirect(token):
+            tags.add(REDIRECTED)
+            target = True
+        elif _is_operator(token, _PIPE):
+            tags.add(PIPED)
+            break
+        elif _is_operator(token, _BREAK) or _is_operator(token, ("}",)) \
+                or _is_operator(token, _ENDS):
+            break
+        elif target:
+            target = False
+        elif not (token.isdigit() and i + 1 < n and _is_redirect(tokens[i + 1])):
+            tags.add(UNKNOWN)  # a word after a group is not shell; `2` before `>` is an fd
+        i += 1
+    return tuple(sorted(tags))
+
+
+def _pipelines(tokens):
+    """Tokens as a list of pipelines, each a list of segments, each a `Segment`.
+
+    A `{` or `}` is a group's open or close only where a command would start, and a quoted
+    one never is. A close that matches no open, such as a `case` arm's `)`, closes nothing.
+    """
+    tokens = _split_closes(tokens)
+    out, pipe, seg = [], [], Segment()
+    opened, stack, placed = [], [], []
+    for i, token in enumerate(tokens):
+        close = _is_operator(token, (")",)) or (not seg and _is_operator(token, ("}",)))
+        if close or _is_operator(token, _BREAK):
             if seg:
                 pipe.append(seg)
-                seg = []
+                placed.append((seg, stack[-1] if stack else None))
+                seg = Segment()
             if pipe:
                 out.append(pipe)
                 pipe = []
+            if close:
+                if stack and stack[-1].close == token:
+                    stack.pop().tags = _after(tokens, i + 1)
+            elif token == "(":
+                stack.append(_Group(")", stack[-1] if stack else None))
+                opened.append(stack[-1])
+            continue
+        if not seg and _is_operator(token, ("{",)):
+            stack.append(_Group("}", stack[-1] if stack else None))
+            opened.append(stack[-1])
             continue
         if _is_operator(token, _PIPE):
             if seg:
                 pipe.append(seg)
-                seg = []
+                placed.append((seg, stack[-1] if stack else None))
+                seg = Segment()
             continue
         if not seg and _is_operator(token, _DROP):
             continue
         seg.append(token)
     if seg:
         pipe.append(seg)
+        placed.append((seg, stack[-1] if stack else None))
     if pipe:
         out.append(pipe)
+    # A group opens after the one around it, so the outer tags are whole by the time an
+    # inner group takes them on.
+    for group in opened:
+        if group.parent is not None and group.parent.tags:
+            group.tags = tuple(sorted(set(group.tags) | set(group.parent.tags)))
+    for segment, group in placed:
+        if group is not None and group.tags:
+            segment.groups = group.tags
     return out
 
 
@@ -490,7 +622,15 @@ def operands(segment):
 
 
 def has_redirect(segment):
-    return any(_is_redirect(t) for t in segment)
+    """Whether a redirect applies to the segment: one of its own, or one after a group it sits
+    in, which the shell applies to every command in the group."""
+    return any(_is_redirect(t) for t in segment) or REDIRECTED in group_output(segment)
+
+
+def group_output(segment):
+    """`Segment.groups` for `segment`: what the groups around it do with its output, or `()`
+    for a segment in none, or a plain list of tokens."""
+    return getattr(segment, "groups", ())
 
 
 def normalise(command):

@@ -22,7 +22,10 @@ The matchers, by the shape they read:
   `redirect`, `unparsed`, `regex`, `program`, `first_operand`: a Bash command, through the
   shared parse in `ruleprobe.shell`. Every key but `regex` and `unparsed` is read against one
   pipeline segment, and they must hold of the *same* segment - which is why two constraints
-  on one command belong in one `command` block and not in an `all` of two. `program` is a
+  on one command belong in one `command` block and not in an `all` of two. A redirect after
+  a `{ ...; }` group or `( ... )` subshell is a `redirect` of every segment in it, and a pipe
+  after one makes none of them a `sole_segment`; in a group the parse cannot follow, one
+  never closed or followed by a word, both keys are undecided. `program` is a
   regex that must match the whole basename of the segment's first word once leading
   `NAME=value` assignments are stepped over (`pip[0-9.]*` holds of `.venv/bin/pip3.12`), and
   `first_operand` one that must match the whole of that command's first operand, flags
@@ -124,8 +127,8 @@ from collections import namedtuple
 from .declarative import DeclarativeError
 from .events import hit, input_of, text_of
 from .registry import KNOWN_SCHEMA_VERSIONS, SCHEMA_VERSION, Detector, register_compiler
-from .shell import (MARKER_RE, SUB_PLACEHOLDER, git_calls, git_config, has_redirect, operands,
-                    split_assignments)
+from .shell import (MARKER_RE, PIPED, SUB_PLACEHOLDER, UNKNOWN, git_calls, git_config,
+                    group_output, has_redirect, operands, split_assignments)
 
 __all__ = ["SPEC_KIND", "Examples", "compile_detector", "compile_examples",
            "compile_matcher", "is_undecided"]
@@ -490,7 +493,7 @@ def _m_command(value, where, owner, key):
                        or sole is not None or redirect is not None or programs
                        or first_operands)
 
-    def segment_ok(segment):
+    def segment_ok(segment, pipe):
         if names and (not segment or segment[0] not in names):
             return False
         if starts and segment[:len(starts)] != starts:
@@ -501,8 +504,6 @@ def _m_command(value, where, owner, key):
         if contains and not any(c in token for c in contains for token in segment):
             return False
         if none_of and any(token in none_of for token in segment[1:]):
-            return False
-        if redirect is not None and has_redirect(segment) != redirect:
             return False
         if count is not None and not count(len(operands(segment))):
             return False
@@ -517,7 +518,23 @@ def _m_command(value, where, owner, key):
                 given = operands(_without_flag_values(words))
                 if not given or not any(rx.fullmatch(given[0]) for rx in first_operands):
                     return False
-        return True
+        # A group the parse cannot follow may have redirected or piped this segment, so the
+        # two keys that read its output are undecided there rather than false or true.
+        unsure = UNKNOWN in group_output(segment)
+        undecided = False
+        if redirect is not None:
+            redirected = has_redirect(segment)
+            if not redirected and unsure:
+                undecided = True
+            elif redirected != redirect:
+                return False
+        if sole is not None:
+            alone = len(pipe) == 1 and PIPED not in group_output(segment)
+            if alone and unsure:
+                undecided = True
+            elif alone != sole:
+                return False
+        return _UNDECIDED if undecided else True
 
     def match(event, env):
         if event.get("kind") != "tool_use" or event.get("name") != "Bash":
@@ -535,13 +552,8 @@ def _m_command(value, where, owner, key):
             return True
         if parsed.skipped:
             return _UNDECIDED
-        for pipe in parsed.pipelines:
-            if sole is not None and (len(pipe) == 1) != sole:
-                continue
-            for segment in pipe:
-                if segment_ok(segment):
-                    return True
-        return False
+        return _any3(segment_ok(segment, pipe)
+                     for pipe in parsed.pipelines for segment in pipe)
     return match
 
 
