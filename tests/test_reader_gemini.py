@@ -478,6 +478,18 @@ class RootWalkTests(TreeTest):
         self.assertEqual(self.gemini_paths(self.tree.base, "gemini"),
                          self.gemini_paths(self.tree.base, "auto"))
 
+    def test_a_chats_file_whose_first_line_is_not_geminis_is_reported_both_ways(self):
+        path = self.tree.write("session-a.jsonl", ["", meta("a"), user("u1", "go")])
+        self.assertEqual(self.ids(self.tree.base, "gemini"), ["a"])
+        errors = []
+        sessions = list(iter_sessions(root=self.tree.base, errors=errors))
+        self.assertIn(path, [s.path for s in sessions] + [e["path"] for e in errors])
+
+    def test_a_legacy_json_beside_a_jsonl_not_detected_as_gemini_is_still_read(self):
+        self.legacy()
+        self.tree.write("session-old.jsonl", ["", meta("old"), user("u1", "go")])
+        self.assertEqual(self.ids(self.tree.base, "gemini"), ["old"])
+
     def test_the_shipped_corpus_reads_the_same_gemini_files_both_ways(self):
         root = os.path.join(os.path.dirname(gemini.__file__), os.pardir, "corpus", "sessions")
         errors = {"gemini": [], "auto": []}
