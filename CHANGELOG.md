@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## Unreleased
 
+## 0.3.0rc1 (2026-10-12)
+
 ### Added
 
 - The package metadata links the reference site, <https://ruleprobe.jakeselby.com>, as its

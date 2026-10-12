@@ -8,7 +8,7 @@
     "story": 27,
     "task": 12,
     "bug": 13,
-    "chore": 10,
+    "chore": 11,
     "spike": 5,
     "decision": 14
   },
@@ -1204,6 +1204,19 @@
       "type": "task",
       "native_type": "Task",
       "artifact_path": "_bmad-output/implementation-artifacts/RP-T011.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-C010",
+      "github_number": 162,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/162",
+      "title": "chore(release): 0.3.0rc1",
+      "type": "chore",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-C010.md",
       "parent_bmad_id": null,
       "parent_github_number": null,
       "lifecycle": "active",
