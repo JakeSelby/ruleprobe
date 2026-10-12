@@ -41,9 +41,9 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="never push; fail unless stable is at the tag")
     args = parser.parse_args(argv)
     args.tag = args.tag or "v" + package_version(ROOT)
-    if not SEMVER.fullmatch(args.tag[1:]):
-        # A release candidate is a pre-release: `stable` moves only to a release.
-        print("{} is not a stable release; {} stays where it is".format(args.tag, BRANCH))
+    if not (args.tag.startswith("v") and SEMVER.fullmatch(args.tag[1:])):
+        # A release candidate is a pre-release: `stable` moves only to a release tag.
+        print("{} is not a release tag, vX.Y.Z; {} stays where it is".format(args.tag, BRANCH))
         return 1
     action, commit = plan(ROOT, args.tag, args.remote)
     if action == "current":

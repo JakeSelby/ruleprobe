@@ -56,7 +56,7 @@ contract are in `docs/bmad-governance.md`, which every BMad workflow loads.
   minor and says so at the top of its changelog section.
 - **A release is a tag.** `docs/releasing.md` holds the procedure: fold the changelog, bump
   `__version__`, run the preflight, tag `v<version>`. The tag workflow publishes to PyPI and
-  GitHub and advances `stable`; nothing is uploaded by hand.
+  GitHub and advances `stable`, except for a release candidate; nothing is uploaded by hand.
 
 ## Layout
 

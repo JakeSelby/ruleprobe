@@ -115,13 +115,19 @@ class PreflightTests(unittest.TestCase):
 
     def test_a_release_candidate_is_a_release_version(self):
         with tempfile.TemporaryDirectory() as temp:
-            root = make_root(temp, version="1.2.0rc1", heading="1.2.0rc1 (2026-01-02)")
-            self.assertEqual(release_preflight.errors(root, tag="v1.2.0rc1"), [])
-            self.assertEqual(release_preflight.errors(root, tag="v1.2.0"),
-                             ["tag v1.2.0 does not match __version__ 1.2.0rc1"])
+            root = make_root(temp, version="1.3.0rc1", heading="1.3.0rc1 (2026-01-02)")
+            self.assertEqual(release_preflight.errors(root, tag="v1.3.0rc1"), [])
+            self.assertEqual(release_preflight.errors(root, tag="v1.3.0"),
+                             ["tag v1.3.0 does not match __version__ 1.3.0rc1"])
+
+    def test_a_candidate_after_its_release_is_refused(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = make_root(temp, version="1.2.0rc2", heading="1.2.0rc2 (2026-01-02)")
+            self.assertEqual(release_preflight.errors(root, tag="v1.2.0rc2"),
+                             ["v1.2.0 is already released; a candidate for it comes too late"])
 
     def test_other_prerelease_versions_are_refused(self):
-        for version in ("1.2.3a1", "1.2.3b1", "1.2.3.dev0", "1.2.3rc", "1.2.3-rc1"):
+        for version in ("1.2.3a1", "1.2.3b1", "1.2.3.dev0", "1.2.3rc", "1.2.3-rc1", "1.2.3rc01"):
             with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
                 found = release_preflight.errors(make_root(
                     temp, version=version, heading="{} (2026-01-02)".format(version)))
@@ -378,9 +384,11 @@ class StableTests(unittest.TestCase):
 
     def test_a_release_candidate_never_moves_stable(self):
         with mock.patch.object(advance_stable, "plan") as plan:
-            for argv in (["v1.2.0rc1"], ["v1.2.0rc1", "--check"]):
+            for argv in (["v1.2.0rc1"], ["v1.2.0rc1", "--check"], ["1.2.0", "--check"]):
                 with self.subTest(argv=argv):
                     self.assertEqual(advance_stable.main(argv), 1)
+            with mock.patch.object(advance_stable, "package_version", return_value="1.2.0rc1"):
+                self.assertEqual(advance_stable.main(["--check"]), 1)
         plan.assert_not_called()
 
 
