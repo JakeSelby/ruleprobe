@@ -15,6 +15,9 @@ opened with: every name `DECLARED` held in `tests/test_contract.py` at the tag `
 be there, at the same import path. The tag is read from the local repository, so it must have been
 fetched; an unreadable tag is an error, never a pass. A new minor may drop names, with notice, so
 `X.Y.0` is not checked, and neither is a 0.1 patch: the contract was first declared in 0.2.0.
+
+A release candidate, `X.Y.ZrcN`, passes the same checks as `X.Y.Z`, the series contract included,
+and is refused once the tag `vX.Y.Z` exists: a candidate comes before its release, never after.
 """
 import argparse
 import ast
@@ -26,6 +29,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SEMVER = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+#: A release version: a stable one, or a candidate for it, `X.Y.ZrcN` (PEP 440).
+RELEASE = re.compile(r"(?P<stable>[0-9]+\.[0-9]+\.[0-9]+)(?:rc(?:0|[1-9][0-9]*))?")
 CONTRACT_TEST = "tests/test_contract.py"
 #: The first minor series whose opening tag carries a contract test; an earlier one declared none.
 FIRST_CONTRACT_SERIES = (0, 2)
@@ -72,9 +77,17 @@ def version_section(sections, version):
 
 
 def series_tag(version):
-    """The tag that opened `version`'s minor series, or None when `version` opens one itself."""
-    major, minor, patch = version.split(".")
+    """The tag that opened `version`'s minor series, or None when `version` opens one itself.
+    A candidate belongs to the series of the release it is a candidate for."""
+    major, minor, patch = RELEASE.fullmatch(version).group("stable").split(".")
     return None if int(patch) == 0 else "v{}.{}.0".format(major, minor)
+
+
+def tag_exists(root, tag):
+    """Whether the local repository holds `tag`; the release workflows fetch every `v*` tag first."""
+    result = subprocess.run(["git", "-C", str(root), "rev-parse", "-q", "--verify", "refs/tags/" + tag],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    return result.returncode == 0
 
 
 def declared_names(source):
@@ -103,8 +116,8 @@ def source_at(root, tag):
 
 def contract_errors(root, version):
     """A line for each name the series' opening tag declared that the contract test no longer does."""
-    if not SEMVER.fullmatch(version):
-        return ["cannot check the series contract of {}: not a stable semantic version".format(version)]
+    if not RELEASE.fullmatch(version):
+        return ["cannot check the series contract of {}: not a release version".format(version)]
     base = series_tag(version)
     if base is None or tuple(int(part) for part in version.split(".")[:2]) < FIRST_CONTRACT_SERIES:
         return []
@@ -123,8 +136,9 @@ def contract_errors(root, version):
 def errors(root=ROOT, tag=None):
     found = []
     version = package_version(root)
-    if not SEMVER.fullmatch(version):
-        found.append("__version__ {} is not a stable semantic version".format(version))
+    if not RELEASE.fullmatch(version):
+        found.append("__version__ {} is not a release version: X.Y.Z, or X.Y.ZrcN for a candidate"
+                     .format(version))
     sections = changelog_sections((root / "CHANGELOG.md").read_text(encoding="utf-8"))
     heading, _ = version_section(sections, version)
     if heading is None:
@@ -135,8 +149,11 @@ def errors(root=ROOT, tag=None):
         found.append("CHANGELOG.md still has Unreleased entries; fold them into the version section")
     if tag is not None and tag != "v" + version:
         found.append("tag {} does not match __version__ {}".format(tag, version))
-    if tag is not None and SEMVER.fullmatch(version):  # else reported above
+    if tag is not None and RELEASE.fullmatch(version):  # else reported above
         found.extend(contract_errors(Path(root), version))
+        stable = RELEASE.fullmatch(version).group("stable")
+        if stable != version and tag_exists(Path(root), "v" + stable):
+            found.append("{} is already released; a candidate for it comes too late".format("v" + stable))
     return found
 
 

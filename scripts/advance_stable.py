@@ -4,7 +4,7 @@ import argparse
 import subprocess
 from pathlib import Path
 
-from release_preflight import package_version
+from release_preflight import SEMVER, package_version
 
 ROOT = Path(__file__).resolve().parents[1]
 BRANCH = "stable"
@@ -41,6 +41,10 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="never push; fail unless stable is at the tag")
     args = parser.parse_args(argv)
     args.tag = args.tag or "v" + package_version(ROOT)
+    if not (args.tag.startswith("v") and SEMVER.fullmatch(args.tag[1:])):
+        # A release candidate is a pre-release: `stable` moves only to a release tag.
+        print("{} is not a release tag, vX.Y.Z; {} stays where it is".format(args.tag, BRANCH))
+        return 1
     action, commit = plan(ROOT, args.tag, args.remote)
     if action == "current":
         print("{} is at {} ({})".format(BRANCH, args.tag, commit))

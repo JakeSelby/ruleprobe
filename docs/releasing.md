@@ -3,7 +3,8 @@
 A release is an immutable `v<version>` tag on `main`. The tag workflow repeats the gates on the
 tagged commit, builds the wheel and sdist once, publishes them to PyPI through trusted publishing,
 creates the GitHub release with the same files and the changelog section as its notes, and
-fast-forwards `stable` to the tag. Nothing is uploaded by hand and no upload token exists.
+fast-forwards `stable` to the tag, unless the tag is a release candidate (below). Nothing is
+uploaded by hand and no upload token exists.
 
 ## When a release is proposed, and what it is numbered
 
@@ -63,6 +64,27 @@ neither is a 0.1 patch, since the contract was first declared in 0.2.0.
    gh api -X PATCH repos/JakeSelby/ruleprobe/milestones/<number> -f state=closed
    gh api repos/JakeSelby/ruleprobe/milestones -f title=v<next> -f state=open
    ```
+
+## Release candidates
+
+A candidate, `X.Y.ZrcN`, lets testers install a release before it is one:
+`uvx ruleprobe@X.Y.ZrcN` or `pip install ruleprobe==X.Y.ZrcN`. Plain `uvx ruleprobe` and
+`pip install ruleprobe` skip it, since PyPI treats it as a pre-release.
+
+Cut it as a release, with `X.Y.ZrcN` as the version, except that its PR closes an issue of its own,
+not the release's: the changelog's Unreleased entries fold into `## X.Y.ZrcN (<YYYY-MM-DD>)`, and
+the preflight holds a candidate for a patch to the series contract as it holds the patch, and
+refuses a candidate once `vX.Y.Z` is tagged. The tag workflow publishes it to PyPI, marks its
+GitHub release a pre-release, and leaves `stable` at the last release; `advance_stable.py` refuses
+a candidate's tag. In step 5, PyPI's project page reports the latest final release, so check the
+candidate's own page instead, `curl -s https://pypi.org/pypi/ruleprobe/X.Y.ZrcN/json`, and run
+`uvx ruleprobe@X.Y.ZrcN --version`; skip the `stable` check and step 6, since the milestone stays
+open for the release.
+
+A candidate's section is never rewritten. Entries merged after it go under Unreleased again, and the
+release folds them into `## X.Y.Z (<YYYY-MM-DD>)`, opening with a line that points to the
+candidates' sections, such as "Everything in 0.3.0rc1, and:", or saying "No change since 0.3.0rc1."
+when there is nothing else. The reference sites stay on the last release until the release itself.
 
 ## A failed release
 

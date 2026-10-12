@@ -67,10 +67,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/release_notes.py > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "ruleprobe $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
+          # A release candidate, vX.Y.ZrcN, is published as a pre-release.
+          case "$GITHUB_REF_NAME" in *rc*) pre=--prerelease ;; *) pre= ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag $pre --title "ruleprobe $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
 
   advance-stable:
     needs: github-release
+    # A release candidate leaves `stable` at the last release.
+    if: ${{ !contains(github.ref_name, 'rc') }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

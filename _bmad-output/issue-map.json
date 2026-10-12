@@ -6,7 +6,7 @@
   "next_ids": {
     "epic": 18,
     "story": 27,
-    "task": 11,
+    "task": 12,
     "bug": 13,
     "chore": 10,
     "spike": 5,
@@ -1193,6 +1193,19 @@
       "artifact_path": "_bmad-output/implementation-artifacts/RP-S026.md",
       "parent_bmad_id": "RP-E010",
       "parent_github_number": 128,
+      "lifecycle": "active",
+      "provenance": "authored"
+    },
+    {
+      "bmad_id": "RP-T011",
+      "github_number": 160,
+      "github_url": "https://github.com/JakeSelby/ruleprobe/issues/160",
+      "title": "feat(release): cut release candidates without moving stable",
+      "type": "task",
+      "native_type": "Task",
+      "artifact_path": "_bmad-output/implementation-artifacts/RP-T011.md",
+      "parent_bmad_id": null,
+      "parent_github_number": null,
       "lifecycle": "active",
       "provenance": "authored"
     }
