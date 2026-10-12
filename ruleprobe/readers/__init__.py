@@ -23,6 +23,10 @@ __all__ = ["iter_sessions", "iter_file_sessions", "COPY", "RUNTIMES", "claude_co
 #: the same session: a copy, not a failure. The entry's `kept` names the file that was read.
 COPY = "copy of a session read from another file"
 
+#: The `error` of an `errors` entry for a Gemini session `--runtime gemini` sets aside under a
+#: named root because it sits below no `chats` directory there. `auto` reads it.
+OUTSIDE_CHATS = "Gemini session outside a chats directory; auto reads it"
+
 
 def _since_stamp(since):
     """`since` as a `YYYY-MM-DD` string, from a date, a datetime, a string, or an int number
@@ -74,7 +78,10 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
       location: `~/.claude/projects`, `~/.codex/sessions` and `~/.gemini/tmp`.
     - `runtime` - `"auto"`, `"claude-code"`, `"codex"` or `"gemini"`. `"auto"` reads every
       default location and decides each file by its first line, so a directory holding
-      several kinds is read correctly.
+      several kinds is read correctly. Under a named `root`, `"gemini"` reads the files
+      below a `chats` directory at or under it, and `"auto"` also reads a Gemini session
+      elsewhere, which `"gemini"` notes in `errors` with `error` set to `OUTSIDE_CHATS`.
+      Under `"auto"` a file that cannot be opened lands in `errors` too.
     - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.
@@ -129,6 +136,9 @@ def _sessions(root, runtime, since, errors, by_id):
         raise ValueError("unknown runtime %r; one of auto, %s"
                          % (runtime, ", ".join(sorted(RUNTIMES))))
     stamp = _since_stamp(since)
+    if errors is not None and root is not None and runtime == "gemini":
+        errors.extend({"path": path, "error": OUTSIDE_CHATS}
+                      for path in _outside_chats(os.path.expanduser(root), stamp))
     groups = {}
     order = []
     # Sorted here too, so the grouping depends on the paths alone, not the order found.
@@ -210,6 +220,23 @@ def _pick(members, expected, stamp, errors):
     return kept, [path for path, _reader in members if path in copies], strays
 
 
+def _outside_chats(base, stamp):
+    """The `.jsonl` files under `base` that `auto` reads as Gemini sessions and `--runtime
+    gemini` does not, since no `chats` directory at or under `base` holds them, in path order.
+    One `auto` would drop by `stamp`, or set aside as a copy of a session read below `chats`,
+    is left out: it is not a session `auto` reads."""
+    listed = gemini.transcripts(base)
+    read = set(gemini.session_key(path) for path in listed) - {None}
+    found = []
+    for path in _walk(base):
+        if path in listed or _detect(path) is not gemini or gemini.session_key(path) in read:
+            continue
+        session = gemini.read(path)
+        if session is not None and not (stamp and session.ended and session.ended[:10] < stamp):
+            found.append(path)
+    return found
+
+
 def _walk(base):
     """Every `.jsonl` file under `base`, in path order."""
     found = []
@@ -230,7 +257,11 @@ def _paths(root, runtime):
             return [(path, gemini) for path in gemini.transcripts(base)]
         for path in _walk(base):
             reader = _detect(path) if runtime == "auto" else RUNTIMES[runtime]
-            if reader is not None and path not in seen:
+            if reader is None:
+                # Unopenable, so of no known runtime: read it anyway, and its failure lands in
+                # `errors` rather than the file vanishing.
+                reader = claude_code
+            if path not in seen:
                 seen.add(path)
                 out.append((path, reader))
         if runtime == "auto":

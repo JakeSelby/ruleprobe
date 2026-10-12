@@ -17,7 +17,7 @@ from unittest import mock
 
 from ruleprobe import iter_sessions, run
 from ruleprobe.cli import main
-from ruleprobe.readers import RUNTIMES, _detect, claude_code, codex, gemini
+from ruleprobe.readers import COPY, OUTSIDE_CHATS, RUNTIMES, _detect, claude_code, codex, gemini
 
 SESSION_ID = "0b5e7c1a-0000-4000-8000-000000000001"
 
@@ -269,10 +269,13 @@ class ErrorTests(TreeTest):
     def test_an_unreadable_file_lands_in_errors_with_its_path(self):
         path = os.path.join(self.tree.chats, "session-gone.jsonl")
         os.symlink(os.path.join(self.tree.base, "no-such-file"), path)
-        errors = []
-        sessions = list(iter_sessions(root=self.tree.base, runtime="gemini", errors=errors))
-        self.assertEqual(sessions, [])
-        self.assertEqual([e["path"] for e in errors], [path])
+        for runtime in ("gemini", "auto"):
+            with self.subTest(runtime=runtime):
+                errors = []
+                sessions = list(iter_sessions(root=self.tree.base, runtime=runtime,
+                                              errors=errors))
+                self.assertEqual(sessions, [])
+                self.assertEqual([e["path"] for e in errors], [path])
 
     def test_a_missing_root_yields_nothing_and_no_error(self):
         errors = []
@@ -445,16 +448,109 @@ class RootWalkTests(TreeTest):
     def ids(self, root, runtime):
         return sorted(s.id for s in iter_sessions(root=root, runtime=runtime))
 
+    def gemini_paths(self, root, runtime, errors=None):
+        return [s.path for s in iter_sessions(root=root, runtime=runtime, errors=errors)
+                if s.runtime == "gemini"]
+
+    def set_aside(self, root):
+        errors = []
+        paths = self.gemini_paths(root, "gemini", errors)
+        return paths, [e["path"] for e in errors if e["error"] == OUTSIDE_CHATS]
+
     def test_a_named_root_reads_only_files_below_chats(self):
-        self.tree.write("stray.jsonl", [meta("stray"), user("u1", "go")],
-                        directory=self.tree.project)
+        stray = self.tree.write("stray.jsonl", [meta("stray"), user("u1", "go")],
+                                directory=self.tree.project)
         self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
         self.assertEqual(self.ids(self.tree.base, "gemini"), ["a"])
+        self.assertEqual(self.set_aside(self.tree.base)[1], [stray])
+        self.assertEqual(self.ids(self.tree.base, "auto"), ["a", "stray"])
 
     def test_a_chats_directory_above_the_root_does_not_count(self):
         root = os.path.join(self.tree.chats, "archive")
-        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")], directory=root)
+        path = self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")],
+                               directory=root)
         self.assertEqual(self.ids(root, "gemini"), [])
+        self.assertEqual(self.set_aside(root)[1], [path])
+
+    def test_every_gemini_file_auto_reads_is_read_or_set_aside_by_gemini(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        self.tree.write("copy.jsonl", [meta("b"), user("u1", "go")], directory=self.tree.base)
+        self.tree.write("claude.jsonl", [json.dumps({
+            "type": "user", "sessionId": "c1", "cwd": "/workspace/demo-project",
+            "timestamp": "2026-09-20T10:00:00Z",
+            "message": {"role": "user", "content": "go"}})], directory=self.tree.base)
+        auto = list(iter_sessions(root=self.tree.base))
+        self.assertEqual(sorted(s.runtime for s in auto), ["claude-code", "gemini", "gemini"])
+        read, aside = self.set_aside(self.tree.base)
+        self.assertEqual(sorted(read + aside), self.gemini_paths(self.tree.base, "auto"))
+        self.assertEqual(len(aside), 1)
+
+    def test_a_file_auto_would_not_yield_is_not_noted(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        self.tree.write("copy.jsonl", [meta("a"), user("u1", "go")], directory=self.tree.project)
+        old = dict(meta("old"), startTime="2020-01-01T00:00:00.000Z",
+                   lastUpdated="2020-01-01T00:00:00.000Z")
+        self.tree.write("old.jsonl", [old, dict(user("u1", "go"),
+                                                timestamp="2020-01-01T00:00:00.000Z")],
+                        directory=self.tree.project)
+        errors = []
+        list(iter_sessions(root=self.tree.base, runtime="gemini", since="2026-01-01",
+                           errors=errors))
+        self.assertEqual(errors, [])
+        auto = []
+        list(iter_sessions(root=self.tree.base, since="2026-01-01", errors=auto))
+        self.assertEqual([e["error"] for e in auto], [COPY])
+
+    def test_a_dot_root_inside_chats_is_read(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        here = os.getcwd()
+        os.chdir(self.tree.chats)
+        try:
+            self.assertEqual(self.ids(".", "gemini"), ["a"])
+        finally:
+            os.chdir(here)
+
+    def test_the_report_counts_set_aside_sessions_apart_from_failures(self):
+        from ruleprobe.cli import _read_errors_line
+        line = _read_errors_line([{"path": "/t/p/x.jsonl", "error": OUTSIDE_CHATS},
+                                  {"path": "/t/p/chats/y.jsonl", "error": "no session in it"}])
+        self.assertEqual(line, "1 transcript(s) produced no session: y.jsonl (no session in "
+                               "it); 1 Gemini session(s) outside a chats directory set aside, "
+                               "which --runtime auto reads: p/x.jsonl")
+
+    def test_no_entry_is_noted_without_a_root_or_under_another_runtime(self):
+        self.tree.write("stray.jsonl", [meta("stray"), user("u1", "go")],
+                        directory=self.tree.project)
+        for runtime in ("auto", "claude-code"):
+            with self.subTest(runtime=runtime):
+                errors = []
+                list(iter_sessions(root=self.tree.base, runtime=runtime, errors=errors))
+                self.assertNotIn(OUTSIDE_CHATS, [e["error"] for e in errors])
+        errors = []
+        with mock.patch.object(gemini, "ROOT", self.tree.base):
+            list(iter_sessions(runtime="gemini", errors=errors))
+        self.assertEqual(errors, [])
+
+    def test_a_chats_file_whose_first_line_is_not_geminis_is_reported_both_ways(self):
+        path = self.tree.write("session-a.jsonl", ["", meta("a"), user("u1", "go")])
+        self.assertEqual(self.ids(self.tree.base, "gemini"), ["a"])
+        errors = []
+        sessions = list(iter_sessions(root=self.tree.base, errors=errors))
+        self.assertIn(path, [s.path for s in sessions] + [e["path"] for e in errors])
+
+    def test_a_legacy_json_beside_a_jsonl_not_detected_as_gemini_is_still_read(self):
+        self.legacy()
+        self.tree.write("session-old.jsonl", ["", meta("old"), user("u1", "go")])
+        self.assertEqual(self.ids(self.tree.base, "gemini"), ["old"])
+
+    def test_the_shipped_corpus_reads_or_sets_aside_every_gemini_file(self):
+        root = os.path.join(os.path.dirname(gemini.__file__), os.pardir, "corpus", "sessions")
+        read, aside = self.set_aside(root)
+        self.assertEqual([os.path.basename(p) for p in aside], ["gemini-writes.jsonl"])
+        self.assertEqual(len(read), 3)
+        errors = []
+        self.assertEqual(sorted(read + aside), self.gemini_paths(root, "auto", errors))
+        self.assertEqual(errors, [])
 
     def test_the_chats_directory_itself_may_be_the_root(self):
         self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
