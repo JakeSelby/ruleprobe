@@ -269,10 +269,13 @@ class ErrorTests(TreeTest):
     def test_an_unreadable_file_lands_in_errors_with_its_path(self):
         path = os.path.join(self.tree.chats, "session-gone.jsonl")
         os.symlink(os.path.join(self.tree.base, "no-such-file"), path)
-        errors = []
-        sessions = list(iter_sessions(root=self.tree.base, runtime="gemini", errors=errors))
-        self.assertEqual(sessions, [])
-        self.assertEqual([e["path"] for e in errors], [path])
+        for runtime in ("gemini", "auto"):
+            with self.subTest(runtime=runtime):
+                errors = []
+                sessions = list(iter_sessions(root=self.tree.base, runtime=runtime,
+                                              errors=errors))
+                self.assertEqual(sessions, [])
+                self.assertEqual([e["path"] for e in errors], [path])
 
     def test_a_missing_root_yields_nothing_and_no_error(self):
         errors = []
@@ -445,16 +448,45 @@ class RootWalkTests(TreeTest):
     def ids(self, root, runtime):
         return sorted(s.id for s in iter_sessions(root=root, runtime=runtime))
 
-    def test_a_named_root_reads_only_files_below_chats(self):
+    def gemini_paths(self, root, runtime, errors=None):
+        return [s.path for s in iter_sessions(root=root, runtime=runtime, errors=errors)
+                if s.runtime == "gemini"]
+
+    def test_a_named_root_reads_a_gemini_file_outside_chats_both_ways(self):
         self.tree.write("stray.jsonl", [meta("stray"), user("u1", "go")],
                         directory=self.tree.project)
         self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
-        self.assertEqual(self.ids(self.tree.base, "gemini"), ["a"])
+        for runtime in ("gemini", "auto"):
+            with self.subTest(runtime=runtime):
+                self.assertEqual(self.ids(self.tree.base, runtime), ["a", "stray"])
 
-    def test_a_chats_directory_above_the_root_does_not_count(self):
+    def test_a_root_below_its_chats_directory_is_read_both_ways(self):
         root = os.path.join(self.tree.chats, "archive")
         self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")], directory=root)
-        self.assertEqual(self.ids(root, "gemini"), [])
+        for runtime in ("gemini", "auto"):
+            with self.subTest(runtime=runtime):
+                self.assertEqual(self.ids(root, runtime), ["archive/a"])
+
+    def test_gemini_reads_only_the_files_auto_gives_gemini_from_a_mixed_root(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        self.tree.write("claude.jsonl", [json.dumps({
+            "type": "user", "sessionId": "c1", "cwd": "/workspace/demo-project",
+            "timestamp": "2026-09-20T10:00:00Z",
+            "message": {"role": "user", "content": "go"}})])
+        auto = list(iter_sessions(root=self.tree.base))
+        self.assertEqual(sorted(s.runtime for s in auto), ["claude-code", "gemini"])
+        self.assertEqual(self.gemini_paths(self.tree.base, "gemini"),
+                         self.gemini_paths(self.tree.base, "auto"))
+
+    def test_the_shipped_corpus_reads_the_same_gemini_files_both_ways(self):
+        root = os.path.join(os.path.dirname(gemini.__file__), os.pardir, "corpus", "sessions")
+        errors = {"gemini": [], "auto": []}
+        paths = {runtime: self.gemini_paths(root, runtime, errors[runtime])
+                 for runtime in errors}
+        self.assertEqual(paths["gemini"], paths["auto"])
+        self.assertEqual(len(paths["gemini"]), 4)
+        self.assertIn("gemini-writes.jsonl", [os.path.basename(p) for p in paths["gemini"]])
+        self.assertEqual(errors, {"gemini": [], "auto": []})
 
     def test_the_chats_directory_itself_may_be_the_root(self):
         self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])

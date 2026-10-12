@@ -74,7 +74,9 @@ def iter_sessions(root=None, runtime="auto", since=None, errors=None):
       location: `~/.claude/projects`, `~/.codex/sessions` and `~/.gemini/tmp`.
     - `runtime` - `"auto"`, `"claude-code"`, `"codex"` or `"gemini"`. `"auto"` reads every
       default location and decides each file by its first line, so a directory holding
-      several kinds is read correctly.
+      several kinds is read correctly. Under a named `root`, `"gemini"` reads exactly the
+      files `"auto"` decides are Gemini's, and a file that cannot be opened is still handed
+      to a reader, so it lands in `errors`.
     - `since` - a date, a `YYYY-MM-DD` string, or a number of days back. A transcript whose
       last timestamp is older is skipped; one that carries no timestamp at all is kept,
       because an absent date is not an old one.
@@ -226,14 +228,21 @@ def _paths(root, runtime):
     out = []
     if root is not None:
         base = os.path.expanduser(root)
-        if runtime == "gemini":
-            return [(path, gemini) for path in gemini.transcripts(base)]
+        # Under a named root `--runtime gemini` reads exactly the files `auto` gives Gemini,
+        # wherever they sit, so the two never differ by a file neither reports.
+        decided = runtime in ("auto", "gemini")
         for path in _walk(base):
-            reader = _detect(path) if runtime == "auto" else RUNTIMES[runtime]
-            if reader is not None and path not in seen:
+            reader = _detect(path) if decided else RUNTIMES[runtime]
+            if reader is None:
+                # Unopenable, so of no known runtime: read it anyway, and its failure lands in
+                # `errors` rather than the file vanishing.
+                reader = gemini if runtime == "gemini" else claude_code
+            if runtime == "gemini" and reader is not gemini:
+                continue
+            if path not in seen:
                 seen.add(path)
                 out.append((path, reader))
-        if runtime == "auto":
+        if decided:
             # A legacy Gemini `session-*.json` ends in no `.jsonl`, so `_walk` never sees it.
             out.extend((path, gemini) for path in gemini.transcripts(base)
                        if path.endswith(".json"))

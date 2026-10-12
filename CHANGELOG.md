@@ -87,6 +87,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Over one `--root`, `--runtime gemini` and `auto` read the same Gemini files: every `.jsonl` whose
+  first line is Gemini's, wherever it sits, and a legacy `session-*.json` below a `chats`
+  directory. `--runtime gemini` read only files below `chats`, so a Gemini session copied elsewhere
+  was read by `auto` and silently skipped by `--runtime gemini`. A file that cannot be opened under
+  `auto` now lands in `errors` instead of vanishing
+  ([#113](https://github.com/JakeSelby/ruleprobe/issues/113)).
 - `secrets/secret-in-write` counts a live credential and stops counting text about secrets: a
   variable's name, a placeholder (`changeme`, `your-token`, `xxx`, `${VAR}`, one repeated
   character), a pattern source, redaction code, and a value a test file marks
