@@ -87,11 +87,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- Over one `--root`, `--runtime gemini` also reads a Gemini session outside any `chats`
-  directory, which `auto` read and `--runtime gemini` silently skipped, such as the corpus's
-  `gemini-writes.jsonl`: it reads every file below a `chats` directory at or under the root, as
-  before, and every `.jsonl` whose first line is Gemini's, wherever it sits. A file that cannot be
-  opened under `auto` now lands in `errors` instead of vanishing
+- Over one `--root`, a Gemini session outside any `chats` directory is no longer read by `auto` and
+  silently skipped by `--runtime gemini`: `--runtime gemini` still reads only files below a
+  `chats` directory at or under the root, and now notes each Gemini session it sets aside in
+  `errors` with `error` set to `readers.OUTSIDE_CHATS`, so the report names it. Over the shipped
+  corpus that is `gemini-writes.jsonl`. A file that cannot be opened under `auto` now lands in
+  `errors` instead of vanishing
   ([#113](https://github.com/JakeSelby/ruleprobe/issues/113)).
 - `secrets/secret-in-write` counts a live credential and stops counting text about secrets: a
   variable's name, a placeholder (`changeme`, `your-token`, `xxx`, `${VAR}`, one repeated
