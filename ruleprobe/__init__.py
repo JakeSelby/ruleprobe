@@ -32,7 +32,7 @@ from .validity import (CorpusError, DEFAULT_FLOOR, Score, load_corpus,
                        score_corpus, score_examples, validity,
                        validity_table)
 
-__version__ = "0.2.0"
+__version__ = "0.3.0rc1"
 
 __all__ = [
     "Bundle", "CorpusError", "DeclarativeError", "Detector", "Finding", "Hit", "Registry",
