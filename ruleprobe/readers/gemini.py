@@ -67,7 +67,7 @@ def transcripts(root=None):
     `root` - one above it does not count - with a legacy `session-*.json` left out when its
     `.jsonl` is beside it."""
     base = os.path.expanduser(root or ROOT)
-    top = os.path.basename(os.path.normpath(base))
+    top = os.path.basename(os.path.abspath(base))
     found = []
     for directory, _dirs, files in os.walk(base, followlinks=True):
         relative = os.path.relpath(directory, base)

@@ -138,7 +138,7 @@ def _sessions(root, runtime, since, errors, by_id):
     stamp = _since_stamp(since)
     if errors is not None and root is not None and runtime == "gemini":
         errors.extend({"path": path, "error": OUTSIDE_CHATS}
-                      for path in _outside_chats(os.path.expanduser(root)))
+                      for path in _outside_chats(os.path.expanduser(root), stamp))
     groups = {}
     order = []
     # Sorted here too, so the grouping depends on the paths alone, not the order found.
@@ -220,11 +220,21 @@ def _pick(members, expected, stamp, errors):
     return kept, [path for path, _reader in members if path in copies], strays
 
 
-def _outside_chats(base):
-    """The `.jsonl` files under `base` that `auto` reads as Gemini's and `--runtime gemini`
-    does not, since no `chats` directory at or under `base` holds them, in path order."""
-    listed = set(gemini.transcripts(base))
-    return [path for path in _walk(base) if path not in listed and _detect(path) is gemini]
+def _outside_chats(base, stamp):
+    """The `.jsonl` files under `base` that `auto` reads as Gemini sessions and `--runtime
+    gemini` does not, since no `chats` directory at or under `base` holds them, in path order.
+    One `auto` would drop by `stamp`, or set aside as a copy of a session read below `chats`,
+    is left out: it is not a session `auto` reads."""
+    listed = gemini.transcripts(base)
+    read = set(gemini.session_key(path) for path in listed) - {None}
+    found = []
+    for path in _walk(base):
+        if path in listed or _detect(path) is not gemini or gemini.session_key(path) in read:
+            continue
+        session = gemini.read(path)
+        if session is not None and not (stamp and session.ended and session.ended[:10] < stamp):
+            found.append(path)
+    return found
 
 
 def _walk(base):

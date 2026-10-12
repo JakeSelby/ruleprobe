@@ -17,7 +17,7 @@ from unittest import mock
 
 from ruleprobe import iter_sessions, run
 from ruleprobe.cli import main
-from ruleprobe.readers import OUTSIDE_CHATS, RUNTIMES, _detect, claude_code, codex, gemini
+from ruleprobe.readers import COPY, OUTSIDE_CHATS, RUNTIMES, _detect, claude_code, codex, gemini
 
 SESSION_ID = "0b5e7c1a-0000-4000-8000-000000000001"
 
@@ -484,6 +484,39 @@ class RootWalkTests(TreeTest):
         read, aside = self.set_aside(self.tree.base)
         self.assertEqual(sorted(read + aside), self.gemini_paths(self.tree.base, "auto"))
         self.assertEqual(len(aside), 1)
+
+    def test_a_file_auto_would_not_yield_is_not_noted(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        self.tree.write("copy.jsonl", [meta("a"), user("u1", "go")], directory=self.tree.project)
+        old = dict(meta("old"), startTime="2020-01-01T00:00:00.000Z",
+                   lastUpdated="2020-01-01T00:00:00.000Z")
+        self.tree.write("old.jsonl", [old, dict(user("u1", "go"),
+                                                timestamp="2020-01-01T00:00:00.000Z")],
+                        directory=self.tree.project)
+        errors = []
+        list(iter_sessions(root=self.tree.base, runtime="gemini", since="2026-01-01",
+                           errors=errors))
+        self.assertEqual(errors, [])
+        auto = []
+        list(iter_sessions(root=self.tree.base, since="2026-01-01", errors=auto))
+        self.assertEqual([e["error"] for e in auto], [COPY])
+
+    def test_a_dot_root_inside_chats_is_read(self):
+        self.tree.write("session-a.jsonl", [meta("a"), user("u1", "go")])
+        here = os.getcwd()
+        os.chdir(self.tree.chats)
+        try:
+            self.assertEqual(self.ids(".", "gemini"), ["a"])
+        finally:
+            os.chdir(here)
+
+    def test_the_report_counts_set_aside_sessions_apart_from_failures(self):
+        from ruleprobe.cli import _read_errors_line
+        line = _read_errors_line([{"path": "/t/p/x.jsonl", "error": OUTSIDE_CHATS},
+                                  {"path": "/t/p/chats/y.jsonl", "error": "no session in it"}])
+        self.assertEqual(line, "1 transcript(s) produced no session: y.jsonl (no session in "
+                               "it); 1 Gemini session(s) outside a chats directory set aside, "
+                               "which --runtime auto reads: p/x.jsonl")
 
     def test_no_entry_is_noted_without_a_root_or_under_another_runtime(self):
         self.tree.write("stray.jsonl", [meta("stray"), user("u1", "go")],

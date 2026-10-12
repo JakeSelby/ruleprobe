@@ -48,7 +48,7 @@ import unicodedata
 from . import __version__
 from .declarative import DeclarativeError, emit, load, parse
 from .detectors.common import REDACTED, SECRET_PATTERNS, redact
-from .readers import COPY, RUNTIMES, iter_sessions
+from .readers import COPY, OUTSIDE_CHATS, RUNTIMES, iter_sessions
 from .registry import DEFAULT, Registry, run
 from .report import (BY, RULE_MIN_OPPORTUNITIES, RULE_MIN_SESSIONS, RULE_FREQUENT_SHARE,
                      _redact, explain, explain_text, measure, report, report_data,
@@ -307,8 +307,9 @@ def _read_errors_line(errors):
     """What to say about the transcripts that never became a row. A swallowed per-item
     error is unknown, not absent, so the count is printed even when every row is fine. A
     copy set aside is counted apart, so a copied project folder is not read as a failure."""
-    failed = [e for e in errors if e["error"] != COPY]
+    failed = [e for e in errors if e["error"] not in (COPY, OUTSIDE_CHATS)]
     copies = [e for e in errors if e["error"] == COPY]
+    outside = [e for e in errors if e["error"] == OUTSIDE_CHATS]
     parts = []
     if failed:
         named = ", ".join("%s (%s)" % (os.path.basename(e["path"]), e["error"])
@@ -323,6 +324,11 @@ def _read_errors_line(errors):
         more = "" if len(copies) <= 3 else ", and %d more" % (len(copies) - 3)
         parts.append("%d transcript(s) set aside as copies of a session read from another "
                      "file: %s%s" % (len(copies), named, more))
+    if outside:
+        named = ", ".join(_folder_and_name(e["path"]) for e in outside[:3])
+        more = "" if len(outside) <= 3 else ", and %d more" % (len(outside) - 3)
+        parts.append("%d Gemini session(s) outside a chats directory set aside, which "
+                     "--runtime auto reads: %s%s" % (len(outside), named, more))
     return "; ".join(parts)
 
 
