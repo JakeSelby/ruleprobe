@@ -113,10 +113,23 @@ class PreflightTests(unittest.TestCase):
             found = release_preflight.errors(make_root(temp, unreleased="\n- Pending.\n"))
         self.assertEqual(found, [])
 
-    def test_prerelease_version_is_refused(self):
+    def test_a_release_candidate_is_a_release_version(self):
         with tempfile.TemporaryDirectory() as temp:
-            found = release_preflight.errors(make_root(temp, version="1.2.3rc1", heading="1.2.3rc1 (2026-01-02)"))
-        self.assertTrue(any("not a stable semantic version" in line for line in found))
+            root = make_root(temp, version="1.2.0rc1", heading="1.2.0rc1 (2026-01-02)")
+            self.assertEqual(release_preflight.errors(root, tag="v1.2.0rc1"), [])
+            self.assertEqual(release_preflight.errors(root, tag="v1.2.0"),
+                             ["tag v1.2.0 does not match __version__ 1.2.0rc1"])
+
+    def test_other_prerelease_versions_are_refused(self):
+        for version in ("1.2.3a1", "1.2.3b1", "1.2.3.dev0", "1.2.3rc", "1.2.3-rc1"):
+            with self.subTest(version=version), tempfile.TemporaryDirectory() as temp:
+                found = release_preflight.errors(make_root(
+                    temp, version=version, heading="{} (2026-01-02)".format(version)))
+                self.assertTrue(any("is not a release version" in line for line in found))
+
+    def test_a_final_release_does_not_take_its_candidates_section(self):
+        sections = release_preflight.changelog_sections("## 1.2.0rc1 (2026-01-02)\n\n- x\n")
+        self.assertEqual(release_preflight.version_section(sections, "1.2.0"), (None, None))
 
     def test_prefix_version_does_not_match_a_longer_one(self):
         sections = release_preflight.changelog_sections("## 1.2.30 (2026-01-02)\n\n- x\n")
@@ -249,13 +262,18 @@ class SeriesContractTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertIn("is not a tuple or list of names", found[0])
 
-    def test_a_prerelease_version_is_reported_not_raised(self):
-        self.assertEqual(release_preflight.contract_errors(Path("."), "1.2.3rc1"),
-                         ["cannot check the series contract of 1.2.3rc1: not a stable semantic version"])
+    def test_another_prerelease_version_is_reported_not_raised(self):
+        self.assertEqual(release_preflight.contract_errors(Path("."), "1.2.3a1"),
+                         ["cannot check the series contract of 1.2.3a1: not a release version"])
         with tempfile.TemporaryDirectory() as temp:
-            root = make_root(temp, version="1.2.3rc1", heading="1.2.3rc1 (2026-01-02)")
-            found = release_preflight.errors(root, tag="v1.2.3rc1")
-        self.assertEqual(found, ["__version__ 1.2.3rc1 is not a stable semantic version"])
+            root = make_root(temp, version="1.2.3a1", heading="1.2.3a1 (2026-01-02)")
+            found = release_preflight.errors(root, tag="v1.2.3a1")
+        self.assertEqual(found, ["__version__ 1.2.3a1 is not a release version: X.Y.Z, or "
+                                 "X.Y.ZrcN for a candidate"])
+
+    def test_a_candidate_for_a_patch_is_held_to_the_series_contract(self):
+        self.assertEqual(release_preflight.series_tag("1.2.3rc1"), "v1.2.0")
+        self.assertIsNone(release_preflight.series_tag("1.2.0rc1"))
 
     def test_a_series_before_the_contract_is_not_checked(self):
         # v0.1.0 carries no contract test, so a 0.1 patch has no declared names to keep.
@@ -356,6 +374,14 @@ class StableTests(unittest.TestCase):
         sideways = self.commit("unrelated")
         git(self.work, "tag", "v3", sideways)
         self.assertEqual(advance_stable.plan(self.work, "v3"), ("refuse", sideways))
+
+
+    def test_a_release_candidate_never_moves_stable(self):
+        with mock.patch.object(advance_stable, "plan") as plan:
+            for argv in (["v1.2.0rc1"], ["v1.2.0rc1", "--check"]):
+                with self.subTest(argv=argv):
+                    self.assertEqual(advance_stable.main(argv), 1)
+        plan.assert_not_called()
 
 
 if __name__ == "__main__":

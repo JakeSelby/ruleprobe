@@ -64,6 +64,23 @@ neither is a 0.1 patch, since the contract was first declared in 0.2.0.
    gh api repos/JakeSelby/ruleprobe/milestones -f title=v<next> -f state=open
    ```
 
+## Release candidates
+
+A candidate, `X.Y.ZrcN`, lets testers install a release before it is one:
+`uvx ruleprobe@X.Y.ZrcN` or `pip install ruleprobe==X.Y.ZrcN`. Plain `uvx ruleprobe` and
+`pip install ruleprobe` skip it, since PyPI treats it as a pre-release.
+
+Cut it exactly as a release, with `X.Y.ZrcN` as the version: the changelog's Unreleased entries
+fold into `## X.Y.ZrcN (<YYYY-MM-DD>)`, and the preflight holds a candidate for a patch to the
+series contract as it holds the patch. The tag workflow publishes it to PyPI, marks its GitHub
+release a pre-release, and leaves `stable` at the last release; `advance_stable.py` refuses a
+candidate's tag. Skip step 5's `stable` check and step 6: the milestone stays open for the release.
+
+A candidate's section is never rewritten. Entries merged after it go under Unreleased again, and the
+release folds them into `## X.Y.Z (<YYYY-MM-DD>)`, opening with a line that points to the
+candidates' sections, such as "Everything in 0.3.0rc1, and:", or saying "No change since 0.3.0rc1."
+when there is nothing else. The reference sites stay on the last release until the release itself.
+
 ## A failed release
 
 Never move or delete a tag; the `tags-integrity` ruleset refuses it anyway. PyPI refuses a second
